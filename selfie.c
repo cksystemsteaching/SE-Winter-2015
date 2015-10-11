@@ -775,6 +775,113 @@ void initSyscalls() {
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
+// ---------------    S E L F I E    S T I C K    ------------------
+// -----------------------------------------------------------------
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+
+int* head;
+
+void insert (int payload) {
+	int* append;
+
+	append = malloc (2*4);
+
+	*append = payload;
+	*(append + 1) = head;
+
+	head = append;
+}
+
+void delete_by_pl (int payload) {
+	int* iter;
+	int* prev;
+
+	prev = 0;
+	iter = head;
+
+	while (iter) {
+		if (*iter == payload) {
+			if (prev != 0) {
+				*(prev + 1) = *(iter + 1);
+
+			} else {
+				head = *(iter + 1);
+			}
+			return;
+		}
+
+		prev = iter;
+		iter = *(iter + 1);
+	}
+}
+
+void delete_by_idx (int idx) {
+        int* iter;
+        int* prev;
+	int run;
+
+	run = 0;
+	prev = 0;
+	iter = head;
+
+        while (iter) {
+                if (run == idx) {
+                        if (prev != 0) {
+                                *(prev + 1) = *(iter + 1);
+
+                        } else {
+                                head = *(iter + 1);
+                        }
+                        return;
+                }
+
+                prev = iter;
+                iter = *(iter + 1);
+
+		run = run + 1;
+        }
+
+}
+
+void swap (int* a, int* b) {
+	int tmp;
+
+	tmp = *a; *a = *b; *b = tmp;
+}
+
+void insertion_sort() {
+	int* iter_inner;
+	int* iter_outer;
+
+	iter_inner = head;
+	iter_outer = head;
+
+	while (iter_outer) {
+
+		while (iter_inner) {
+
+			if (*iter_inner > *iter_outer) {
+				swap (iter_inner, iter_outer);
+			}
+
+			iter_inner = *(iter_inner + 1);
+		}
+
+		iter_inner = head;
+		iter_outer = *(iter_outer + 1);
+	}
+}
+
+void iter_list () {
+	int* iter = head;
+
+	while (iter) {
+		iter = *(iter + 1);
+	}
+}
+
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+// -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
 // -----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
