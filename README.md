@@ -1,10 +1,5 @@
-SE-Winter-2015
-==============
-
-Systems Engineering 2015
-
-Home work flow
-==============
+Home Work Flow
+--------------
 
 * Step 0: form a team of 2-3 members
 * Step 1: get a github account (for each member)
@@ -15,8 +10,8 @@ Home work flow
 * Step 6: send a pull request containing your solution via github.com to [cksystemsteaching/SE-Winter-2015/tree/selfie-master](https://github.com/cksystemsteaching/SE-Winter-2015/tree/selfie-master)
 
 
-Assignment 0
-------------
+Assignment 0: Basic data structures
+-----------------------------------
 
 Review [linked lists](https://en.wikipedia.org/wiki/Linked_list) and implement a simple program using a singly linked list in C*. The minimal requirements are as follows:
 
