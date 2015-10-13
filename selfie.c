@@ -801,7 +801,7 @@ void delete_by_pl (int payload) {
 
 	while (iter) {
 		if (*iter == payload) {
-			if (prev != 0) {
+			if ( prev != (int*) 0) {
 				*(prev + 1) = *(iter + 1);
 
 			} else {
@@ -826,7 +826,7 @@ void delete_by_idx (int idx) {
 
         while (iter) {
                 if (run == idx) {
-                        if (prev != 0) {
+                        if ( prev != (int*) 0) {
                                 *(prev + 1) = *(iter + 1);
 
                         } else {
@@ -873,7 +873,9 @@ void insertion_sort() {
 }
 
 void iter_list () {
-	int* iter = head;
+	int* iter;
+
+    iter = head;
 
 	while (iter) {
 		iter = *(iter + 1);
