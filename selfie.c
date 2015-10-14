@@ -3491,6 +3491,55 @@ int* search(int* head, int data) {
     return 0;
 }
 
+// sorts list using bubble sort (ascending -> head = smallest element)
+int* sort(int* head) {
+    int* c1;
+    int* c2;
+    int* temp;
+    int* prev;
+    int i;
+    int counter;
+   
+    if((int) head == 0)
+        return 0;
+       
+    counter = 0;
+    c1 = head;
+   
+    while(*c1 != 0) {
+        counter = counter + 1;
+        c1 = *c1;
+    }
+   
+    while(counter > 0) {
+        i = 0;
+        prev = 0;
+        c1 = head;
+        c2 = *head;
+       
+        while(i < counter) {
+            if(*(c1 + 1) > *(c2 + 1)) {
+                if(i == 0)
+                    head = c2;
+                if((int) prev != 0)
+                    *prev = c2;
+                *c1 = *c2;   
+                *c2 = c1;
+                temp = c1;
+                c1 = c2;
+                c2 = temp;
+            }
+            prev = c1;
+            c1 = c2;
+            c2 = *c2;
+            i = i + 1;
+        }
+        counter = counter - 1;
+    }
+    return head;
+   
+}
+
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
