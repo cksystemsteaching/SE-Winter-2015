@@ -3457,8 +3457,16 @@ void emitPutchar() {
 // --------------- ASSIGNMENT 0 (SINGLY LINKED LIST) ---------------
 // -----------------------------------------------------------------
 
-// removes first (i.e. last inserted) entry with matching data, returns new head
+// creates new field at the head of the list, inserts data and returns new head
+int* insert(int* head, int data) {
+    int* newfield;
+    newfield = malloc(2*4);
+    *(newfield + 1) = data;
+    *newfield = head;
+    return newfield;
+}
 
+// removes first (i.e. last inserted) entry with matching data, returns new head
 int* remove(int* head, int data) {
     int* cursor;
     int* previous;
@@ -3500,28 +3508,28 @@ int* sort(int* head) {
     int i;
     int counter;
    
-    if((int) head == 0)
+    if ((int) head == 0)
         return 0;
        
     counter = 0;
     c1 = head;
    
-    while(*c1 != 0) {
+    while (*c1 != 0) {
         counter = counter + 1;
         c1 = *c1;
     }
    
-    while(counter > 0) {
+    while (counter > 0) {
         i = 0;
         prev = 0;
         c1 = head;
         c2 = *head;
        
-        while(i < counter) {
-            if(*(c1 + 1) > *(c2 + 1)) {
-                if(i == 0)
+        while (i < counter) {
+            if (*(c1 + 1) > *(c2 + 1)) {
+                if (i == 0)
                     head = c2;
-                if((int) prev != 0)
+                if ((int) prev != 0)
                     *prev = c2;
                 *c1 = *c2;   
                 *c2 = c1;
@@ -3537,7 +3545,59 @@ int* sort(int* head) {
         counter = counter - 1;
     }
     return head;
+}
+
+void printlist(int* head) {
+    int* numberBuffer;
+    numberBuffer = (int*)malloc(4*10);
+
+    while ((int) head != 0) {
+        print(itoa(*(head + 1), numberBuffer, 10, 0));
+        print(createString(' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0));
+        head = *head;
+    }
+
+    print(createString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)); // ASCII code for line feed is 10 (\n does misteriously not work...)
+}
+
+void test_list() {
+    int* head;
+    int* numberBuffer;
+    int* result;
+    numberBuffer = (int*)malloc(4*10);
    
+    head = insert(0, 2);
+    head = insert(head, 4);
+    head = insert(head, 8);
+    printlist(head);//842
+   
+    head = remove(head, 2);
+    printlist(head);//84
+   
+    head = insert(head, 2);
+    printlist(head);//284
+    head = remove(head, 8);
+    printlist(head);//24
+    head = insert(head, 8);
+    printlist(head);//824
+    head = remove(head, 8);
+    printlist(head);//24
+    result = search(head, 4);
+    print(createString('s','e','a','r','c','h',':',10,0,0,0,0,0,0,0,0,0,0,0,0));
+    print(itoa(*(result + 1), numberBuffer, 10, 0));
+    print(createString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0));
+    head = insert(head, 11);
+    head = insert(head, 5); // 5 2 4 11
+    head = insert(head, 120); // 120 5 2 4 11
+    head = insert(head, 4);
+    head = insert(head, -17);
+    head = insert(head, -17);
+    head = insert(head, -9);
+    head = insert(head, 1);
+    print(createString('s','o','r','t',':',10,0,0,0,0,0,0,0,0,0,0,0,0,0,0));
+    printlist(head);
+    head = sort(head);
+    printlist(head);
 }
 
 
@@ -4215,6 +4275,8 @@ int main(int argc, int *argv) {
                     main_emulator(argc, argv, cstar_argv);
                 else
                     exit(-1);
+            } else if (*(firstParameter+1) == 'l') { // flag for testing linked list (assignment0)
+                test_list();
             }
             else {
                 exit(-1);
