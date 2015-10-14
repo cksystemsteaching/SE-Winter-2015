@@ -3453,6 +3453,45 @@ void emitPutchar() {
     emitRFormat(OP_SPECIAL, REG_LINK, 0, 0, FCT_JR);
 }
 
+// -----------------------------------------------------------------
+// --------------- ASSIGNMENT 0 (SINGLY LINKED LIST) ---------------
+// -----------------------------------------------------------------
+
+// removes first (i.e. last inserted) entry with matching data, returns new head
+
+int* remove(int* head, int data) {
+    int* cursor;
+    int* previous;
+    cursor = *head;
+    previous = head;
+    if(*(head + 1) == data)
+        return cursor;
+       
+    while ((int) cursor != 0) {
+        if(*(cursor + 1) == data) {
+            *previous = *cursor;
+            return head;
+        }
+        previous = cursor;
+        cursor = *cursor;
+    }
+    return head;
+}
+
+// searches for element with specified data, returns pointer to found element or 0 if not found
+int* search(int* head, int data) {
+    int* cursor;
+    cursor = head;
+    while((int)cursor != 0) {
+        if(*(cursor + 1) == data) {
+            return cursor;
+        }
+        cursor = *cursor;
+    }
+    return 0;
+}
+
+
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
