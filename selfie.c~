@@ -3474,7 +3474,7 @@ void emitPutchar() {
 	void delete_node( int* node );
 	void print_node( int* node );
 	void print_list( int* first );
-	int* sort_list(int *first);  // TO DO
+	int* sort_list(int *first);
 	
 	// initiate an empty list
 	void create_list(){
