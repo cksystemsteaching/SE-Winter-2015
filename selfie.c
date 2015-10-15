@@ -773,6 +773,127 @@ void initSyscalls() {
     SYSCALL_GETCHAR = 5002;
 }
 
+
+
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+// -----------------------------------------------------------------
+// ---------------------------     O S   ---------------------------
+// -----------------------------------------------------------------
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+
+int  pid;
+int *head;
+int *tail;
+
+void initialize_process_queue() {
+    pid  = 0;
+    head = 0;
+    tail = 0;
+}
+
+// insert:  insert new list item and initialize 'data'.
+// return:  return pointer to this new item.
+int* insert(int pc, int* mem, int* reg) {
+    int *new;
+
+    new = malloc(5*4);
+
+    if ((int)head == 0)
+        head = new;
+    else
+        *tail = (int)new;
+
+    *new = 0;
+    pid = pid + 1;
+    *(new + 1) = pid;
+    *(new + 2) = pc;
+    *(new + 3) = (int)reg;
+    *(new + 4) = (int)mem;
+
+    tail = new;
+
+    return new;
+}
+
+
+// remove:  remove 'item' from list (pointer to an item)
+// return:  1 if an item was removed, 0 otherwise.
+int remove(int pid) {
+    int *cursor;
+    int *next;
+
+    cursor = head;
+
+    if (*(cursor+1) == pid) {
+        head = (int*)*cursor;
+        return 1;
+    }
+
+    while ((int)cursor != 0) {
+        next = (int*)*cursor;
+        if (*(next+1) == pid) {
+            *cursor = *next;
+            if (next == tail) {
+                tail = cursor;
+            }
+            return 1;
+        }
+        cursor = (int*)*cursor;
+    }
+    return 0;
+}
+
+// search:  try to find a list item where pid == value
+// return:  return pointer to this list item if found, otherwise 0
+int* search(int pid) {
+    int *cursor;
+
+    cursor = head;
+    while ((int)cursor != 0) {
+        if (*(cursor + 1) == pid) {
+            return cursor;
+        }
+        cursor = (int*)*cursor;
+    }
+    return 0;
+}
+
+int* search_min(int field) {
+    int *cursor;
+    int *min;
+
+    cursor = head;
+    min = cursor;
+    while ((int)cursor != 0) {
+        if (*(cursor+field) < *(min+field)) {
+            min = cursor;
+        }
+        cursor = (int*)*cursor;
+    }
+    return min;
+}
+
+void sort(int field) {
+    int *newhead;
+    int *newtail;
+    int *new_min;
+
+    newhead = search_min(field);
+    newtail    = newhead;
+    remove(*(newhead+1));
+
+    while ((int)head != 0) {
+        new_min = search_min(field);
+        remove(*(new_min+1));
+        *newtail = (int)new_min;
+        newtail = new_min;
+    }
+
+    head = newhead;
+    tail = newtail;
+}
+
+
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -3942,7 +4063,7 @@ void run() {
 }
 
 void debug_boot(int memorySize) {
-    printString('m','e','m',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+    printString('[','s','y','s',']',' ','m','e','m',' ',0,0,0,0,0,0,0,0,0,0);
 
     print(itoa(memorySize/1024/1024*4, string_buffer, 10, 0));
 
@@ -4025,7 +4146,7 @@ int up_copyCString(int *s) {
 
 void up_copyArguments(int argc, int *argv) {
     int c_argv;
-    
+
     up_push(argc);
 
     c_argv = up_malloc(argc*4);
