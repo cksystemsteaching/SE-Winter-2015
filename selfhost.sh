@@ -2,7 +2,7 @@
 
 # To test self-compilation
 
-gcc -o selfie selfie.c
+clang -w -m32 -D'main(a, b)=main(int argc, char **argv)' -o selfie selfie.c
 touch out
 ./selfie -c < selfie.c
 mv out selfie.mips1
@@ -15,6 +15,3 @@ echo '*** ---------- *** ---------- *** ----------- ***'
 diff -s selfie.mips1 selfie.mips2
 echo '*** ---------- *** ---------- *** ----------- ***'
 echo '                                                 '
-
-rm selfie
-rm selfie.mips*
