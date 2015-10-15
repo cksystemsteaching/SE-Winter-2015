@@ -642,6 +642,22 @@ int addNodeToLList(int size, int list){
     return node;  
 }
 
+int removeNode(int size, int node){
+   int *prev;
+   int *next;
+   int *pr;
+   pr = node;
+   pr = pr + size;
+   next = *pr;
+   pr = pr + 1;
+   prev = *pr;
+   pr = prev;
+   pr = pr + size;
+   *pr = (int)next;
+   pr = next;
+   pr = pr + (size + 1);
+   *pr = prev;
+}
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
