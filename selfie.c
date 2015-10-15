@@ -2828,6 +2828,7 @@ void emitMainEntry() {
 // -----------------------------------------------------------------
 
 int main_compiler() {
+	
     initScanner();
     initSymbolTable();
     initParser();
@@ -3453,6 +3454,97 @@ void emitPutchar() {
     emitRFormat(OP_SPECIAL, REG_LINK, 0, 0, FCT_JR);
 }
 
+//-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+int *begin;
+int *end;
+
+ void list_create()
+{
+	//empty list
+	begin = 0;
+	end = 0;
+}
+
+void list_insert_end(int data)
+{
+	int *newnode;
+	newnode = malloc (3*4);
+	*newnode = data;
+	*(newnode+2) = 0;
+	if(begin == (int*)0){
+		begin = newnode;
+	}else{
+		*(end+1) = (int)newnode;
+	}
+	end = newnode;
+}
+
+void list_insert_beginning(int data)
+{
+	int *newnode;
+	newnode = malloc (3*4);
+	*(newnode+2) = 0;
+	*newnode = data;
+	*(newnode+1) = (int)begin;
+	begin = newnode;
+	if(end == (int*)0)
+		end = begin;
+}
+
+int *search;
+int *toBeDeleted;
+int i;
+int loop;
+
+void node_remove(int data)
+{
+	if(begin == (int*)0)
+		return;
+	if((*begin) == data){
+		if(begin == end){
+			begin = (int*)0;
+			end = (int*)0;
+		}else{
+			begin = (int*)(*(begin+1));	//adr next node 
+		}
+	}else{
+		loop = 1;
+		search = begin;
+		while(loop == 1){
+			search = (int*)(*(search+1));
+			if(*((int*)(*(search+1))) == data)	//data next node
+				loop = 0;
+			else if((int*)(*(search+1)) == end)
+				loop = 0;
+		}
+//		while(search-1) != data && *(search+1) != end)
+		if (*((int*)(*(search+1))) == data){
+			if((int*)(*(search+1)) == end){ //letztes löschen, search = vorletztes
+				end = search;	//end = vorletztes
+//				*(search+1) = 0;
+			}else{
+				*toBeDeleted = (int*)(*(search+1));
+				*(search+1) = *(toBeDeleted+1);
+			}
+		}
+	}
+}
+
+ void list_print(){
+	search = begin;
+	while(search != end){
+		print(search);
+		search = (int*)(*(search+1));
+	}
+	if(begin != end){
+		print(end);
+	}else if(end != (int*)0)
+		print(end);
+}
+
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -3931,7 +4023,13 @@ void execute() {
 }
 
 void run() {
-
+	//printString('H','a','l','l','o',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+	list_create();
+	list_insert_beginning('B');
+	list_insert_end('C');
+	list_insert_beginning('A');
+	list_print();
+	
     while (1) {
         fetch();
         decode();
@@ -3939,6 +4037,7 @@ void run() {
         execute();
         post_debug();
     }
+	
 }
 
 void debug_boot(int memorySize) {
@@ -4105,6 +4204,7 @@ int* copyC2CStarArguments(int argc, int *argv) {
 }
 
 int main(int argc, int *argv) {
+
     int *cstar_argv;
     int *firstParameter;
 
@@ -4120,11 +4220,13 @@ int main(int argc, int *argv) {
         firstParameter = (int*) (*(cstar_argv+1));
 
         if (*firstParameter == '-') {
-            if (*(firstParameter+1) == 'c')
+            if (*(firstParameter+1) == 'c'){
                 main_compiler();
-            else if (*(firstParameter+1) == 'm') {
-                if (argc > 3)
+            }
+			else if (*(firstParameter+1) == 'm') {
+                if (argc > 3) {
                     main_emulator(argc, argv, cstar_argv);
+				}
                 else
                     exit(-1);
             }
@@ -4137,4 +4239,5 @@ int main(int argc, int *argv) {
     } else
         // default: compiler
         main_compiler();
+	
 }
