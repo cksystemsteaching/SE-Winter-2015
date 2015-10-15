@@ -3483,7 +3483,7 @@ void delete_listentry_by_data(int data) {
 
     while (i) { 
         if (*i == data) { 
-            if (prev == 0) { 
+            if ((int)prev == 0) { 
                 head = *(i + 1); 
             } else { 
                 *(prev + 1) = *(i + 1); 
@@ -3506,7 +3506,7 @@ void delete_listentry_by_id(int id) {
 
     while (i) { 
         if (counter == id) { 
-            if (prev == 0) { 
+            if ((int)prev == 0) { 
                 head = *(i + 1); 
             } else { 
                 *(prev + 1) = *(i + 1); 
@@ -3520,7 +3520,9 @@ void delete_listentry_by_id(int id) {
 } 
 
 void iter_list() { 
-    int* iter = head; 
+    int* iter;
+
+    iter = head; 
 
     while (iter) { 
         iter = *(iter + 1); 
