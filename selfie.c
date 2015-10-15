@@ -577,6 +577,34 @@ void emitMainEntry();
 // ------------------------- Assignment 0 Linked List --------------
 // -----------------------------------------------------------------
 
+//
+// Eg.: Size 2
+// list
+// We add 2 to the given size
+// for the pointer 
+// The size variable defines the 
+// entrys you need for data
+// +---------------+
+// | Entry         |
+// +---------------+
+// | Entry 2       |
+// +---------------+
+// | Pr next 0     |
+// +---------------+
+// | Pr Prev 0     |
+// +---------------+
+//
+   
+int createLList(int size){
+   int *list;
+   int *pr;
+   list = malloc((size + 2) * 4);
+   pr = list + 3;
+   *pr = 0;
+   pr = list + 4;
+   *pr = 0;
+   return list;
+}
 
 int addNodeToLList(int size, int list){
     int *pr;
