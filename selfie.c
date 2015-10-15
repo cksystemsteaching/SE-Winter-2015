@@ -780,6 +780,7 @@ void initSyscalls() {
 // -----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 
+// Append entry (including specified payload) to a specified list
 int* insert (int payload, int* where) {
 	int* append;
 
@@ -793,6 +794,7 @@ int* insert (int payload, int* where) {
 	return where;
 }
 
+// Delete by payload, specify the data to be removed from a specified list.
 int* delete_by_pl (int payload, int* where) {
 	int* iter;
 	int* prev;
@@ -818,6 +820,7 @@ int* delete_by_pl (int payload, int* where) {
 	return where;
 }
 
+// Delete by index: Iterate through specified list, remove the idx-th (zero-indexed) entry reached.
 int* delete_by_idx (int idx, int* where) {
 	int* iter;
 	int* prev;
@@ -852,6 +855,7 @@ void swap (int* a, int* b) {
 	tmp = *a; *a = *b; *b = tmp;
 }
 
+// Sort list ascending.
 int* insertion_sort(int* where) {
 	int* iter_inner;
 	int* iter_outer;
@@ -876,6 +880,7 @@ int* insertion_sort(int* where) {
 	return where;
 }
 
+// Iterate through a specified list and print the payload of each entry.
 void iter_list (int* where) {
 	int* iter;
 	int* buffer;
@@ -4173,6 +4178,8 @@ int main_emulator(int argc, int *argv, int *cstar_argv) {
     *(registers+REG_K1) = *(registers+REG_GP);
 
     up_copyArguments(argc-3, argv+3);
+
+    // Duplicate binaries here
 
     run();
 
