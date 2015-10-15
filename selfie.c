@@ -577,7 +577,6 @@ void emitMainEntry();
 // ------------------------- Assignment 0 Linked List --------------
 // -----------------------------------------------------------------
 
-//
 // Eg.: Size 2
 // list
 // We add 2 to the given size
@@ -593,15 +592,15 @@ void emitMainEntry();
 // +---------------+
 // | Pr Prev 0     |
 // +---------------+
-//
    
 int createLList(int size){
    int *list;
    int *pr;
    list = malloc((size + 2) * 4);
-   pr = list + 3;
+   pr = list;
+   pr = pr + size;
    *pr = 0;
-   pr = list + 4;
+   pr = pr + 1;
    *pr = 0;
    return list;
 }
