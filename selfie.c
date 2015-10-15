@@ -3453,38 +3453,34 @@ void emitPutchar() {
     emitRFormat(OP_SPECIAL, REG_LINK, 0, 0, FCT_JR);
 }
 
-// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
-// -----------------------------------------------------------------
-// ---------------------------    O S   ----------------------------
-// -----------------------------------------------------------------
-// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 
 // -----------------------------------------------------------------
+// ------------------------- ASSIGNMENT 0 --------------------------
 // ------------------------- Linked List ---------------------------
 // -----------------------------------------------------------------
 
-int* head; 
-
-void insert_listentry(int data) { 
+int* insert_listentry(int data, int* list) { 
     int* append; 
 
     append = malloc (2*4); 
     *append = data; 
-    *(append + 1) = head; 
-    head = append; 
+    *(append + 1) = list; 
+    list = append; 
+
+    return list;
 }
 
-void delete_listentry_by_data(int data) { 
+int* delete_listentry_by_data(int data, int* list) { 
     int* i; 
     int* prev;
  
     prev = 0; 
-    i = head; 
+    i = list; 
 
-    while (i) { 
+    while ((int) i != 0) { 
         if (*i == data) { 
             if ((int)prev == 0) { 
-                head = *(i + 1); 
+                list = *(i + 1); 
             } else { 
                 *(prev + 1) = *(i + 1); 
             } 
@@ -3493,40 +3489,45 @@ void delete_listentry_by_data(int data) {
         prev = i; 
         i = *(i + 1); 
     } 
+    return list;
 } 
 
-void delete_listentry_by_id(int id) { 
+int* delete_listentry_by_id(int id, int* list) { 
     int* i; 
     int* prev; 
     int counter; 
 
     counter = 0; 
     prev = 0; 
-    i = head; 
+    i = list; 
 
-    while (i) { 
+    while ((int) i != 0) { 
         if (counter == id) { 
             if ((int)prev == 0) { 
-                head = *(i + 1); 
+                list = *(i + 1); 
             } else { 
                 *(prev + 1) = *(i + 1); 
             } 
-            return; 
+            return list; 
         } 
         prev = i; 
         i = *(i + 1); 
         counter = counter + 1; 
     } 
+    return list;
 } 
 
-void iter_list() { 
-    int* iter;
+void print_list(int* list) { 
+    int* buffer;
+    buffer = (int*)malloc(2*4);
 
-    iter = head; 
-
-    while (iter) { 
-        iter = *(iter + 1); 
+    printString('L','i','s','t',':',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+    while ((int) list != 0) { 
+        print(itoa(*list, buffer, 10, 0));
+        printString(' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+        list = *(list + 1); 
     } 
+    printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 } 
 
 void swap(int* a, int* b) { 
@@ -3537,12 +3538,12 @@ void swap(int* a, int* b) {
     *b = tmp; 
 } 
 
-void insertionsort_list() { 
+int* sort_list(int* list) { 
     int* i; 
     int* j; 
 
-    i = head; 
-    j = head; 
+    i = list; 
+    j = list; 
 
     while (i) { 
         while (j) { 
@@ -3551,9 +3552,37 @@ void insertionsort_list() {
             } 
             j = *(j + 1); 
         } 
-        j = head; 
+        j = list; 
         i = *(i + 1); 
     } 
+    return list;
+}
+
+void test_list(){
+    int* list;
+    list = 0;
+    
+    printString('I','n','s','e','r','t',' ','v','a','l','u','e','s',':',10,0,0,0,0,0);
+    list = insert_listentry(26, list);
+    list = insert_listentry(15, list);
+    list = insert_listentry(7, list);
+    list = insert_listentry(94, list);
+    list = insert_listentry(67, list);
+    list = insert_listentry(3, list);
+    print_list(list);
+
+    printString('D','e','l','e','t','e',' ','v','a','l','u','e',' ','b','y',' ','d','a','t','a');
+    printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+    list = delete_listentry_by_data(67, list);
+    print_list(list);
+
+    printString('D','e','l','e','t','e',' ','v','a','l','u','e',' ','b','y',' ','i','d',10,0);
+    list = delete_listentry_by_id(2, list);
+    print_list(list);
+
+    printString('S','o','r','t',' ','l','i','s','t',10,0,0,0,0,0,0,0,0,0,0);
+    list = sort_list(list);
+    print_list(list); 
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -4230,6 +4259,9 @@ int main(int argc, int *argv) {
                     main_emulator(argc, argv, cstar_argv);
                 else
                     exit(-1);
+            }
+            else if (*(firstParameter+1) == 't') {
+                test_list();
             }
             else {
                 exit(-1);
