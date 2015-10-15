@@ -775,72 +775,75 @@ void initSyscalls() {
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
-// ---------------    S E L F I E    S T I C K    ------------------
+// ---------------    S E L F I E   S T I C K    -------------------
+// ---------------    A S S I G N M E N T   0    -------------------
 // -----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 
-int* head;
-
-void insert (int payload) {
+int* insert (int payload, int* where) {
 	int* append;
 
 	append = malloc (2*4);
 
 	*append = payload;
-	*(append + 1) = head;
+	*(append + 1) = where;
 
-	head = append;
+	where = append;
+
+	return where;
 }
 
-void delete_by_pl (int payload) {
+int* delete_by_pl (int payload, int* where) {
 	int* iter;
 	int* prev;
 
 	prev = 0;
-	iter = head;
+	iter = where;
 
-	while (iter) {
+	while ((int) iter != 0) {
 		if (*iter == payload) {
-			if (prev != 0) {
+			if ((int) prev != 0) {
 				*(prev + 1) = *(iter + 1);
-
 			} else {
-				head = *(iter + 1);
+				where = *(iter + 1);
 			}
-			return;
+
+			return where;
 		}
 
 		prev = iter;
 		iter = *(iter + 1);
 	}
+
+	return where;
 }
 
-void delete_by_idx (int idx) {
-        int* iter;
-        int* prev;
+int* delete_by_idx (int idx, int* where) {
+	int* iter;
+	int* prev;
 	int run;
 
 	run = 0;
 	prev = 0;
-	iter = head;
+	iter = where;
 
-        while (iter) {
-                if (run == idx) {
-                        if (prev != 0) {
-                                *(prev + 1) = *(iter + 1);
+	while ((int) iter != 0) {
+		if (run == idx) {
+			if ((int) prev != 0) {
+				*(prev + 1) = *(iter + 1);
+			} else {
+				where = *(iter + 1);
+			}
 
-                        } else {
-                                head = *(iter + 1);
-                        }
-                        return;
-                }
+			return where;
+		}
 
-                prev = iter;
-                iter = *(iter + 1);
-
+		prev = iter;
+		iter = *(iter + 1);
 		run = run + 1;
-        }
+	}
 
+	return where;
 }
 
 void swap (int* a, int* b) {
@@ -849,33 +852,44 @@ void swap (int* a, int* b) {
 	tmp = *a; *a = *b; *b = tmp;
 }
 
-void insertion_sort() {
+int* insertion_sort(int* where) {
 	int* iter_inner;
 	int* iter_outer;
 
-	iter_inner = head;
-	iter_outer = head;
+	iter_inner = where;
+	iter_outer = where;
 
-	while (iter_outer) {
-
-		while (iter_inner) {
-
+	while ((int) iter_outer != 0) {
+		while ((int) iter_inner != 0) {
 			if (*iter_inner > *iter_outer) {
 				swap (iter_inner, iter_outer);
 			}
 
 			iter_inner = *(iter_inner + 1);
+
 		}
 
-		iter_inner = head;
+		iter_inner = where;
 		iter_outer = *(iter_outer + 1);
 	}
+
+	return where;
 }
 
-void iter_list () {
-	int* iter = head;
+void iter_list (int* where) {
+	int* iter;
+	int* buffer;
 
-	while (iter) {
+	iter = where;
+
+	printString(45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45);
+	printString(10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+
+	while ((int) iter != 0) {
+		buffer = malloc(8);
+
+		print(itoa(*iter, buffer, 10, 0));
+		printString(10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 		iter = *(iter + 1);
 	}
 }
@@ -4214,6 +4228,9 @@ int* copyC2CStarArguments(int argc, int *argv) {
 int main(int argc, int *argv) {
     int *cstar_argv;
     int *firstParameter;
+    int* testl;
+
+    testl = 0;
 
     initLibrary();
 
@@ -4227,15 +4244,36 @@ int main(int argc, int *argv) {
         firstParameter = (int*) (*(cstar_argv+1));
 
         if (*firstParameter == '-') {
-            if (*(firstParameter+1) == 'c')
+            if (*(firstParameter+1) == 'c') {
                 main_compiler();
+	    }
             else if (*(firstParameter+1) == 'm') {
                 if (argc > 3)
                     main_emulator(argc, argv, cstar_argv);
                 else
                     exit(-1);
-            }
-            else {
+            } else if (*(firstParameter+1) == 't') {
+		testl = insert(48, testl);
+		testl = insert(34, testl);
+		testl = insert(18, testl);
+		testl = insert(36, testl);
+
+		iter_list(insertion_sort(testl));
+
+		testl = delete_by_idx(1, testl);
+
+		iter_list(testl);
+
+		delete_by_pl(36, testl);
+
+		iter_list(testl);
+
+		testl = insert(55, testl);
+
+		iter_list(testl);
+
+		iter_list(insertion_sort(testl));
+	} else {
                 exit(-1);
             }
         } else {
