@@ -3456,92 +3456,168 @@ void emitPutchar() {
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-int *begin;
-int *end;
+int *listHead;
+int *listTail;
+int listSize;
 
- void list_create()
-{
-	//empty list
-	begin = 0;
-	end = 0;
-}
 
-void list_insert_end(int data)
-{
-	int *newnode;
-	newnode = malloc (3*4);
-	*newnode = data;
-	*(newnode+2) = 0;
-	if(begin == (int*)0){
-		begin = newnode;
-	}else{
-		*(end+1) = (int)newnode;
+void printListElement(int *element){
+	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+
+	printString('p','r','e',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+	if(*(element+1) != 0){
+		print(element+1);
 	}
-	end = newnode;
+
+	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+
+	printString('c','u','r','r',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+	print(element);
+
+	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+
+	printString('n','e','x','t',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+	if(*(element+2) != 0){
+		print(element+2);
+	}
+	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+
 }
 
-void list_insert_beginning(int data)
-{
-	int *newnode;
-	newnode = malloc (3*4);
-	*(newnode+2) = 0;
-	*newnode = data;
-	*(newnode+1) = (int)begin;
-	begin = newnode;
-	if(end == (int*)0)
-		end = begin;
+void appendListElement(int data){
+	int *newElement;
+	newElement = malloc(3*4);
+	*newElement = data;
+	*(newElement+2) = 0;
+	if(listHead == (int*)0){
+		listHead = newElement;
+		*(newElement+1) = 0;
+	} else {
+		*(newElement+1) = (int)(*listTail);
+		*(listTail+2) = (int)(newElement);
+	}
+	listTail = newElement;
+	listSize = listSize+1;
+//	printListElement(newElement);
 }
 
-int *search;
-int *toBeDeleted;
-int i;
-int loop;
+void printListRec(int *current){
+	if(listHead != current){
+		printListRec((int*)*(current+1));
+	}
+	printString(*current,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+	
+}
 
-void node_remove(int data)
-{
-	if(begin == (int*)0)
-		return;
-	if((*begin) == data){
-		if(begin == end){
-			begin = (int*)0;
-			end = (int*)0;
-		}else{
-			begin = (int*)(*(begin+1));	//adr next node 
-		}
-	}else{
-		loop = 1;
-		search = begin;
-		while(loop == 1){
-			search = (int*)(*(search+1));
-			if(*((int*)(*(search+1))) == data)	//data next node
-				loop = 0;
-			else if((int*)(*(search+1)) == end)
-				loop = 0;
-		}
-//		while(search-1) != data && *(search+1) != end)
-		if (*((int*)(*(search+1))) == data){
-			if((int*)(*(search+1)) == end){ //letztes löschen, search = vorletztes
-				end = search;	//end = vorletztes
-//				*(search+1) = 0;
-			}else{
-				*toBeDeleted = (int*)(*(search+1));
-				*(search+1) = *(toBeDeleted+1);
-			}
-		}
+void printList1(){
+	printListRec(listTail);
+}
+
+void printList(){
+	int *current;
+	int currIndex;
+	currIndex = 0;
+	current = listHead;
+	while(currIndex < listSize){
+		printListElement(current);
+		current = (int*)(*(current+2));
+		currIndex = currIndex+1;
 	}
 }
 
- void list_print(){
-	search = begin;
-	while(search != end){
-		print(search);
-		search = (int*)(*(search+1));
+int* findListElementByIndex(int index){
+	int currIndex;
+	int *currElement;
+	currElement = listHead;
+	currIndex = 0;
+	if(index >= listSize){
+		return 0;
 	}
-	if(begin != end){
-		print(end);
-	}else if(end != (int*)0)
-		print(end);
+	while(currIndex < index){
+		currElement = (int*)(*(currElement+2));
+	}
+	return currElement;
 }
+
+int* findListElementByData(int data){
+	int *currElement;
+	currElement = listHead;
+	if(listHead == (int*)0){
+		return 0;
+	}
+	while(*currElement != data){
+		currElement = (int*)(*(currElement+2));
+	}
+	return currElement;
+}
+
+int deleteListElementByIndex(int index){
+	int *element;
+	int retVal;
+	element = findListElementByIndex(index);
+	retVal = deleteListElement(element);
+	return retVal;
+}
+
+int deleteListElementByData(int data){
+	int *element;
+	int retVal;
+	element = findListElementByData(data);
+	retVal = deleteListElement(element);
+	return retVal;
+}
+
+void initList(){
+	listHead = 0;
+	listTail = 0;
+	listSize = 0;
+}
+
+void clearList(){
+	listHead = 0;
+	listTail = 0;
+}
+
+int deleteListElement(int *elementToDelete){
+	int *prev;
+	int *next;
+
+
+	if(elementToDelete == (int*)0){
+		return 0;
+	} else if(elementToDelete == listHead){
+		if(elementToDelete == listTail){
+			clearList();
+		} else {
+			next = (int*)*(elementToDelete+2);
+			*(next+1) = 0;
+			*(elementToDelete+2) = 0; // muss nicht sein
+			listHead = next;
+		}
+	} else if (elementToDelete == listTail){
+		prev = elementToDelete+1;
+		*(prev+2) = 0; // muss nicht sein
+		*(elementToDelete+1) = 0;
+		listTail = prev;
+	} else {
+		prev = elementToDelete+1;
+		next = (int*)*(elementToDelete+2);
+		printListElement(prev);
+		printListElement(next);
+		
+		*(prev+2) = (int)*next;
+		*(next+1) = (int)*prev;
+		
+//		*(elementToDelete+1) = 0; // muss nicht sein
+//		*(elementToDelete+2) = 0; // muss nicht sein
+		
+	}
+	listSize = listSize-1;
+	return 1;
+}
+
+
 
 //--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -4023,12 +4099,20 @@ void execute() {
 }
 
 void run() {
-	//printString('H','a','l','l','o',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-	list_create();
-	list_insert_beginning('B');
-	list_insert_end('C');
-	list_insert_beginning('A');
-	list_print();
+	initList();
+	appendListElement('A');
+	appendListElement('B');
+	appendListElement('C');
+	appendListElement('D');
+	printList();
+
+	deleteListElementByData('A');
+	deleteListElementByData('B');
+	deleteListElementByData('C');
+    printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+    printString('a','f','t','e','r',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+    printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+	printList();
 	
     while (1) {
         fetch();
