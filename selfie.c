@@ -3723,25 +3723,47 @@ void sortList(){
 	unsorted = 1;
 	changes = 0;
 	
+//	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+//	printString('s','o','r','t',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+//	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 	while(unsorted == 1){
 		nextElement = listHead;
+		changes = 0;
 		while(nextElement != listTail){
-			changes = 0;
 			currElement = nextElement;
 			nextElement = (int*)*(currElement+2);
 			
 			if(*currElement>*nextElement){
+//				printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+//				printString('c','u','r','r',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+//				print(currElement);
+//				printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+//				printString('n','e','x','t',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+//				print(nextElement);
+//				printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+
 				tmp = *currElement;
 				*currElement = *nextElement;
 				*nextElement = tmp;
 				changes = 1;
+
+//				printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+//				printString('c','u','r','r',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+//				print(currElement);
+//				printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+//				printString('n','e','x','t',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+//				print(nextElement);
+//				printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+
 			}
 		}
 		if(changes == 0){
 			unsorted = 0;
 		}
-	
 	}
+//	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+//	printString('s','o','r','t',' ','e','n','d',' ',0,0,0,0,0,0,0,0,0,0,0);
+//	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 }
 
 
