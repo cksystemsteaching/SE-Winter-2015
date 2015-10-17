@@ -3460,7 +3460,7 @@ int *listHead;
 int *listTail;
 int listSize;
 
-
+// print pre neighbour, the element itself and next neighbour
 void printListElement(int *element){
 	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 
@@ -3484,10 +3484,19 @@ void printListElement(int *element){
 
 }
 
-void appendListElement(int data){
+// create a new list element and sets the data
+// @return: the new element
+int* createNewListElement(int data){
 	int *newElement;
 	newElement = malloc(3*4);
 	*newElement = data;
+	return newElement;
+}
+
+// add new element at the end of the list
+void appendListElement(int data){
+	int *newElement;
+	newElement = createNewListElement(data);
 	*(newElement+2) = 0;
 	if(listHead == (int*)0){
 		listHead = newElement;
@@ -3498,9 +3507,68 @@ void appendListElement(int data){
 	}
 	listTail = newElement;
 	listSize = listSize+1;
-//	printListElement(newElement);
 }
 
+// add new element at the beginning of the list
+void insertListElementAtBeginning(int data){
+	int *newElement;
+	newElement = createNewListElement(data);
+	*(newElement+1) = 0;
+	if(listSize > 0) {
+		*(newElement+2) = (int)listHead;
+	} else {
+		*(newElement+2) = 0;
+	}
+	*(listHead+1) = (int)*newElement;
+	listHead = newElement;
+	if(listSize == 0){
+		listTail = newElement;
+	}
+
+	listSize = listSize+1;
+}
+
+// insert element anywhere in the middle of the list after prev
+void insertListElement(int *prev, int data){
+	int *newElement;
+	int *next;
+
+	newElement = createNewListElement(data);
+	
+	next = (int*)*(prev+2);
+
+	*(newElement+2) = (int)next;
+	*(newElement+1) = (int)*prev;
+	
+	*(prev+2) = (int)newElement;
+	*(next+1) = (int)*newElement;
+
+	listSize = listSize+1;
+}
+
+// this method should be called from outside
+// insert a new list element at index 'index' with data 'data'
+void insertListElementAtIndex(int index, int data){
+	int *currElement;
+	int currIndex;
+	currElement = listHead;
+	currIndex = 0;
+
+	if(index >= listSize){
+		appendListElement(data);
+	} else if (index <= 0){
+		insertListElementAtBeginning(data);
+	} else {
+		while(currIndex < index){
+			currElement = currElement+2;
+			currIndex = currIndex + 1;
+		}
+		insertListElement(currElement, data);
+	}
+}
+
+// print the list recursively
+// not working yet
 void printListRec(int *current){
 	if(listHead != current){
 		printListRec((int*)*(current+1));
@@ -3510,10 +3578,13 @@ void printListRec(int *current){
 	
 }
 
+// this mehtod is called to print the list recursively
+// not working yet
 void printList1(){
 	printListRec(listTail);
 }
 
+// print the list
 void printList(){
 	int *current;
 	int currIndex;
@@ -3526,6 +3597,9 @@ void printList(){
 	}
 }
 
+// search for an element in the list by index
+// @return: 0 if element is not in the list
+//			else pointer to the element
 int* findListElementByIndex(int index){
 	int currIndex;
 	int *currElement;
@@ -3540,6 +3614,11 @@ int* findListElementByIndex(int index){
 	return currElement;
 }
 
+// search for an element in the list by data
+// if the list contains more than one element with the 
+// same data it returns the first that is found
+// @return: 0 if element is not in the list
+//			else pointer to the element
 int* findListElementByData(int data){
 	int *currElement;
 	currElement = listHead;
@@ -3552,6 +3631,10 @@ int* findListElementByData(int data){
 	return currElement;
 }
 
+// for deleting an element this method should be called (or deleteListElementByData)
+// delete an element from the list by its index
+// @return: 1 if the index exists
+//			0 otherwise
 int deleteListElementByIndex(int index){
 	int *element;
 	int retVal;
@@ -3560,6 +3643,10 @@ int deleteListElementByIndex(int index){
 	return retVal;
 }
 
+// for deleting an element this method should be called (or deleteListElementByIndx)
+// delete an element from the list by its data
+// @return: 1 if the list contains an element with this data
+//			0 otherwise
 int deleteListElementByData(int data){
 	int *element;
 	int retVal;
@@ -3568,21 +3655,41 @@ int deleteListElementByData(int data){
 	return retVal;
 }
 
+// initialize list 
 void initList(){
 	listHead = 0;
 	listTail = 0;
 	listSize = 0;
 }
 
+// delete list
+// listSize is not reset because this method is called from
+// delete list where the counter is decreased
 void clearList(){
 	listHead = 0;
 	listTail = 0;
 }
 
+// delete list element that is not at the beginning or end
+void deleteInnerListElement(int *elementToDelete){
+	int *prev;
+	int *next;
+	prev = elementToDelete+1;
+	next = (int*)*(elementToDelete+2);
+	
+	*(prev+2) = (int)*next;
+	*(next+1) = (int)*prev;
+	
+	*(elementToDelete+1) = 0; //unnecessary
+	*(elementToDelete+2) = 0; //unnecessary
+}
+
+// delete list element
+// @return: 1 if the element exists
+// 			0 otherwise
 int deleteListElement(int *elementToDelete){
 	int *prev;
 	int *next;
-
 
 	if(elementToDelete == (int*)0){
 		return 0;
@@ -3592,29 +3699,49 @@ int deleteListElement(int *elementToDelete){
 		} else {
 			next = (int*)*(elementToDelete+2);
 			*(next+1) = 0;
-			*(elementToDelete+2) = 0; // muss nicht sein
+			*(elementToDelete+2) = 0; //unnecessary
 			listHead = next;
 		}
 	} else if (elementToDelete == listTail){
 		prev = elementToDelete+1;
-		*(prev+2) = 0; // muss nicht sein
+		*(prev+2) = 0; //unnecessary
 		*(elementToDelete+1) = 0;
 		listTail = prev;
 	} else {
-		prev = elementToDelete+1;
-		next = (int*)*(elementToDelete+2);
-		printListElement(prev);
-		printListElement(next);
-		
-		*(prev+2) = (int)*next;
-		*(next+1) = (int)*prev;
-		
-//		*(elementToDelete+1) = 0; // muss nicht sein
-//		*(elementToDelete+2) = 0; // muss nicht sein
-		
+		deleteInnerListElement(elementToDelete);
 	}
 	listSize = listSize-1;
 	return 1;
+}
+
+void sortList(){
+	int *currElement;
+	int *nextElement;
+	int unsorted;
+	int changes;
+	int tmp;
+	unsorted = 1;
+	changes = 0;
+	
+	while(unsorted == 1){
+		nextElement = listHead;
+		while(nextElement != listTail){
+			changes = 0;
+			currElement = nextElement;
+			nextElement = (int*)*(currElement+2);
+			
+			if(*currElement>*nextElement){
+				tmp = *currElement;
+				*currElement = *nextElement;
+				*nextElement = tmp;
+				changes = 1;
+			}
+		}
+		if(changes == 0){
+			unsorted = 0;
+		}
+	
+	}
 }
 
 
@@ -4100,15 +4227,17 @@ void execute() {
 
 void run() {
 	initList();
-	appendListElement('A');
-	appendListElement('B');
 	appendListElement('C');
+	appendListElement('B');
 	appendListElement('D');
+	appendListElement('A');
 	printList();
+	sortList();
+//	insertListElementAtIndex(2, 'F');
 
-	deleteListElementByData('A');
-	deleteListElementByData('B');
-	deleteListElementByData('C');
+//	deleteListElementByData('A');
+//	deleteListElementByData('B');
+//	deleteListElementByData('C');
     printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
     printString('a','f','t','e','r',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0);
     printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
