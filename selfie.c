@@ -3528,7 +3528,6 @@ void emitPutchar() {
 			if(temp == last){	// does the list contain only one node?
 				last = *(last+1);
 			}
-			free(temp); // if only one Node , free memory
 		}
 		else{
 			while(*(previous+1) != *temp){ // TO DO must be : *(previous+1) != temp
@@ -3536,9 +3535,8 @@ void emitPutchar() {
 			}
 			*(previous+1) = *(temp+1);
 			if(temp == last){   	//if the deleted node was the last,then reset
-				last = previous; 	// the last node and free memory
-			}
-			free(temp); 
+				last = previous; 	// the last node 
+			}	
 		}
 	}
 	
@@ -3577,30 +3575,7 @@ void emitPutchar() {
 		}
 		print_node(last);
 	}
-	
-	
-//	int* search_node(int data, int* start){
-//		int* found;
-//		if(head == (int*)0)  // no search in an empty list
-//			return;
-//		current = head;
-//		while(current != last){   // search in the whole list except the last 
-//			if(*current == data)
-//				return current;		// break if found
-//			else{
-//				//prev = current;
-//				current = (int*)(*(current+1)); // go to next node
-//			}
-//		}
-//		if(*last == data)
-//				found = *last;	//make sur all node have been tested 
-//		return found;
-//	}
-	
-	
-	
-	
-	
+
 ///////////////////////////////////////////////////////////////////////////////
 	///////////////// End of contribution  ////////////////////
 ////////////////////////////////////////////////////////////////////////////////	
