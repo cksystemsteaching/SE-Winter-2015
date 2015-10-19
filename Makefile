@@ -2,7 +2,6 @@ CC			:= clang
 CC_OPT			:= -w -m32 -D'main(a, b)=main(int argc, char **argv)'
 EXEC			:= selfie
 MEM_SIZE		:= 32
-TEST_LIST_OPT		:= -t
 
 all: self_host test clean
 

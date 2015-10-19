@@ -781,122 +781,42 @@ void initSyscalls() {
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 
 // Append entry (including specified payload) to a specified list
-int* insert (int payload, int* where) {
-    int* append;
+int* insert(int pc, int* reg, int* mem, int* prev, int* next) {
+	int* node;
 
-    append = malloc (2*4);
+	node = malloc(4 * 5);
 
-    *append = payload;
-    *(append + 1) = where;
+	*node = pc;
+	*(node + 1) = reg;
+	*(node + 2) = mem;
+	*(node + 3) = prev;
+	*(node + 4) = next;
 
-    where = append;
-
-    return where;
+	return node;
 }
 
-// Delete by payload, specify the data to be removed from a specified list.
-int* delete_by_pl (int payload, int* where) {
-    int* iter;
-    int* prev;
+int* remove(int* node, int* list) {
+	int* next;
+	int* prev;
+	int* tmp;
 
-    prev = 0;
-    iter = where;
+	next = *(node+4);
+	prev = *(node+3);
 
-    while ((int) iter != 0) {
-        if (*iter == payload) {
-            if ((int) prev != 0) {
-                *(prev + 1) = *(iter + 1);
-            } else {
-                where = *(iter + 1);
-            }
+	if( (int) prev != 0 ) {
+		tmp = *prev;
+		*(tmp+4) = next;
+	}
+	else {
+		list = next;
+	}
 
-            return where;
-        }
+	if( (int) next != 0) {
+		tmp = *next;
+		*(tmp+3) = prev;
+	}
 
-        prev = iter;
-        iter = *(iter + 1);
-    }
-
-    return where;
-}
-
-// Delete by index: Iterate through specified list, remove the idx-th (zero-indexed) entry reached.
-int* delete_by_idx (int idx, int* where) {
-    int* iter;
-    int* prev;
-    int run;
-
-    run = 0;
-    prev = 0;
-    iter = where;
-
-    while ((int) iter != 0) {
-        if (run == idx) {
-            if ((int) prev != 0) {
-                *(prev + 1) = *(iter + 1);
-            } else {
-                where = *(iter + 1);
-            }
-
-            return where;
-        }
-
-        prev = iter;
-        iter = *(iter + 1);
-        run = run + 1;
-    }
-
-    return where;
-}
-
-void swap (int* a, int* b) {
-    int tmp;
-
-    tmp = *a; *a = *b; *b = tmp;
-}
-
-// Sort list ascending.
-int* insertion_sort(int* where) {
-    int* iter_inner;
-    int* iter_outer;
-
-    iter_inner = where;
-    iter_outer = where;
-
-    while ((int) iter_outer != 0) {
-        while ((int) iter_inner != 0) {
-            if (*iter_inner > *iter_outer) {
-                swap (iter_inner, iter_outer);
-            }
-
-            iter_inner = *(iter_inner + 1);
-
-        }
-
-        iter_inner = where;
-        iter_outer = *(iter_outer + 1);
-    }
-
-    return where;
-}
-
-// Iterate through a specified list and print the payload of each entry.
-void iter_list (int* where) {
-    int* iter;
-    int* buffer;
-
-    iter = where;
-
-    printString(45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45);
-    printString(10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-
-    while ((int) iter != 0) {
-        buffer = malloc(8);
-
-        print(itoa(*iter, buffer, 10, 0));
-        printString(10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-        iter = *(iter + 1);
-    }
+	return list;
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -945,6 +865,7 @@ void post_debug();
 void fetch();
 void execute();
 void run();
+void context_switch();
 
 void debug_boot(int memorySize);
 int* parse_args(int argc, int *argv, int *cstar_argv);
@@ -982,6 +903,9 @@ int ir; // instruction record
 
 int reg_hi; // hi register for multiplication/division
 int reg_lo; // lo register for multiplication/division
+
+int *proc_list;
+int *current_proc;
 
 // ------------------------- INITIALIZATION ------------------------
 
@@ -1046,9 +970,9 @@ void initInterpreter() {
     *(op_strings + 43) =  (int)createString('s','w',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 
     debug_registers   = 0;
-    debug_syscalls    = 0;
+    debug_syscalls    = 1;
     debug_load        = 0;
-    debug_disassemble = 0;
+    debug_disassemble = 1;
 
     EXCEPTION_SIGNAL             = 1;
     EXCEPTION_ADDRESSERROR       = 2;
@@ -3308,10 +3232,12 @@ void emitExit() {
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_EXIT);
     emitRFormat(0, 0, 0, 0, FCT_SYSCALL);
+
 }
 
 void syscall_exit() {
     int exitCode;
+    int* proc;
 
     exitCode = *(registers+REG_A0);
 
@@ -3323,7 +3249,14 @@ void syscall_exit() {
     print(itoa(exitCode, string_buffer, 10, 0));
     putchar(CHAR_LF);
 
-    exit(0);
+    proc = current_proc;
+    context_switch();
+    proc_list = remove(proc,proc_list);
+
+    if( (int) proc_list == 0 ) {
+      exit(0);
+    }
+
 }
 
 void emitRead() {
@@ -4059,12 +3992,30 @@ void execute() {
 void run() {
 
     while (1) {
+
         fetch();
         decode();
         pre_debug();
         execute();
         post_debug();
+
+        context_switch();
     }
+}
+
+void context_switch() {
+
+  *current_proc = pc; // Save old program counter
+
+  current_proc = *(current_proc + 4);
+
+  if( (int) current_proc == 0 ) {
+    current_proc = proc_list;
+  }
+
+  registers = (int*) *(current_proc + 1);
+  memory = (int*) *(current_proc + 2);
+
 }
 
 void debug_boot(int memorySize) {
@@ -4151,7 +4102,7 @@ int up_copyCString(int *s) {
 
 void up_copyArguments(int argc, int *argv) {
     int c_argv;
-    
+
     up_push(argc);
 
     c_argv = up_malloc(argc*4);
@@ -4171,15 +4122,30 @@ void up_copyArguments(int argc, int *argv) {
 }
 
 int main_emulator(int argc, int *argv, int *cstar_argv) {
+
+    int* proc;
+
     initInterpreter();
 
     *(registers+REG_GP) = loadBinary(parse_args(argc, argv, cstar_argv));
-
     *(registers+REG_K1) = *(registers+REG_GP);
 
     up_copyArguments(argc-3, argv+3);
 
-    // Duplicate binaries here
+    //Init list
+    proc_list = insert(pc,registers,memory,0,0);
+
+    initInterpreter();
+
+    *(registers+REG_GP) = loadBinary(parse_args(argc, argv, cstar_argv));
+    *(registers+REG_K1) = *(registers+REG_GP);
+
+    up_copyArguments(argc-3, argv+3);
+
+    proc = insert(pc,registers,memory,proc_list,0);
+    *(proc_list+4) = proc;
+
+    current_proc =  proc;
 
     run();
 
@@ -4251,36 +4217,15 @@ int main(int argc, int *argv) {
         firstParameter = (int*) (*(cstar_argv+1));
 
         if (*firstParameter == '-') {
-            if (*(firstParameter+1) == 'c') {
+            if (*(firstParameter+1) == 'c')
                 main_compiler();
-        }
             else if (*(firstParameter+1) == 'm') {
                 if (argc > 3)
                     main_emulator(argc, argv, cstar_argv);
                 else
                     exit(-1);
-            } else if (*(firstParameter+1) == 't') {
-        testl = insert(48, testl);
-        testl = insert(34, testl);
-        testl = insert(18, testl);
-        testl = insert(36, testl);
-
-        iter_list(insertion_sort(testl));
-
-        testl = delete_by_idx(1, testl);
-
-        iter_list(testl);
-
-        delete_by_pl(36, testl);
-
-        iter_list(testl);
-
-        testl = insert(55, testl);
-
-        iter_list(testl);
-
-        iter_list(insertion_sort(testl));
-    } else {
+            }
+            else {
                 exit(-1);
             }
         } else {
