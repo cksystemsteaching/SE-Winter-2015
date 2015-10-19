@@ -3455,6 +3455,13 @@ void emitPutchar() {
 }
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+// double linked list has following structure: 
+//
+//        0        1        2        3
+//        |--------|--------|--------|--------|
+//        |  prev  |  next  |  data  |  NULL  |
+//        |--------|--------|--------|--------|
+//
 
 int *listHead;
 int *listTail;
@@ -3465,20 +3472,20 @@ void printListElement(int *element){
 	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 
 	printString('p','r','e',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-	if(*(element+1) != 0){
-		print(element+1);
+	if(*element != 0){
+		print(element+0);
 	}
 
 	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 
 	printString('c','u','r','r',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-	print(element);
+	print(element+2);
 
 	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 
 	printString('n','e','x','t',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-	if(*(element+2) != 0){
-		print(element+2);
+	if(*(element+1) != 0){
+		print(element+1);
 	}
 	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 
@@ -3488,8 +3495,11 @@ void printListElement(int *element){
 // @return: the new element
 int* createNewListElement(int data){
 	int *newElement;
-	newElement = malloc(3*4);
-	*newElement = data;
+	newElement = malloc(4*4);
+	*(newElement+0) = 0; // pre
+	*(newElement+1) = 0; // next
+	*(newElement+2) = data; // data
+	*(newElement+3) = 0; // only for correct output
 	return newElement;
 }
 
@@ -3497,13 +3507,11 @@ int* createNewListElement(int data){
 void appendListElement(int data){
 	int *newElement;
 	newElement = createNewListElement(data);
-	*(newElement+2) = 0;
 	if(listHead == (int*)0){
 		listHead = newElement;
-		*(newElement+1) = 0;
 	} else {
-		*(newElement+1) = (int)(*listTail);
-		*(listTail+2) = (int)(newElement);
+		*newElement = (int)(listTail);
+		*(listTail+1) = (int)newElement;
 	}
 	listTail = newElement;
 	listSize = listSize+1;
@@ -3513,13 +3521,10 @@ void appendListElement(int data){
 void insertListElementAtBeginning(int data){
 	int *newElement;
 	newElement = createNewListElement(data);
-	*(newElement+1) = 0;
 	if(listSize > 0) {
-		*(newElement+2) = (int)listHead;
-	} else {
-		*(newElement+2) = 0;
+		*(newElement+1) = (int)listHead;
+		*listHead = (int)newElement;
 	}
-	*(listHead+1) = (int)*newElement;
 	listHead = newElement;
 	if(listSize == 0){
 		listTail = newElement;
@@ -3532,16 +3537,13 @@ void insertListElementAtBeginning(int data){
 void insertListElement(int *prev, int data){
 	int *newElement;
 	int *next;
-
 	newElement = createNewListElement(data);
-	
-	next = (int*)*(prev+2);
+	next = (int*)(*(prev+1));
+	*(newElement+1) = (int)next;
+	*newElement = (int)*prev;
 
-	*(newElement+2) = (int)next;
-	*(newElement+1) = (int)*prev;
-	
-	*(prev+2) = (int)newElement;
-	*(next+1) = (int)*newElement;
+	*(prev+1) = (int)newElement;
+	*next = (int)*newElement;
 
 	listSize = listSize+1;
 }
@@ -3553,35 +3555,19 @@ void insertListElementAtIndex(int index, int data){
 	int currIndex;
 	currElement = listHead;
 	currIndex = 0;
-
+	
 	if(index >= listSize){
 		appendListElement(data);
 	} else if (index <= 0){
 		insertListElementAtBeginning(data);
 	} else {
+		currIndex = currIndex + 1;
 		while(currIndex < index){
-			currElement = currElement+2;
+			currElement = (int*)(*(currElement+1));
 			currIndex = currIndex + 1;
 		}
 		insertListElement(currElement, data);
 	}
-}
-
-// print the list recursively
-// not working yet
-void printListRec(int *current){
-	if(listHead != current){
-		printListRec((int*)*(current+1));
-	}
-	printString(*current,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-	
-}
-
-// this mehtod is called to print the list recursively
-// not working yet
-void printList1(){
-	printListRec(listTail);
 }
 
 // print the list
@@ -3592,7 +3578,7 @@ void printList(){
 	current = listHead;
 	while(currIndex < listSize){
 		printListElement(current);
-		current = (int*)(*(current+2));
+		current = (int*)(*(current+1));
 		currIndex = currIndex+1;
 	}
 }
@@ -3606,10 +3592,14 @@ int* findListElementByIndex(int index){
 	currElement = listHead;
 	currIndex = 0;
 	if(index >= listSize){
-		return 0;
+		return (int*)0;
 	}
+	if(index < 0){
+		return (int*)0;
+	}
+	
 	while(currIndex < index){
-		currElement = (int*)(*(currElement+2));
+		currElement = (int*)(*(currElement+1));
 	}
 	return currElement;
 }
@@ -3623,10 +3613,13 @@ int* findListElementByData(int data){
 	int *currElement;
 	currElement = listHead;
 	if(listHead == (int*)0){
-		return 0;
+		return (int*)0;
 	}
-	while(*currElement != data){
-		currElement = (int*)(*(currElement+2));
+	while(*(currElement+2) != data){
+		currElement = (int*)(*(currElement+1));
+		if(currElement == (int*)0){
+			return (int*)0;
+		}
 	}
 	return currElement;
 }
@@ -3674,22 +3667,19 @@ void clearList(){
 void deleteInnerListElement(int *elementToDelete){
 	int *prev;
 	int *next;
-	prev = elementToDelete+1;
-	next = (int*)*(elementToDelete+2);
+	prev = (int*)*elementToDelete;
+	next = (int*)*(elementToDelete+1);
+	*(prev+1) = (int)next;
+	*next = prev;
 	
-	*(prev+2) = (int)*next;
-	*(next+1) = (int)*prev;
-	
-	*(elementToDelete+1) = 0; //unnecessary
-	*(elementToDelete+2) = 0; //unnecessary
+	*elementToDelete = 0;
+	*(elementToDelete+1) = 0;
 }
 
 // delete list element
 // @return: 1 if the element exists
 // 			0 otherwise
 int deleteListElement(int *elementToDelete){
-	int *prev;
-	int *next;
 
 	if(elementToDelete == (int*)0){
 		return 0;
@@ -3697,16 +3687,14 @@ int deleteListElement(int *elementToDelete){
 		if(elementToDelete == listTail){
 			clearList();
 		} else {
-			next = (int*)*(elementToDelete+2);
-			*(next+1) = 0;
-			*(elementToDelete+2) = 0; //unnecessary
-			listHead = next;
+			listHead = (int*)*(elementToDelete+1);
+			*listHead = 0;
+			*(elementToDelete+1) = 0;
 		}
 	} else if (elementToDelete == listTail){
-		prev = elementToDelete+1;
-		*(prev+2) = 0; //unnecessary
-		*(elementToDelete+1) = 0;
-		listTail = prev;
+		listTail = (int*)elementToDelete;
+		*(listTail+1) = 0;
+		*elementToDelete = 0;
 	} else {
 		deleteInnerListElement(elementToDelete);
 	}
@@ -3731,28 +3719,28 @@ void sortList(){
 		changes = 0;
 		while(nextElement != listTail){
 			currElement = nextElement;
-			nextElement = (int*)*(currElement+2);
+			nextElement = (int*)*(currElement+1);
 			
-			if(*currElement>*nextElement){
+			if(*(currElement+2) > *(nextElement+2)){
 //				printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 //				printString('c','u','r','r',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-//				print(currElement);
+//				print(currElement+2);
 //				printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 //				printString('n','e','x','t',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-//				print(nextElement);
+//				print(nextElement+2);
 //				printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 
-				tmp = *currElement;
-				*currElement = *nextElement;
-				*nextElement = tmp;
+				tmp = *(currElement+2);
+				*(currElement+2) = *(nextElement+2);
+				*(nextElement+2) = tmp;
 				changes = 1;
 
 //				printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 //				printString('c','u','r','r',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-//				print(currElement);
+//				print(currElement+2);
 //				printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 //				printString('n','e','x','t',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-//				print(nextElement);
+//				print(nextElement+2);
 //				printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 
 			}
@@ -4248,23 +4236,24 @@ void execute() {
 }
 
 void run() {
+
 	initList();
-	appendListElement('C');
-	appendListElement('B');
-	appendListElement('D');
 	appendListElement('A');
+	appendListElement('B');
+	appendListElement('C');
+//	appendListElement('D');
 	printList();
-	sortList();
 //	insertListElementAtIndex(2, 'F');
+//	sortList();
+	deleteListElementByData('B');
 
 //	deleteListElementByData('A');
 //	deleteListElementByData('B');
-//	deleteListElementByData('C');
-    printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-    printString('a','f','t','e','r',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-    printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+	printString('a','f','t','e','r',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 	printList();
-	
+		
     while (1) {
         fetch();
         decode();
