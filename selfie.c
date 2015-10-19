@@ -3463,9 +3463,6 @@ void emitPutchar() {
 //        |--------|--------|--------|--------|
 //
 
-int *listHead;
-int *listTail;
-int listSize;
 
 // print pre neighbour, the element itself and next neighbour
 void printListElement(int *element){
@@ -3503,9 +3500,22 @@ int* createNewListElement(int data){
 	return newElement;
 }
 
+int* getListHead(int *listBorders){
+	return listBorders;
+}
+int* getListTail(int *listBorders){
+	return listBorders+1;
+}
+
+
 // add new element at the end of the list
-void appendListElement(int data){
+int* appendListElement(int data, int *listBorders){
+	int *listHead;
+	int *listTail;
 	int *newElement;
+	listHead = getListHead(listBorders);
+	listTail = getListTail(listBorders);
+	
 	newElement = createNewListElement(data);
 	if(listHead == (int*)0){
 		listHead = newElement;
@@ -3514,23 +3524,29 @@ void appendListElement(int data){
 		*(listTail+1) = (int)newElement;
 	}
 	listTail = newElement;
-	listSize = listSize+1;
+	
+	return listBorders;
 }
 
 // add new element at the beginning of the list
-void insertListElementAtBeginning(int data){
+int* insertListElementAtBeginning(int data, int *listBorders){
+	int *listHead;
+	int *listTail;
 	int *newElement;
+	listHead = getListHead(listBorders);
+	listTail = getListTail(listBorders);
+
 	newElement = createNewListElement(data);
-	if(listSize > 0) {
+	if(listHead != listTail ){
 		*(newElement+1) = (int)listHead;
 		*listHead = (int)newElement;
 	}
 	listHead = newElement;
-	if(listSize == 0){
+	if(listHead == listTail){
 		listTail = newElement;
 	}
+	return listBorders;
 
-	listSize = listSize+1;
 }
 
 // insert element anywhere in the middle of the list after prev
@@ -3544,63 +3560,72 @@ void insertListElement(int *prev, int data){
 
 	*(prev+1) = (int)newElement;
 	*next = (int)*newElement;
-
-	listSize = listSize+1;
 }
 
 // this method should be called from outside
 // insert a new list element at index 'index' with data 'data'
-void insertListElementAtIndex(int index, int data){
+int* insertListElementAtIndex(int index, int data, int *listBorders){
 	int *currElement;
 	int currIndex;
-	currElement = listHead;
+
+	currElement = getListHead(listBorders);
 	currIndex = 0;
 	
-	if(index >= listSize){
-		appendListElement(data);
-	} else if (index <= 0){
-		insertListElementAtBeginning(data);
+	if (index <= 0){
+		listBorders = insertListElementAtBeginning(data, listBorders);
 	} else {
 		currIndex = currIndex + 1;
 		while(currIndex < index){
 			currElement = (int*)(*(currElement+1));
 			currIndex = currIndex + 1;
+			if(*currElement == 0){
+				currIndex = index+1;
+			}
 		}
-		insertListElement(currElement, data);
+		if(currIndex == index+1){
+			listBorders = appendListElement(data, listBorders);
+		} else {
+			insertListElement(currElement, data);
+		}
 	}
+	return listBorders;
 }
 
 // print the list
-void printList(){
+void printList(int *listBorders){
 	int *current;
-	int currIndex;
-	currIndex = 0;
-	current = listHead;
-	while(currIndex < listSize){
+	current = getListHead(listBorders);
+	while(current != (int*)0){
 		printListElement(current);
 		current = (int*)(*(current+1));
-		currIndex = currIndex+1;
 	}
 }
 
 // search for an element in the list by index
 // @return: 0 if element is not in the list
 //			else pointer to the element
-int* findListElementByIndex(int index){
+int* findListElementByIndex(int index, int *listBorders){
+	int *listHead;
+	int *listTail;
+
 	int currIndex;
 	int *currElement;
+
+	listHead = getListHead(listBorders);
+	listTail = getListTail(listBorders);
+
 	currElement = listHead;
 	currIndex = 0;
-	if(index >= listSize){
-		return (int*)0;
-	}
 	if(index < 0){
 		return (int*)0;
 	}
 	
 	while(currIndex < index){
 		currElement = (int*)(*(currElement+1));
+		currIndex = currIndex +1; 
 	}
+	if(currIndex == index)
+		return (int*)0;
 	return currElement;
 }
 
@@ -3609,8 +3634,15 @@ int* findListElementByIndex(int index){
 // same data it returns the first that is found
 // @return: 0 if element is not in the list
 //			else pointer to the element
-int* findListElementByData(int data){
+int* findListElementByData(int data, int *listBorders){
+	int *listHead;
+	int *listTail;
+
 	int *currElement;
+
+	listHead = getListHead(listBorders);
+	listTail = getListTail(listBorders);
+
 	currElement = listHead;
 	if(listHead == (int*)0){
 		return (int*)0;
@@ -3624,43 +3656,20 @@ int* findListElementByData(int data){
 	return currElement;
 }
 
-// for deleting an element this method should be called (or deleteListElementByData)
-// delete an element from the list by its index
-// @return: 1 if the index exists
-//			0 otherwise
-int deleteListElementByIndex(int index){
-	int *element;
-	int retVal;
-	element = findListElementByIndex(index);
-	retVal = deleteListElement(element);
-	return retVal;
-}
 
-// for deleting an element this method should be called (or deleteListElementByIndx)
-// delete an element from the list by its data
-// @return: 1 if the list contains an element with this data
-//			0 otherwise
-int deleteListElementByData(int data){
-	int *element;
-	int retVal;
-	element = findListElementByData(data);
-	retVal = deleteListElement(element);
-	return retVal;
-}
 
 // initialize list 
-void initList(){
-	listHead = 0;
-	listTail = 0;
-	listSize = 0;
+int* initList(){
+	int *listBorders;
+	listBorders = malloc(2*4);
+//	listHead = 0;
+//	listTail = 0;
+	return listBorders;
 }
 
 // delete list
-// listSize is not reset because this method is called from
-// delete list where the counter is decreased
-void clearList(){
-	listHead = 0;
-	listTail = 0;
+int* clearList(){
+	return initList();
 }
 
 // delete list element that is not at the beginning or end
@@ -3670,22 +3679,25 @@ void deleteInnerListElement(int *elementToDelete){
 	prev = (int*)*elementToDelete;
 	next = (int*)*(elementToDelete+1);
 	*(prev+1) = (int)next;
-	*next = prev;
+	*next = (int)prev;
 	
 	*elementToDelete = 0;
 	*(elementToDelete+1) = 0;
 }
 
 // delete list element
-// @return: 1 if the element exists
-// 			0 otherwise
-int deleteListElement(int *elementToDelete){
+// @return: head and tail of the list
+int* deleteListElement(int *elementToDelete, int *listBorders){
+	int *listHead;
+	int *listTail;
+	listHead = getListHead(listBorders);
+	listTail = getListTail(listBorders);
 
 	if(elementToDelete == (int*)0){
 		return 0;
 	} else if(elementToDelete == listHead){
 		if(elementToDelete == listTail){
-			clearList();
+			listBorders = clearList();
 		} else {
 			listHead = (int*)*(elementToDelete+1);
 			*listHead = 0;
@@ -3698,22 +3710,46 @@ int deleteListElement(int *elementToDelete){
 	} else {
 		deleteInnerListElement(elementToDelete);
 	}
-	listSize = listSize-1;
-	return 1;
+	return listBorders;
 }
 
-void sortList(){
+// for deleting an element this method should be called (or deleteListElementByData)
+// delete an element from the list by its index
+// @return: head and tail of the list
+int* deleteListElementByIndex(int index, int *listBorders){
+	int *element;
+//	int retVal;
+	element = findListElementByIndex(index, listBorders);
+	listBorders = deleteListElement(element, listBorders);
+	return listBorders;
+}
+
+// for deleting an element this method should be called (or deleteListElementByIndx)
+// delete an element from the list by its data
+// @return: head and tail of the list
+int* deleteListElementByData(int data, int *listBorders){
+	int *element;
+//	int retVal;
+	element = findListElementByData(data, listBorders);
+	listBorders = deleteListElement(element, listBorders);
+	return listBorders;
+}
+
+int* sortList(int *listBorders){
+	int *listHead;
+	int *listTail;
 	int *currElement;
 	int *nextElement;
 	int unsorted;
 	int changes;
 	int tmp;
+
+	listHead = getListHead(listBorders);
+	listTail = getListTail(listBorders);
+	
 	unsorted = 1;
 	changes = 0;
 	
-//	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-//	printString('s','o','r','t',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-//	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 	while(unsorted == 1){
 		nextElement = listHead;
 		changes = 0;
@@ -3722,26 +3758,10 @@ void sortList(){
 			nextElement = (int*)*(currElement+1);
 			
 			if(*(currElement+2) > *(nextElement+2)){
-//				printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-//				printString('c','u','r','r',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-//				print(currElement+2);
-//				printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-//				printString('n','e','x','t',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-//				print(nextElement+2);
-//				printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-
 				tmp = *(currElement+2);
 				*(currElement+2) = *(nextElement+2);
 				*(nextElement+2) = tmp;
 				changes = 1;
-
-//				printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-//				printString('c','u','r','r',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-//				print(currElement+2);
-//				printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-//				printString('n','e','x','t',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-//				print(nextElement+2);
-//				printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 
 			}
 		}
@@ -3749,10 +3769,30 @@ void sortList(){
 			unsorted = 0;
 		}
 	}
-//	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-//	printString('s','o','r','t',' ','e','n','d',' ',0,0,0,0,0,0,0,0,0,0,0);
-//	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 }
+
+void testDoubleLinkedList(){
+	int *listBorders;
+	listBorders = initList();
+	listBorders = appendListElement('A', listBorders);
+	listBorders = appendListElement('B', listBorders);
+//	appendListElement('C');
+//	appendListElement('D');
+	printList(listBorders);
+//	insertListElementAtIndex(2, 'F', head, tail);
+//	listBorders = sortList(listBorders);
+//	deleteListElementByData('B');
+
+//	deleteListElementByData('A');
+//	deleteListElementByData('B');
+//	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+//	printString(10,'a','f','t','e','r',' ',10,0,0,0,0,0,0,0,0,0,0,0,0);
+//	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+//	printList(listBorders);
+
+
+}
+
 
 
 
@@ -4237,23 +4277,6 @@ void execute() {
 
 void run() {
 
-	initList();
-	appendListElement('A');
-	appendListElement('B');
-	appendListElement('C');
-//	appendListElement('D');
-	printList();
-//	insertListElementAtIndex(2, 'F');
-//	sortList();
-	deleteListElementByData('B');
-
-//	deleteListElementByData('A');
-//	deleteListElementByData('B');
-	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-	printString('a','f','t','e','r',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-	printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-	printList();
-		
     while (1) {
         fetch();
         decode();
@@ -4453,6 +4476,9 @@ int main(int argc, int *argv) {
 				}
                 else
                     exit(-1);
+            }
+            else if(*(firstParameter+1) == 'l'){
+            	testDoubleLinkedList();
             }
             else {
                 exit(-1);
