@@ -853,6 +853,8 @@ void op_teq();
 // -------------------------- INTERPRETER --------------------------
 // -----------------------------------------------------------------
 
+void allocateRegisters();
+
 void initInterpreter();
 
 void exception_handler(int enumber);
@@ -866,6 +868,7 @@ void fetch();
 void execute();
 void run();
 void context_switch();
+void create_process(int* filename);
 
 void debug_boot(int memorySize);
 int* parse_args(int argc, int *argv, int *cstar_argv);
@@ -906,9 +909,25 @@ int reg_lo; // lo register for multiplication/division
 
 int *proc_list;
 int *current_proc;
-int proc_count;
+int number_of_proc;
+int instr_cycles;
 
 // ------------------------- INITIALIZATION ------------------------
+
+void allocateRegisters() {
+  registers = (int*) malloc(32*4);
+}
+
+void create_process( int* filename ) {
+
+  allocateMachineMemory(memorySize*4);
+  allocateRegisters();
+  *(registers+REG_GP) = loadBinary(filename);
+  *(registers+REG_K1) = *(registers+REG_GP);
+  *(registers+REG_SP ) = (memorySize-1)*4;
+
+}
+
 
 void initInterpreter() {
     register_strings = (int*)malloc(4*32);
@@ -982,7 +1001,7 @@ void initInterpreter() {
     EXCEPTION_UNKNOWNSYSCALL     = 5;
     EXCEPTION_UNKNOWNFUNCTION    = 6;
 
-    registers = (int*)malloc(32*4);
+    allocateRegisters();
 
     pc = 0;
     ir = 0;
@@ -3179,37 +3198,37 @@ void emitBinary() {
 
 int loadBinary(int *filename) {
     int fd;
-     int i;
-     int ret;
+    int i;
+    int ret;
 
-     fd = open(filename, 0);
+    fd = open(filename, 0);
 
-     if (fd < 0)
-         exit(-1);
+    if (fd < 0)
+      exit(-1);
 
-     i = 0;
+    i = 0;
 
-     ret = 4;
+    ret = 4;
 
-     while (ret == 4) {
-         ret = read(fd, memory + i, 4);
+    while (ret == 4) {
+      ret = read(fd, memory + i, 4);
 
-         if (debug_load) {
-             memset(string_buffer, 33, 0);
-             print(itoa(i * 4, string_buffer, 16, 4));
-             putchar(' ');
-             putchar('#');
-             putchar(' ');
-             memset(string_buffer, 33, 0);
-             print(itoa(*(memory+i), string_buffer, 16, 8));
-             putchar(CHAR_LF);
-         }
+      if (debug_load) {
+        memset(string_buffer, 33, 0);
+        print(itoa(i * 4, string_buffer, 16, 4));
+        putchar(' ');
+        putchar('#');
+        putchar(' ');
+        memset(string_buffer, 33, 0);
+        print(itoa(*(memory+i), string_buffer, 16, 8));
+        putchar(CHAR_LF);
+      }
 
-         i = i + 1;
-     }
+      i = i + 1;
+    }
 
-     // Return global pointer and bump pointer for malloc
-     return i * 4;
+    // Return global pointer and bump pointer for malloc
+    return i * 4;
 
 }
 
@@ -3241,7 +3260,7 @@ void syscall_exit() {
     int exitCode;
     int* proc;
 
-    proc_count = proc_count - 1;
+    number_of_proc = number_of_proc - 1;
 
     printString('[','O','S',']',' ','T', 'e', 'r','m','i','n','a','t','e','d',' ','w','i','t','h');
     putchar(' ');
@@ -3258,13 +3277,9 @@ void syscall_exit() {
     proc = current_proc;
     proc_list = remove(proc,proc_list);
 
-    if( proc_count == 0 ) {
-      print(itoa(proc_count, string_buffer, 10, 0));
-      putchar(10);
+    if( number_of_proc == 0 ) {
       exit(0);
     }
-    print(itoa(proc_count, string_buffer, 10, 0));
-    putchar(10);
 
 }
 
@@ -4000,8 +4015,13 @@ void execute() {
 
 void run() {
 
+  int instr_count;
+
+  instr_count = 0;
+
     while (1) {
 
+      while( instr_count < instr_cycles ) {
         fetch();
         decode();
         pre_debug();
@@ -4009,6 +4029,7 @@ void run() {
         post_debug();
 
         context_switch();
+      }
     }
 }
 
@@ -4038,6 +4059,8 @@ int* parse_args(int argc, int *argv, int *cstar_argv) {
     // assert: ./selfie -m size executable {-m size executable}
 
     memorySize = atoi((int*)*(cstar_argv+2)) * 1024 * 1024 / 4;
+
+    allocateMachineMemory(memorySize*4);
 
     // initialize stack pointer
     *(registers+REG_SP) = (memorySize - 1) * 4;
@@ -4129,37 +4152,43 @@ void up_copyArguments(int argc, int *argv) {
 int main_emulator(int argc, int *argv, int *cstar_argv) {
 
     int* proc;
+    int* prev_proc;
     int* filename;
+    int proc_count;
+    int number_of_proc;
 
+    number_of_proc = 4;
+    instr_cycles = 3;
+
+    // Initialize main process
     initInterpreter();
     filename = parse_args(argc, argv, cstar_argv);
-
-
-    allocateMachineMemory(memorySize*4);
     *(registers+REG_GP) = loadBinary(filename);
     *(registers+REG_K1) = *(registers+REG_GP);
-
-    //Init list
     proc_list = insert(pc,registers,memory,0,0);
 
-    // 2ter Process
-    allocateMachineMemory(memorySize*4);
-    registers = (int*) malloc(32*4);
-    *(registers+REG_GP) = loadBinary(filename);
-    *(registers+REG_K1) = *(registers+REG_GP);
-    *(registers+REG_SP ) = (memorySize-1)*4;
 
+    prev_proc = proc_list;
+    proc_count = 1; // Starting with 1 as there is already the main process
+    while( proc_count < number_of_proc ) {
 
-    proc = insert(pc,registers,memory,proc_list,0);
-    *(proc_list+4) = proc;
+      create_process(filename);
 
+      // Insert into list
+      proc = insert(pc,registers,memory,prev_proc,0);
+      *(prev_proc+4) = proc;
+      prev_proc = proc;
+
+      proc_count = proc_count + 1;
+
+    }
+
+    //Important: After the last loop memory, reg point to proc. Therefore must use proc as current_proc
     current_proc =  proc;
-    proc_count = 2;
 
     up_copyArguments(argc-3, argv+3);
 
     run();
-
 
     exit(0);
 }
