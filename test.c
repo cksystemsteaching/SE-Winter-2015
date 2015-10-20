@@ -1,12 +1,9 @@
 
-
-int main(int argc, int *argv) {
-
-	int i;
-	
+int main() {
 	putchar('A');
+	putchar('S');
+	putchar('P');
 	putchar(10);
-	i=5;
-
-	return 0;
+	putchar(10);
+	exit(0);
 }

@@ -762,6 +762,8 @@ int SYSCALL_OPEN;
 int SYSCALL_MALLOC;
 int SYSCALL_GETCHAR;
 
+int memorySize;
+
 // ------------------------- INITIALIZATION ------------------------
 
 void initSyscalls() {
@@ -804,16 +806,14 @@ int* remove(int* node, int* list) {
 	prev = *(node+3);
 
 	if( (int) prev != 0 ) {
-		tmp = *prev;
-		*(tmp+4) = next;
+		*(prev+4) = next;
 	}
 	else {
 		list = next;
 	}
 
 	if( (int) next != 0) {
-		tmp = *next;
-		*(tmp+3) = prev;
+		*(next+3) = prev;
 	}
 
 	return list;
@@ -906,6 +906,7 @@ int reg_lo; // lo register for multiplication/division
 
 int *proc_list;
 int *current_proc;
+int proc_count;
 
 // ------------------------- INITIALIZATION ------------------------
 
@@ -970,9 +971,9 @@ void initInterpreter() {
     *(op_strings + 43) =  (int)createString('s','w',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 
     debug_registers   = 0;
-    debug_syscalls    = 1;
+    debug_syscalls    = 0;
     debug_load        = 0;
-    debug_disassemble = 1;
+    debug_disassemble = 0;
 
     EXCEPTION_SIGNAL             = 1;
     EXCEPTION_ADDRESSERROR       = 2;
@@ -3178,37 +3179,38 @@ void emitBinary() {
 
 int loadBinary(int *filename) {
     int fd;
-    int i;
-    int ret;
+     int i;
+     int ret;
 
-    fd = open(filename, 0);
+     fd = open(filename, 0);
 
-    if (fd < 0)
-        exit(-1);
+     if (fd < 0)
+         exit(-1);
 
-    i = 0;
+     i = 0;
 
-    ret = 4;
+     ret = 4;
 
-    while (ret == 4) {
-        ret = read(fd, memory + i, 4);
+     while (ret == 4) {
+         ret = read(fd, memory + i, 4);
 
-        if (debug_load) {
-            memset(string_buffer, 33, 0);
-            print(itoa(i * 4, string_buffer, 16, 4));
-            putchar(' ');
-            putchar('#');
-            putchar(' ');
-            memset(string_buffer, 33, 0);
-            print(itoa(*(memory+i), string_buffer, 16, 8));
-            putchar(CHAR_LF);
-        }
+         if (debug_load) {
+             memset(string_buffer, 33, 0);
+             print(itoa(i * 4, string_buffer, 16, 4));
+             putchar(' ');
+             putchar('#');
+             putchar(' ');
+             memset(string_buffer, 33, 0);
+             print(itoa(*(memory+i), string_buffer, 16, 8));
+             putchar(CHAR_LF);
+         }
 
-        i = i + 1;
-    }
+         i = i + 1;
+     }
 
-    // Return global pointer and bump pointer for malloc
-    return i * 4;
+     // Return global pointer and bump pointer for malloc
+     return i * 4;
+
 }
 
 // -----------------------------------------------------------------
@@ -3239,23 +3241,30 @@ void syscall_exit() {
     int exitCode;
     int* proc;
 
-    exitCode = *(registers+REG_A0);
+    proc_count = proc_count - 1;
 
     printString('[','O','S',']',' ','T', 'e', 'r','m','i','n','a','t','e','d',' ','w','i','t','h');
     putchar(' ');
+
+    exitCode = *(registers+REG_A0);
 
     *(registers+REG_V0) = exitCode;
 
     print(itoa(exitCode, string_buffer, 10, 0));
     putchar(CHAR_LF);
 
-    proc = current_proc;
     context_switch();
+
+    proc = current_proc;
     proc_list = remove(proc,proc_list);
 
-    if( (int) proc_list == 0 ) {
+    if( proc_count == 0 ) {
+      print(itoa(proc_count, string_buffer, 10, 0));
+      putchar(10);
       exit(0);
     }
+    print(itoa(proc_count, string_buffer, 10, 0));
+    putchar(10);
 
 }
 
@@ -3395,6 +3404,7 @@ void syscall_open() {
     int fd;
 
     flags   = *(registers+REG_A1);
+
     address = *(registers+REG_A0) / 4;
 
     filename = memory + address;
@@ -3543,7 +3553,6 @@ void fct_syscall() {
     } else {
         exception_handler(EXCEPTION_UNKNOWNSYSCALL);
     }
-
     pc = pc + 1;
 }
 
@@ -4006,15 +4015,14 @@ void run() {
 void context_switch() {
 
   *current_proc = pc; // Save old program counter
-
   current_proc = *(current_proc + 4);
 
   if( (int) current_proc == 0 ) {
     current_proc = proc_list;
   }
-
   registers = (int*) *(current_proc + 1);
   memory = (int*) *(current_proc + 2);
+  pc = *current_proc;
 
 }
 
@@ -4028,11 +4036,8 @@ void debug_boot(int memorySize) {
 
 int* parse_args(int argc, int *argv, int *cstar_argv) {
     // assert: ./selfie -m size executable {-m size executable}
-    int memorySize;
 
     memorySize = atoi((int*)*(cstar_argv+2)) * 1024 * 1024 / 4;
-
-    allocateMachineMemory(memorySize*4);
 
     // initialize stack pointer
     *(registers+REG_SP) = (memorySize - 1) * 4;
@@ -4124,30 +4129,37 @@ void up_copyArguments(int argc, int *argv) {
 int main_emulator(int argc, int *argv, int *cstar_argv) {
 
     int* proc;
+    int* filename;
 
     initInterpreter();
+    filename = parse_args(argc, argv, cstar_argv);
 
-    *(registers+REG_GP) = loadBinary(parse_args(argc, argv, cstar_argv));
+
+    allocateMachineMemory(memorySize*4);
+    *(registers+REG_GP) = loadBinary(filename);
     *(registers+REG_K1) = *(registers+REG_GP);
-
-    up_copyArguments(argc-3, argv+3);
 
     //Init list
     proc_list = insert(pc,registers,memory,0,0);
 
-    initInterpreter();
-
-    *(registers+REG_GP) = loadBinary(parse_args(argc, argv, cstar_argv));
+    // 2ter Process
+    allocateMachineMemory(memorySize*4);
+    registers = (int*) malloc(32*4);
+    *(registers+REG_GP) = loadBinary(filename);
     *(registers+REG_K1) = *(registers+REG_GP);
+    *(registers+REG_SP ) = (memorySize-1)*4;
 
-    up_copyArguments(argc-3, argv+3);
 
     proc = insert(pc,registers,memory,proc_list,0);
     *(proc_list+4) = proc;
 
     current_proc =  proc;
+    proc_count = 2;
+
+    up_copyArguments(argc-3, argv+3);
 
     run();
+
 
     exit(0);
 }
@@ -4217,13 +4229,16 @@ int main(int argc, int *argv) {
         firstParameter = (int*) (*(cstar_argv+1));
 
         if (*firstParameter == '-') {
-            if (*(firstParameter+1) == 'c')
+            if (*(firstParameter+1) == 'c') {
                 main_compiler();
+              }
             else if (*(firstParameter+1) == 'm') {
                 if (argc > 3)
                     main_emulator(argc, argv, cstar_argv);
-                else
+                else {
+
                     exit(-1);
+                  }
             }
             else {
                 exit(-1);
