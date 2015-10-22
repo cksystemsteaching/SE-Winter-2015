@@ -3577,7 +3577,6 @@ int* findListElement(int index){
 	return currElement;
 }
 
-//ADDED 18.10.2015
 // set pc (element+0), registers (element+3) and memory (element+4) of element in the list by index
 // if element is in list
 void setListElement(int index, int pc, int* reg, int* mem){
@@ -3589,30 +3588,6 @@ void setListElement(int index, int pc, int* reg, int* mem){
 		*(tmp+4) = (int)mem;
 	}
 }
-
-// // for deleting an element this method should be called
-// // delete an element from the list by its index
-// // @return: 1 if deletion was successful
-// //			0 otherwise
-// int deleteListElement(int index){
-	// int* element;
-	// if(index >= listSize){
-		// return 0;
-	// }
-	// if(index == 0){
-		// listHead = (int*)(*(listHead+2));
-		// *(listHead+1) = 0;
-	// }else if(index == listSize-1){
-		// listTail = (int*)(*(listTail+1));
-		// *(listTail+2) = 0;
-	// }else{
-		// element = findListElement(index);
-		// element = (int*)(*(element+1));
-		// *(element+2) = *(((int*)(*(element+2)))+2);
-		// *(((int*)(*(element+2)))+1) = (int)(element);
-	// }
-	// return 1;
-// }
 
 //--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -4093,13 +4068,10 @@ void execute() {
     }
 }
 
-//ADDED 18.10.2015
 int current_process;
 int count_processes;
 int count_switch;
 
-
-//CHANGED 18.10.2015
 void run() {
 	int i;
 	int* tmp;
@@ -4141,7 +4113,6 @@ void debug_boot(int memorySize) {
 }
 
 
-//ADDED 18.10.2015
 void allocateMoreMemory(int memorySize){
 	int i;
 	i=0;
@@ -4162,10 +4133,8 @@ void allocateMoreMemory(int memorySize){
 	}
 }
 
-//ADDED 18.10.2015
 int memSize;
 
-//CHANGED 18.10.2015
 int* parse_args(int *argv, int *cstar_argv) {
 	int memorySize;
     // assert: ./selfie -m size executable {-m size executable}
@@ -4261,7 +4230,6 @@ void up_copyArguments(int argc, int *argv) {
     }
 }
 
-//CHANGED 18.10.2015
 int main_emulator(int argc, int *argv, int *cstar_argv) {
 	int i;
 	int j;
