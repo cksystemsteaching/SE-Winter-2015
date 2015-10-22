@@ -939,6 +939,10 @@ void initInterpreter() {
 
     pc = 0;
     ir = 0;
+    
+    readyQueue = malloc(2*4);
+    *readyQueue = 0;
+    *(readyQueue + 1) = 0;
 
     reg_hi = 0;
     reg_lo = 0;
@@ -1145,10 +1149,8 @@ void printString(int c0, int c1, int c2, int c3, int c4,
         int c5, int c6, int c7, int c8, int c9,
         int c10, int c11, int c12, int c13, int c14,
         int c15, int c16, int c17, int c18, int c19) {
-
     assignString(string_buffer, c0, c1, c2, c3, c4, c5, c6, c7, c8, c9,
                  c10, c11, c12, c13, c14, c15, c16, c17, c18, c19);
-
     print(string_buffer);
 }
 
@@ -3462,43 +3464,60 @@ void emitPutchar() {
 // --------------- ASSIGNMENT 0 (SINGLY LINKED LIST) ---------------
 // -----------------------------------------------------------------
 
-// creates new field at the head of the list, inserts data and returns new head
-int* insert(int* head, int data) {
-    int* newfield;
-    newfield = malloc(2 * 4);
-    *(newfield + 1) = data;
-	*newfield = head;
-    return newfield;
-}
+// works for nodes of the following form:
+// ________________
+// | next         |
+// | previous     |
+// | key          |
+// | ...          |
+// |______________|
 
 // removes first (i.e. last inserted) entry with matching data, returns new head
-int* remove(int* head, int data) {
+void remove(int* list, int key) {
     int* cursor;
+    int* head;
     int* previous;
+    int* next;
+    
+    if (*list == 0)
+    	return;
+    
+    head = *list;
     cursor = *head;
-    previous = head;
-    if (*(head + 1) == data)
-        return cursor;
+	
+    if (*(head + 2) == key) {
+    	*list = cursor;	
+    	if (*list == 0)// in case list only contains one element
+    	   	*(list + 1) = 0;
+    	return;
+    }
        
     while ((int) cursor != 0) {
-        if (*(cursor + 1) == data) {
-            *previous = *cursor;
-            return head;
+        if (*(cursor + 2) == key) {
+        	previous = *(cursor + 1);
+        	if (*cursor == 0) {
+        		//cursor.previous.next = 0;
+        		*previous = 0;
+        		*(list + 1) = previous;
+        	} else {
+        		//cursor.previous.next = cursor.next;
+        		*previous = *cursor;
+        		//cursor.next.previous = cursor.previous;
+        		next = *cursor;
+        		*(next + 1) = *(cursor + 1);
+        	}
         }
-        previous = cursor;
         cursor = *cursor;
     }
-    
-    return head;
 }
 
 // searches for element with specified data, returns pointer to found element or 0 if not found
-int* search(int* head, int data) {
+int* search(int* list, int key) {
     int* cursor;
-    cursor = head;
+    cursor = *list;
     
     while ((int)cursor != 0) {
-        if (*(cursor + 1) == data) {
+        if (*(cursor + 2) == key) {
             return cursor;
         }
         cursor = *cursor;
@@ -3508,60 +3527,63 @@ int* search(int* head, int data) {
 }
 
 // sorts list using bubble sort (ascending -> head = smallest element)
-int* sort(int* head) {
-    int* c1;
-    int* c2;
-    int* temp;
-    int* prev;
-    int i;
-    int counter;
-   
-    if ((int) head == 0)
-        return 0;
+//int* sort(int* head) {
+//    int* c1;
+//    int* c2;
+//    int* temp;
+//    int* prev;
+//    int i;
+//    int counter;
+//   
+//    if ((int) head == 0)
+//        return 0;
        
-    counter = 0;
-    c1 = head;
+//    counter = 0;
+//    c1 = head;
    
-    while (*c1 != 0) {
-        counter = counter + 1;
-        c1 = *c1;
-    }
+//    while (*c1 != 0) {
+//        counter = counter + 1;
+//        c1 = *c1;
+//    }
    
-    while (counter > 0) {
-        i = 0;
-        prev = 0;
-        c1 = head;
-        c2 = *head;
+//    while (counter > 0) {
+//        i = 0;
+//        prev = 0;
+//        c1 = head;
+//        c2 = *head;
        
-        while (i < counter) {
-            if (*(c1 + 1) > *(c2 + 1)) {
-                if (i == 0)
-                    head = c2;
-                if ((int) prev != 0)
-                    *prev = c2;
-                *c1 = *c2;   
-                *c2 = c1;
-                temp = c1;
-                c1 = c2;
-                c2 = temp;
-            }
-            prev = c1;
-            c1 = c2;
-            c2 = *c2;
-            i = i + 1;
-        }
-        counter = counter - 1;
-    }
+//        while (i < counter) {
+//            if (*(c1 + 1) > *(c2 + 1)) {
+//                if (i == 0)
+//                    head = c2;
+//                if ((int) prev != 0)
+//                    *prev = c2;
+//                *c1 = *c2;   
+//                *c2 = c1;
+//                temp = c1;
+//                c1 = c2;
+//                c2 = temp;
+//            }
+//            prev = c1;
+//            c1 = c2;
+//            c2 = *c2;
+//            i = i + 1;
+//        }
+//        counter = counter - 1;
+//    }
     
-    return head;
-}
+//   return head;
+//}
 
-void printlist(int* head) {
+void printlist(int* list) {
+	int* head;
     int* numberBuffer;
     numberBuffer = (int*)malloc(4*10);
 
+	head = *list;	
+	
     while ((int) head != 0) {
-        print(itoa(*(head + 1), numberBuffer, 10, 0));
+        print(itoa(*(head + 2), numberBuffer, 10, 0));
         print(createString(' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0));
         head = *head;
     }
@@ -3569,78 +3591,98 @@ void printlist(int* head) {
     print(createString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)); // ASCII code for line feed is 10 (\n does misteriously not work...)
 }
 
-void test_list() {
-    int* head;
-    int* numberBuffer;
-    int* result;
-    numberBuffer = (int*)malloc(4*10);
+//void test_list() {
+//    int* list;
+//    int* numberBuffer;
+//    int* result;
+    
+//    numberBuffer = (int*)malloc(4*10);
+//    list = malloc(2*4);
+//    *list = 0;
+//    *(list + 1) = 0;
+//    enqueue(list, 2);
+//    head = insert(head, 4);
+//    head = insert(head, 8);
+//    printlist(head);//842
    
-    head = insert(0, 2);
-    head = insert(head, 4);
-    head = insert(head, 8);
-    printlist(head);//842
+//    head = remove(head, 2);
+//    printlist(head);//84
    
-    head = remove(head, 2);
-    printlist(head);//84
-   
-    head = insert(head, 2);
-    printlist(head);//284
-    head = remove(head, 8);
-    printlist(head);//24
-    head = insert(head, 8);
-    printlist(head);//824
-    head = remove(head, 8);
-    printlist(head);//24
-    result = search(head, 4);
-    print(createString('s','e','a','r','c','h',':',10,0,0,0,0,0,0,0,0,0,0,0,0));
-    print(itoa(*(result + 1), numberBuffer, 10, 0));
-    print(createString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0));
-    head = insert(head, 11);
-    head = insert(head, 5); // 5 2 4 11
-    head = insert(head, 120); // 120 5 2 4 11
-    head = insert(head, 4);
-    head = insert(head, -17);
-    head = insert(head, -17);
-    head = insert(head, -9);
-    head = insert(head, 1);
-    print(createString('s','o','r','t',':',10,0,0,0,0,0,0,0,0,0,0,0,0,0,0));
-    printlist(head);
-    head = sort(head);
-    printlist(head);
-}
+//    head = insert(head, 2);
+//    printlist(head);//284
+//    head = remove(head, 8);
+//    printlist(head);//24
+//    head = insert(head, 8);
+//    printlist(head);//824
+//    head = remove(head, 8);
+//    printlist(head);//24
+//    result = search(head, 4);
+//    print(createString('s','e','a','r','c','h',':',10,0,0,0,0,0,0,0,0,0,0,0,0));
+//    print(itoa(*(result + 1), numberBuffer, 10, 0));
+//    print(createString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0));
+//    head = insert(head, 11);
+//    head = insert(head, 5); // 5 2 4 11
+//    head = insert(head, 120); // 120 5 2 4 11
+//    head = insert(head, 4);
+//    head = insert(head, -17);
+//    head = insert(head, -17);
+//    head = insert(head, -9);
+//    head = insert(head, 1);
+//    print(createString('s','o','r','t',':',10,0,0,0,0,0,0,0,0,0,0,0,0,0,0));
+//    printlist(head);
+//    head = sort(head);
+//    printlist(head);
+//}
 
 // -----------------------------------------------------------------
 // --- ASSIGNMENT 1  (Loading, scheduling, switching, execution) ---
 // -----------------------------------------------------------------
 
-void enqueueProcess(int* process) {
-	*process = readyQueue;
-    readyQueue = process;
+void enqueue(int* list, int* node) {
+	int* head;
+	
+	if((int) node == 0)
+		return;
+	if((int) list == 0)
+		return;
+	
+	*(node + 1) = 0;
+	*node = *list;
+
+	if (*list != 0) {
+		head = *list;
+		*(head + 1) = node;
+	} 
+	
+	*list = node;
+	
+    if (*(list + 1) == 0) {
+    	*(list + 1) = node;
+    }
+    
 }
 
-int* dequeueProcess() {
-	int* cursor;
+int* dequeue(int* list) {
+	int* tail;
 	int* previous;
-	previous = 0;
-	cursor = readyQueue;
 	
-	if ((int)cursor == 0) {
+	if ((int) list == 0)
 		return 0;
-	}
+	if ((int) *list == 0)
+		return 0;
 	
-	if (*cursor == 0)
-		readyQueue = 0;
-		
-	while (*cursor != 0) {
-		previous = cursor;
-		cursor = *cursor;
-	}
+	tail = *(list + 1);
+	previous = *(tail + 1);
 	
-	if ((int)previous != 0) {
+	if ((int) previous != 0) {
 		*previous = 0;
+	} else {
+		*list = 0;
 	}
 	
-	return cursor;
+	*(list + 1) = previous;
+	
+	return tail;
 }
 
 void copyMemSpace(int* from, int* to, int size) {
@@ -3654,33 +3696,36 @@ void copyMemSpace(int* from, int* to, int size) {
 void duplicateProcesses(int* cstar_argv) {
 	int* process;
 	int memSize;
-	int nop;
+	int processCounter;
 	
-	nop = numberOfProcesses;
+	processCounter = numberOfProcesses;
 	
-	process = malloc(4 * 4);
+	process = malloc(5 * 4);
 	*process = 0;
 	*(process + 1) = 0;
-	*(process + 2) = registers;
-	*(process + 3) = memory;
+	*(process + 2) = 0;
+	*(process + 3) = registers;
+	*(process + 4) = memory;
 	
-	enqueueProcess(process);
+	enqueue(readyQueue, process);
 	
 	memSize = atoi((int*)*(cstar_argv + 2)) * 1024 * 1024 / 4;
 	
-	while (nop - 1 > 0) {
-		process = malloc(4 * 4);
+	while (processCounter - 1 > 0) {
+		process = malloc(5 * 4);
 		
+		*process = 0;
 		*(process + 1) = 0;
-		*(process + 2) = malloc(32 * 4);
-		*(process + 3) = malloc(memSize * 4);
+		*(process + 2) = 0;
+		*(process + 3) = malloc(32 * 4);
+		*(process + 4) = malloc(memSize * 4);
 		
-		copyMemSpace(registers, (int*)*(process + 2), 32);
-		copyMemSpace(memory, (int*)*(process + 3), memSize);
+		copyMemSpace(registers, (int*)*(process + 3), 32);
+		copyMemSpace(memory, (int*)*(process + 4), memSize);
 		
-		enqueueProcess(process);
+		enqueue(readyQueue, process);
 	
-		nop = nop - 1;
+		processCounter = processCounter - 1;
 	}
 }
 
@@ -4164,28 +4209,29 @@ void execute() {
 
 void run() {
 
-	int noi;
+	int nrOfInstr;
 	
-	noi = numberOfInstructions;
+	nrOfInstr = numberOfInstructions;
 
-    while (noi > 0) {
+    while (nrOfInstr > 0) {
         fetch();
         decode();
         pre_debug();
         execute();
         post_debug();
         
-        noi = noi - 1;
+        nrOfInstr = nrOfInstr - 1;
         
         if (exited == 1) {
         	return;
         }
+        
     }
 }
 
 void debug_boot(int memorySize) {
     printString('m','e','m',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-
+    
     print(itoa(memorySize/1024/1024*4, string_buffer, 10, 0));
 
     printString('M','B',CHAR_LF,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
@@ -4201,7 +4247,6 @@ int* parse_args(int argc, int *argv, int *cstar_argv) {
 
     // initialize stack pointer
     *(registers+REG_SP) = (memorySize - 1) * 4;
-
     debug_boot(memorySize);
 
     // return executable file name
@@ -4296,24 +4341,26 @@ int main_emulator(int argc, int *argv, int *cstar_argv) {
     *(registers+REG_K1) = *(registers+REG_GP);
 
     up_copyArguments(argc-3, argv+3);
-    
+
     duplicateProcesses(cstar_argv);
     
-    while ((int)readyQueue != 0) {
+    while (*readyQueue != 0) {
     	exited = 0;
 
-    	process = dequeueProcess();
+    	process = dequeue(readyQueue);
     	
-    	pc = *(process + 1);
-    	registers = (int*)*(process + 2);
-    	memory = (int*)*(process + 3);
+    	pc = *(process + 2);
+    	registers = (int*)*(process + 3);
+    	memory = (int*)*(process + 4);
     	
     	run();
-    	
+
     	if (exited == 0) {
-    		*(process + 1) = pc;
-    		enqueueProcess(process);
+    		*(process + 2) = pc;
+    		enqueue(readyQueue, process);
     	}
+    	
+    	
     }
 
     exit(0);
@@ -4368,7 +4415,6 @@ int* copyC2CStarArguments(int argc, int *argv) {
 int main(int argc, int *argv) {
     int *cstar_argv;
     int *firstParameter;
-
     initLibrary();
 
     initRegister();
@@ -4393,10 +4439,10 @@ int main(int argc, int *argv) {
 	            else
 	                exit(-1);
 	        } else if (*(firstParameter+1) == 'l') { // flag for testing linked list (assignment0)
-	            test_list();
+	            //test_list();
 	        } else if (*(firstParameter + 1) == 'a') { // flag for testing assignment1
-	        	numberOfProcesses = 5;
-        		numberOfInstructions = 2;
+	        	numberOfProcesses = 10;
+        		numberOfInstructions = 40;
         		
         		if (argc > 3)
 	                main_emulator(argc, argv, cstar_argv);
