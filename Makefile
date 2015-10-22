@@ -32,6 +32,16 @@ test_binary:
 	mv out $(TEST_BINARY)
 	./$(EXEC) -m $(MEM_SIZE) $(TEST_BINARY)
 
+self_execute:
+	$(CC) $(CC_OPT) -o $(EXEC) selfie.c
+	touch out
+	./$(EXEC) -c < $(INPUT)
+	mv out $(EXEC).mips1
+	touch out
+	./$(EXEC) -m 64 $(EXEC).mips1 -m $(MEM_SIZE) $(EXEC).mips1 < $(INPUT)
+	mv out $(EXEC).mips2
+	diff -s $(EXEC).mips1 $(EXEC).mips2
+
 clean:
 	rm -f *.mips*
 	rm -f $(EXEC)
