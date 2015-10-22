@@ -568,98 +568,6 @@ void emitLeftShiftBy(int b);
 void emitMainEntry();
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
-// ---------------------     O S   ---------------------------------
-// -----------------------------------------------------------------
-// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
-
-
-// -----------------------------------------------------------------
-// ------------------------- Assignment 0 Linked List --------------
-// -----------------------------------------------------------------
-
-// Eg.: Size 2
-// list
-// We add 2 to the given size
-// for the pointer 
-// The size variable defines the 
-// entrys you need for data
-// +---------------+
-// | Entry         |
-// +---------------+
-// | Entry 2       |
-// +---------------+
-// | Pr next 0     |
-// +---------------+
-// | Pr Prev 0     |
-// +---------------+
-   
-int createLList(int size){
-   int *list;
-   int *pr;
-   list = malloc((size + 2) * 4);
-   pr = list;
-   pr = pr + size;
-   *pr = 0;
-   pr = pr + 1;
-   *pr = 0;
-   return list;
-}
-
-int addNodeToLList(int size, int list){
-    int *pr;
-    int *last;
-    int *node;
-    node = malloc((size + 2) * 4);
-    pr = list;
-    pr = pr + size;      
-    if(*pr == 0){
-        pr = pr + 1;
-        if(*pr == 0){
-            pr = list;
-            pr = pr + size;
-            *pr = (int)node;
-             pr = pr + 1;
-            *pr = (int)node;
-            pr = node;
-            pr = pr + size;
-            *pr = (int)list;
-            pr = pr + 1;
-            *pr = (int)list;
-        }   
-    }else {
-        pr = pr + 1;
-        last = *pr;
-        *pr = (int)node;
-        pr = *pr;
-        pr = pr + size;
-        *pr = list;
-        pr = pr + 1;
-        *pr = last;
-        last = last + size;
-        *last = node;
-    } 
-    return node;  
-}
-
-int removeNode(int size, int node){
-   int *prev;
-   int *next;
-   int *pr;
-   pr = node;
-   pr = pr + size;
-   next = *pr;
-   pr = pr + 1;
-   prev = *pr;
-   pr = prev;
-   pr = pr + size;
-   *pr = (int)next;
-   pr = next;
-   pr = pr + (size + 1);
-   *pr = prev;
-}
-
-// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
-// -----------------------------------------------------------------
 // -------------------     I N T E R F A C E     -------------------
 // -----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -870,6 +778,26 @@ void initSyscalls() {
 // -----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 
+//------------------------------------------------------------------
+//--------------------------- OS Functions / Variables  ------------
+//------------------------------------------------------------------
+//@Team Declare our Functions and Variables here
+//We need them access able from the emulator and our
+//OS
+int instances;
+int switchAfterMInstructions;
+int switchIn;
+int *pList;
+
+int *createLList(int size);
+int *addNodeToLList(int size, int *list);
+void removeNode(int *node);
+int *getNextNode(int *node);
+int *getPrevNode(int *node);
+int getListEntry(int pos,int *node);
+void setListEntry(int pos, int value, int *node);
+void prepareContext();
+void contextSwitch();
 // -----------------------------------------------------------------
 // ------------------------- INSTRUCTIONS --------------------------
 // -----------------------------------------------------------------
@@ -949,7 +877,8 @@ int reg_hi; // hi register for multiplication/division
 int reg_lo; // lo register for multiplication/division
 
 // ------------------------- INITIALIZATION ------------------------
-
+//@Team We set here how much instances should be generated
+//See instance
 void initInterpreter() {
     register_strings = (int*)malloc(4*32);
     op_strings       = (int*)malloc(4*64);
@@ -1029,7 +958,108 @@ void initInterpreter() {
 
     reg_hi = 0;
     reg_lo = 0;
+
+    instances = 3;
+    switchAfterMInstructions = 1;
+    switchIn = switchAfterMInstructions;
 }
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+// -----------------------------------------------------------------
+// ---------------------     O S   ---------------------------------
+// -----------------------------------------------------------------
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+
+// -----------------------------------------------------------------
+// ------------------------- Assignment 0 Linked List --------------
+// -----------------------------------------------------------------
+// @Team
+// Eg.: Size 2
+// list
+// We add 2 to the given size
+// for the pointer 
+// The size variable defines the 
+// entrys you need for data
+// Changed to Martins proposal 
+// +---------------+
+// | Pr next 0     |
+// +---------------+
+// | Pr Prev 0     |
+// +---------------+
+// | Data 	   |
+// +---------------+
+// | ...	   |
+// +---------------+
+
+int *createLList(int size){
+	int *list;
+	list = malloc((size + 2) * 4);
+	//next
+	*list = (int) list;
+	//prev
+	*(list + 1) = (int) list;
+	return list;
+}
+
+int *addNodeToLList(int size,int* list){
+	int *node;
+	int *pr;
+	node = malloc((size + 2) * 4);
+	pr = (int *) *(list + 1);
+	//Prev	
+	*(list + 1) = (int) node;
+	*pr = (int) node;
+	*node = (int) list;
+	*(node + 1) = (int) pr;
+	return node;
+}
+
+void removeNode(int *node){
+  int *next;
+  int *prev;
+  next = (int *) *node;
+  prev = (int *) *(node+1);
+  *prev = (int) next;
+  *(next+1) = (int) prev;
+}
+
+int *getNextNode(int *node){
+	return (int *) *node;
+}
+
+int *getPrevNode(int *node){
+	return (int *) *(node + 1);
+}
+
+int getListEntry(int pos,int *node){
+	pos = pos + 1;
+	return *(node + pos);
+}
+
+void setListEntry(int pos,int value,int *node){
+	pos = pos + 1;
+	*(node + pos) = value;
+}
+// -----------------------------------------------------------------
+// -------------------Assignment 1 Loading, Scheduling, Switching --
+// -----------------------------------------------------------------
+//@Team
+//We Create the Linked List with 3 entry's
+//And copy the actual state of the reg, pc, and the memory pointer
+//into the list
+//List View:
+//+-------------------+
+//| PC		      |
+//+-------------------+
+//| *reg	      |
+//+-------------------+
+//| *mem 	      |
+//+-------------------+
+//Note for now we don't switch 
+//the memory because we use the same binary
+//and thus the same memory
+//But we create the list in mind that we maybe
+//must load more binaries in the future
+
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -3877,7 +3907,6 @@ void op_sw() {
     vaddr = *(registers+rs) + signExtend(immediate);
 
     paddr = addressTranslation(vaddr) / 4;
-
     *(memory+paddr) = *(registers+rt);
 
     pc = pc + 1;
@@ -4021,14 +4050,27 @@ void execute() {
     }
 }
 
-void run() {
+//@Team We call here our context switch
+//after post_debug();
+//prepareContext(); Creates the instance list
+//And prepares the pc and registers
+//for all instances
 
+void run() {
+    prepareContext(); 
     while (1) {
         fetch();
         decode();
         pre_debug();
         execute();
         post_debug();
+	if(switchIn == 0){
+		contextSwitch();
+		switchIn = switchAfterMInstructions;
+	}
+	else{
+		switchIn = switchIn - 1;
+	}
     }
 }
 
@@ -4195,10 +4237,11 @@ int* copyC2CStarArguments(int argc, int *argv) {
     return cstar_argv;
 }
 
+
 int main(int argc, int *argv) {
     int *cstar_argv;
     int *firstParameter;
-
+    
     initLibrary();
 
     initRegister();
@@ -4215,7 +4258,7 @@ int main(int argc, int *argv) {
                 main_compiler();
             else if (*(firstParameter+1) == 'm') {
                 if (argc > 3)
-                    main_emulator(argc, argv, cstar_argv);
+		    main_emulator(argc, argv, cstar_argv);
                 else
                     exit(-1);
             }
