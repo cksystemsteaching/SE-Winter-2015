@@ -1060,6 +1060,33 @@ void setListEntry(int pos,int value,int *node){
 //But we create the list in mind that we maybe
 //must load more binaries in the future
 
+void prepareContext(){
+	int *node;
+	int *registerDummy;
+	int i;
+	pList = (int*)createLList(3);
+	setListEntry(1,pc,pList);
+	setListEntry(2,(int)registers,pList);
+	while(instances > 1){
+		registerDummy = (int*) malloc(32 * 4);
+		i = 0;
+		while(i < 32){
+			*(registerDummy+i) = *(registers+i);
+			i = i + 1;
+		}
+		node = (int*)addNodeToLList(3,pList);
+		setListEntry(1,pc,node);
+		setListEntry(2,(int)registerDummy,node);
+		instances = instances - 1;
+	}
+}
+void contextSwitch(){
+	setListEntry(1,pc,pList);
+	setListEntry(2,(int)registers,pList);
+	pList = getNextNode(pList);
+	pc = getListEntry(1,pList);
+	registers = (int *)getListEntry(2,pList);	
+}
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
