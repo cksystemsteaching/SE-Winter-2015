@@ -854,8 +854,9 @@ int *registers; // general purpose registers
 int pc; // program counter
 int ir; // instruction record
 int* readyQueue;
-int numberOfInstructions;
+int exited;
 int numberOfProcesses;
+int numberOfInstructions;
 
 int reg_hi; // hi register for multiplication/division //TODO do we have to save reg_hi and reg_lo in context switch?
 int reg_lo; // lo register for multiplication/division
@@ -3200,7 +3201,8 @@ void syscall_exit() {
     print(itoa(exitCode, string_buffer, 10, 0));
     putchar(CHAR_LF);
 
-    exit(0);
+    //exit(0);
+    exited = 1;
 }
 
 void emitRead() {
@@ -3652,9 +3654,9 @@ void copyMemSpace(int* from, int* to, int size) {
 void duplicateProcesses(int* cstar_argv) {
 	int* process;
 	int memSize;
-	int processCounter;
+	int nop;
 	
-	processCounter = numberOfProcesses;
+	nop = numberOfProcesses;
 	
 	process = malloc(4 * 4);
 	*process = 0;
@@ -3666,7 +3668,7 @@ void duplicateProcesses(int* cstar_argv) {
 	
 	memSize = atoi((int*)*(cstar_argv + 2)) * 1024 * 1024 / 4;
 	
-	while (processCounter - 1 > 0) {
+	while (nop - 1 > 0) {
 		process = malloc(4 * 4);
 		
 		*(process + 1) = 0;
@@ -3678,7 +3680,7 @@ void duplicateProcesses(int* cstar_argv) {
 		
 		enqueueProcess(process);
 	
-		processCounter = processCounter - 1;
+		nop = nop - 1;
 	}
 }
 
@@ -4160,14 +4162,24 @@ void execute() {
     }
 }
 
-void run() {	
+void run() {
 
-    while (1) {
+	int noi;
+	
+	noi = numberOfInstructions;
+
+    while (noi > 0) {
         fetch();
         decode();
         pre_debug();
         execute();
         post_debug();
+        
+        noi = noi - 1;
+        
+        if (exited == 1) {
+        	return;
+        }
     }
 }
 
@@ -4275,6 +4287,8 @@ void up_copyArguments(int argc, int *argv) {
 }
 
 int main_emulator(int argc, int *argv, int *cstar_argv) {
+	int* process;
+
     initInterpreter();
 
     *(registers+REG_GP) = loadBinary(parse_args(argc, argv, cstar_argv));
@@ -4285,7 +4299,22 @@ int main_emulator(int argc, int *argv, int *cstar_argv) {
     
     duplicateProcesses(cstar_argv);
     
-    run();
+    while ((int)readyQueue != 0) {
+    	exited = 0;
+
+    	process = dequeueProcess();
+    	
+    	pc = *(process + 1);
+    	registers = (int*)*(process + 2);
+    	memory = (int*)*(process + 3);
+    	
+    	run();
+    	
+    	if (exited == 0) {
+    		*(process + 1) = pc;
+    		enqueueProcess(process);
+    	}
+    }
 
     exit(0);
 }
