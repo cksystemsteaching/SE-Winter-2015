@@ -847,7 +847,6 @@ int* insert(int pc, int* reg, int* mem, int* prev, int* next) {
 int* remove(int* node, int* list) {
 	int* next;
 	int* prev;
-	int* tmp;
 
 	next = *(node + 4);
 	prev = *(node + 3);
@@ -957,6 +956,7 @@ int *proc_list;
 int *current_proc;
 int number_of_proc;
 int instr_cycles;
+int exited;
 
 // ------------------------- INITIALIZATION ------------------------
 
@@ -3420,10 +3420,10 @@ void syscall_exit() {
 
 	proc_list = remove(current_proc, proc_list);
 
-	if (number_of_proc == 0) {
-		exit(0);
-	}
+	exited = 1;
 
+	if ((int) proc_list == 0)
+		exit(0);
 }
 
 void emitRead() {
@@ -4177,11 +4177,15 @@ void run() {
 	while (1) {
 
 		while (instr_count < instr_cycles) {
-			fetch();
-			decode();
-			pre_debug();
-			execute();
-			post_debug();
+			if (exited) {
+
+			} else {
+				fetch();
+				decode();
+				pre_debug();
+				execute();
+				post_debug();
+			}
 
 			instr_count = instr_count + 1;
 		}
@@ -4200,6 +4204,8 @@ void context_switch() {
 	if ((int) current_proc == 0) {
 		current_proc = proc_list;
 	}
+
+	exited = 0;
 
 	registers = (int*) *(current_proc + 1);
 	memory = (int*) *(current_proc + 2);
@@ -4315,7 +4321,7 @@ int main_emulator(int argc, int *argv, int *cstar_argv) {
 	int* filename;
 	int proc_count;
 
-	number_of_proc = 5;
+	number_of_proc = 3;
 	instr_cycles = 10;
 
 	// Initialize main process
