@@ -4157,7 +4157,7 @@ int main_emulator(int argc, int *argv, int *cstar_argv) {
     int proc_count;
     int number_of_proc;
 
-    number_of_proc = 4;
+    number_of_proc = 1;
     instr_cycles = 3;
 
     // Initialize main process
@@ -4167,9 +4167,9 @@ int main_emulator(int argc, int *argv, int *cstar_argv) {
     *(registers+REG_K1) = *(registers+REG_GP);
     proc_list = insert(pc,registers,memory,0,0);
 
-
     prev_proc = proc_list;
     proc_count = 1; // Starting with 1 as there is already the main process
+
     while( proc_count < number_of_proc ) {
 
       create_process(filename);

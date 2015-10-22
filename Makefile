@@ -24,5 +24,6 @@ test:
 	./$(EXEC) -m $(MEM_SIZE) $(EXEC).mips1 $(TEST_LIST_OPT)
 
 clean:
-	rm *.mips*
-	rm $(EXEC)
+	rm -f *.mips*
+	rm -f $(EXEC)
+	rm -f out
