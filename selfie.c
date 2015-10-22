@@ -853,8 +853,11 @@ int *registers; // general purpose registers
 
 int pc; // program counter
 int ir; // instruction record
+int* readyQueue;
+int numberOfInstructions;
+int numberOfProcesses;
 
-int reg_hi; // hi register for multiplication/division
+int reg_hi; // hi register for multiplication/division //TODO do we have to save reg_hi and reg_lo in context switch?
 int reg_lo; // lo register for multiplication/division
 
 // ------------------------- INITIALIZATION ------------------------
@@ -919,7 +922,7 @@ void initInterpreter() {
     *(op_strings + 35) = (int)createString('l','w',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
     *(op_strings + 43) =  (int)createString('s','w',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 
-    debug_registers   = 0;
+    debug_registers   = 0;//set debug flags here
     debug_syscalls    = 0;
     debug_load        = 0;
     debug_disassemble = 0;
@@ -3460,9 +3463,9 @@ void emitPutchar() {
 // creates new field at the head of the list, inserts data and returns new head
 int* insert(int* head, int data) {
     int* newfield;
-    newfield = malloc(2*4);
+    newfield = malloc(2 * 4);
     *(newfield + 1) = data;
-    *newfield = head;
+	*newfield = head;
     return newfield;
 }
 
@@ -3472,17 +3475,18 @@ int* remove(int* head, int data) {
     int* previous;
     cursor = *head;
     previous = head;
-    if(*(head + 1) == data)
+    if (*(head + 1) == data)
         return cursor;
        
     while ((int) cursor != 0) {
-        if(*(cursor + 1) == data) {
+        if (*(cursor + 1) == data) {
             *previous = *cursor;
             return head;
         }
         previous = cursor;
         cursor = *cursor;
     }
+    
     return head;
 }
 
@@ -3490,12 +3494,14 @@ int* remove(int* head, int data) {
 int* search(int* head, int data) {
     int* cursor;
     cursor = head;
-    while((int)cursor != 0) {
-        if(*(cursor + 1) == data) {
+    
+    while ((int)cursor != 0) {
+        if (*(cursor + 1) == data) {
             return cursor;
         }
         cursor = *cursor;
     }
+    
     return 0;
 }
 
@@ -3544,6 +3550,7 @@ int* sort(int* head) {
         }
         counter = counter - 1;
     }
+    
     return head;
 }
 
@@ -3598,6 +3605,81 @@ void test_list() {
     printlist(head);
     head = sort(head);
     printlist(head);
+}
+
+// -----------------------------------------------------------------
+// --- ASSIGNMENT 1  (Loading, scheduling, switching, execution) ---
+// -----------------------------------------------------------------
+
+void enqueueProcess(int* process) {
+	*process = readyQueue;
+    readyQueue = process;
+}
+
+int* dequeueProcess() {
+	int* cursor;
+	int* previous;
+	previous = 0;
+	cursor = readyQueue;
+	
+	if ((int)cursor == 0) {
+		return 0;
+	}
+	
+	if (*cursor == 0)
+		readyQueue = 0;
+		
+	while (*cursor != 0) {
+		previous = cursor;
+		cursor = *cursor;
+	}
+	
+	if ((int)previous != 0) {
+		*previous = 0;
+	}
+	
+	return cursor;
+}
+
+void copyMemSpace(int* from, int* to, int size) {
+	while (size - 1 >= 0) {
+		*(to + size) = *(from + size);
+	
+		size = size - 1;
+	}
+}
+
+void duplicateProcesses(int* cstar_argv) {
+	int* process;
+	int memSize;
+	int processCounter;
+	
+	processCounter = numberOfProcesses;
+	
+	process = malloc(4 * 4);
+	*process = 0;
+	*(process + 1) = 0;
+	*(process + 2) = registers;
+	*(process + 3) = memory;
+	
+	enqueueProcess(process);
+	
+	memSize = atoi((int*)*(cstar_argv + 2)) * 1024 * 1024 / 4;
+	
+	while (processCounter - 1 > 0) {
+		process = malloc(4 * 4);
+		
+		*(process + 1) = 0;
+		*(process + 2) = malloc(32 * 4);
+		*(process + 3) = malloc(memSize * 4);
+		
+		copyMemSpace(registers, (int*)*(process + 2), 32);
+		copyMemSpace(memory, (int*)*(process + 3), memSize);
+		
+		enqueueProcess(process);
+	
+		processCounter = processCounter - 1;
+	}
 }
 
 
@@ -4067,7 +4149,7 @@ void execute() {
         op_sw();
     } else if (opcode == OP_BEQ) {
         op_beq();
-    } else if (opcode == OP_BNE) {
+    } else if (opcode == OP_BNE) { 
         op_bne();
     } else if (opcode == OP_JAL) {
         op_jal();
@@ -4078,7 +4160,7 @@ void execute() {
     }
 }
 
-void run() {
+void run() {	
 
     while (1) {
         fetch();
@@ -4200,7 +4282,9 @@ int main_emulator(int argc, int *argv, int *cstar_argv) {
     *(registers+REG_K1) = *(registers+REG_GP);
 
     up_copyArguments(argc-3, argv+3);
-
+    
+    duplicateProcesses(cstar_argv);
+    
     run();
 
     exit(0);
@@ -4268,19 +4352,30 @@ int main(int argc, int *argv) {
         firstParameter = (int*) (*(cstar_argv+1));
 
         if (*firstParameter == '-') {
-            if (*(firstParameter+1) == 'c')
-                main_compiler();
-            else if (*(firstParameter+1) == 'm') {
-                if (argc > 3)
-                    main_emulator(argc, argv, cstar_argv);
-                else
-                    exit(-1);
-            } else if (*(firstParameter+1) == 'l') { // flag for testing linked list (assignment0)
-                test_list();
-            }
-            else {
-                exit(-1);
-            }
+        
+        	numberOfProcesses = 1;
+        	numberOfInstructions = 10000;
+        
+	        if (*(firstParameter+1) == 'c')
+	            main_compiler();
+	        else if (*(firstParameter+1) == 'm') {
+	            if (argc > 3)
+	                main_emulator(argc, argv, cstar_argv);
+	            else
+	                exit(-1);
+	        } else if (*(firstParameter+1) == 'l') { // flag for testing linked list (assignment0)
+	            test_list();
+	        } else if (*(firstParameter + 1) == 'a') { // flag for testing assignment1
+	        	numberOfProcesses = 5;
+        		numberOfInstructions = 2;
+        		
+        		if (argc > 3)
+	                main_emulator(argc, argv, cstar_argv);
+	            else
+	                exit(-1);
+	        } else {
+	            exit(-1);
+	        }
         } else {
             exit(-1);
         }
