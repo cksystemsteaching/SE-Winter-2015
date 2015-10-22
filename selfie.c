@@ -4321,7 +4321,7 @@ int main_emulator(int argc, int *argv, int *cstar_argv) {
 	int* filename;
 	int proc_count;
 
-	number_of_proc = 3;
+	number_of_proc = 1;
 	instr_cycles = 10;
 
 	// Initialize main process
