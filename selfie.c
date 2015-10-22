@@ -821,7 +821,7 @@ void execute();
 void run();
 
 void debug_boot(int memorySize);
-int* parse_args(int argc, int *argv, int *cstar_argv);
+int* parse_args(int *argv, int *cstar_argv);
 void up_push(int value);
 int  up_malloc(int size);
 int  up_copyCString(int *s);
@@ -3143,7 +3143,6 @@ int loadBinary(int *filename) {
 
     while (ret == 4) {
         ret = read(fd, memory + i, 4);
-
         if (debug_load) {
             memset(string_buffer, 33, 0);
             print(itoa(i * 4, string_buffer, 16, 4));
@@ -3455,92 +3454,139 @@ void emitPutchar() {
 }
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+int* numberPrinter;
 
-int *begin;
-int *end;
-
- void list_create()
-{
-	//empty list
-	begin = 0;
-	end = 0;
-}
-
-void list_insert_end(int data)
-{
-	int *newnode;
-	newnode = malloc (3*4);
-	*newnode = data;
-	*(newnode+2) = 0;
-	if(begin == (int*)0){
-		begin = newnode;
-	}else{
-		*(end+1) = (int)newnode;
-	}
-	end = newnode;
-}
-
-void list_insert_beginning(int data)
-{
-	int *newnode;
-	newnode = malloc (3*4);
-	*(newnode+2) = 0;
-	*newnode = data;
-	*(newnode+1) = (int)begin;
-	begin = newnode;
-	if(end == (int*)0)
-		end = begin;
-}
-
-int *search;
-int *toBeDeleted;
-int i;
-int loop;
-
-void node_remove(int data)
-{
-	if(begin == (int*)0)
+//prints a number and breaks the line (not working for negative numbers (yet))
+void printLineNumber(int n){
+	int i;
+	int j;
+	int tmp;
+	int* tmp2;
+	i = 0;
+	if(n == 0){
+		*numberPrinter = 48;
+		*(numberPrinter + 1) = 10;
+		*(numberPrinter + 2) = 0;
+		print(numberPrinter);
 		return;
-	if((*begin) == data){
-		if(begin == end){
-			begin = (int*)0;
-			end = (int*)0;
-		}else{
-			begin = (int*)(*(begin+1));	//adr next node 
-		}
-	}else{
-		loop = 1;
-		search = begin;
-		while(loop == 1){
-			search = (int*)(*(search+1));
-			if(*((int*)(*(search+1))) == data)	//data next node
-				loop = 0;
-			else if((int*)(*(search+1)) == end)
-				loop = 0;
-		}
-//		while(search-1) != data && *(search+1) != end)
-		if (*((int*)(*(search+1))) == data){
-			if((int*)(*(search+1)) == end){ //letztes löschen, search = vorletztes
-				end = search;	//end = vorletztes
-//				*(search+1) = 0;
-			}else{
-				*toBeDeleted = (int*)(*(search+1));
-				*(search+1) = *(toBeDeleted+1);
-			}
-		}
 	}
+	while(n > 0){
+		*(numberPrinter + i) = 48 + (n % 10);
+		n = n / 10;
+		i = i + 1;
+	}
+	*(numberPrinter + i) = 10;
+	i = i + 1;
+	*(numberPrinter + i) = 0;
+	i = i - 1;
+	j = 0;
+	while(j < i/2){
+		tmp = *(numberPrinter + j);
+		tmp2 = numberPrinter + (i - j - 1);
+		*(numberPrinter + j) = *tmp2;
+		*tmp2 = tmp;
+		j = j + 1;
+	}
+	 print(numberPrinter);
 }
 
- void list_print(){
-	search = begin;
-	while(search != end){
-		print(search);
-		search = (int*)(*(search+1));
+//prints a number (not working for negative numbers (yet))
+void printNumber(int n){
+	int i;
+	int j;
+	int tmp;
+	int* tmp2;
+	i = 0;
+	if(n == 0){
+		*numberPrinter = 48;
+		*(numberPrinter + 1) = 0;
+		print(numberPrinter);
+		return;
 	}
-	if(begin != end){
-		print(end);
-	}else if(end != (int*)0)
-		print(end);
+	while(n > 0){
+		*(numberPrinter + i) = 48 + (n % 10);
+		n = n / 10;
+		i = i + 1;
+	}
+	*(numberPrinter + i) = 0;
+	j = 0;
+	while(j < i/2){
+		tmp = *(numberPrinter + j);
+		tmp2 = numberPrinter + (i - j - 1);
+		*(numberPrinter + j) = *tmp2;
+		*tmp2 = tmp;
+		j = j + 1;
+	}
+	 print(numberPrinter);
+}
+
+
+int *listHead;
+int *listTail;
+int listSize;
+
+// initialize list 
+void initList(){
+	listHead = 0;
+	listTail = 0;
+	listSize = 0;
+}
+
+// create a new list element and sets the data
+// @return: the new element
+int* createListElement(int data){
+	int *newElement;
+	newElement = (int*)malloc(6*4);
+	*newElement = data;
+	*(newElement+5) = 0;
+	return newElement;
+}
+
+// add new element at the end of the list
+void appendListElement(int data){
+	int *newElement;
+	newElement = createListElement(data);
+	*(newElement+2) = 0;
+	if(listHead == (int*)0){
+		listHead = newElement;
+		listTail = newElement;
+		*(newElement+1) = 0;
+	} else {
+		*(newElement+1) = (int)listTail;
+		*(listTail+2) = (int)newElement;
+	}
+	listTail = newElement;
+	listSize = listSize+1;
+}
+
+// search for an element in the list by index
+// @return: 0 if element is not in the list
+//			else pointer to the element
+int* findListElement(int index){
+	int currIndex;
+	int *currElement;
+	currElement = listHead;
+	currIndex = 0;
+	if(index >= listSize){
+		return 0;
+	}
+	while(currIndex < index){
+		currElement = (int*)(*(currElement+2));
+		currIndex = currIndex + 1;
+	}
+	return currElement;
+}
+
+// set pc (element+0), registers (element+3) and memory (element+4) of element in the list by index
+// if element is in list
+void setListElement(int index, int pc, int* reg, int* mem){
+	int* tmp;
+	tmp = findListElement(index);
+	if(tmp != (int*)0){
+		*tmp = pc;
+		*(tmp+3) = (int)reg;
+		*(tmp+4) = (int)mem;
+	}
 }
 
 //--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -4022,20 +4068,38 @@ void execute() {
     }
 }
 
+int current_process;
+int count_processes;
+int count_switch;
+
 void run() {
-	//printString('H','a','l','l','o',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-	list_create();
-	list_insert_beginning('B');
-	list_insert_end('C');
-	list_insert_beginning('A');
-	list_print();
-	
-    while (1) {
+	int i;
+	int* tmp;
+	i = 0;
+	current_process = 0;
+	count_switch = 100;
+	while (1) {
+		//switch every count_switch instructions to next process
+		if(i >= count_switch){
+			i = 0;
+			//save program counter of current process
+			tmp = findListElement(current_process);
+			*tmp = pc;
+			current_process = current_process + 1;
+			if(current_process == count_processes){
+				current_process = 0;
+			}
+			tmp = findListElement(current_process);
+			pc = *tmp;
+			registers = (int*)(*(tmp + 3));
+			memory = (int*)(*(tmp + 4));
+		}
         fetch();
         decode();
         pre_debug();
         execute();
         post_debug();
+		i = i + 1;
     }
 	
 }
@@ -4048,14 +4112,37 @@ void debug_boot(int memorySize) {
     printString('M','B',CHAR_LF,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 }
 
-int* parse_args(int argc, int *argv, int *cstar_argv) {
+
+void allocateMoreMemory(int memorySize){
+	int i;
+	i=0;
+	//create empty list and add count_processes elements
+	initList();
+
+	while(i < count_processes){
+		appendListElement(0);
+		i = i + 1;
+	}
+	//set first element to default registers and memory
+	setListElement(0, 0, registers, memory);
+	//create registers and memories for every other element/process
+	i=1;
+	while(i < count_processes){
+		setListElement(i, 0, (int*)malloc(32*4), (int*)malloc(memorySize));
+		i = i + 1;
+	}
+}
+
+int memSize;
+
+int* parse_args(int *argv, int *cstar_argv) {
+	int memorySize;
     // assert: ./selfie -m size executable {-m size executable}
-    int memorySize;
 
     memorySize = atoi((int*)*(cstar_argv+2)) * 1024 * 1024 / 4;
-
+	memSize = memorySize;
     allocateMachineMemory(memorySize*4);
-
+	allocateMoreMemory(memorySize*4);
     // initialize stack pointer
     *(registers+REG_SP) = (memorySize - 1) * 4;
 
@@ -4144,14 +4231,38 @@ void up_copyArguments(int argc, int *argv) {
 }
 
 int main_emulator(int argc, int *argv, int *cstar_argv) {
+	int i;
+	int j;
+	int* process;
+	int* regs;
+	int* mem;
+	i = 1;
     initInterpreter();
 
-    *(registers+REG_GP) = loadBinary(parse_args(argc, argv, cstar_argv));
+    *(registers+REG_GP) = loadBinary(parse_args(argv, cstar_argv));
 
-    *(registers+REG_K1) = *(registers+REG_GP);
+    *(registers+REG_K1) = *(registers+REG_GP);	
 
     up_copyArguments(argc-3, argv+3);
-
+	
+	//copy content from registers and memory to the other processes regs and mems
+	while(i < count_processes){
+		process = findListElement(i);
+		regs = (int*)(*(process+3));
+		mem = (int*)(*(process+4));
+		j = 0;
+		while(j < 32){
+			*(regs + j) = *(registers+j);
+			j = j + 1;
+		}
+		j = 0;
+		while(j < memSize){
+			*(mem + j) = *(memory+j);
+			j = j + 1;
+		}
+		i = i + 1;
+	}
+	
     run();
 
     exit(0);
@@ -4208,6 +4319,8 @@ int main(int argc, int *argv) {
     int *cstar_argv;
     int *firstParameter;
 
+	numberPrinter = (int*)malloc(12*4);
+	count_processes = 5;
     initLibrary();
 
     initRegister();
