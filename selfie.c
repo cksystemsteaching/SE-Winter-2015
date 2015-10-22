@@ -72,6 +72,7 @@
 // -----------------------------------------------------------------
 // ----------------------- LIBRARY FUNCTIONS -----------------------
 // -----------------------------------------------------------------
+int currentInstCount;
 
 void initLibrary();
 
@@ -709,7 +710,9 @@ void allocateMachineMemory(int size);
 
 // ------------------------ GLOBAL VARIABLES -----------------------
 
+int pc;
 int *memory; // machine memory
+int *registers;
 
 // -----------------------------------------------------------------
 // ---------------------------- BINARY -----------------------------
@@ -753,6 +756,9 @@ void syscall_getchar();
 
 void emitPutchar();
 
+void emitGetpid();
+void syscall_getpid();
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int SYSCALL_EXIT;
@@ -761,6 +767,7 @@ int SYSCALL_WRITE;
 int SYSCALL_OPEN;
 int SYSCALL_MALLOC;
 int SYSCALL_GETCHAR;
+int SYSCALL_GETPID;
 
 // ------------------------- INITIALIZATION ------------------------
 
@@ -769,6 +776,7 @@ void initSyscalls() {
     SYSCALL_READ    = 4003;
     SYSCALL_WRITE   = 4004;
     SYSCALL_OPEN    = 4005;
+    SYSCALL_GETPID  = 4020;
     SYSCALL_MALLOC  = 5001;
     SYSCALL_GETCHAR = 5002;
 }
@@ -781,118 +789,256 @@ void initSyscalls() {
 // -----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 
-int  pid;
-int *head;
-int *tail;
+int debug_registers;
+int debug_syscalls;
+int debug_load;
+int debug_disassemble;
+int debug_os;
 
-void initialize_process_queue() {
-    pid  = 0;
-    head = 0;
-    tail = 0;
+int pid;                 // last process identifier
+
+int *readyQ;
+
+// List Operations (generic)
+int* os_createQueue();                     // create empty queue
+int* os_removeQueue(int* list, int* data); // remove element from queue
+int* os_getHead(int* list);                // get current head of queue
+int* os_appendQueue(int* list, int* data); // append element to a queue
+
+// process specific queue functions:
+int* os_searchPqueue(int* list, int key);  //  search process queue for given pid
+void os_printQueue(int* list);
+
+// process functions
+int* os_createProcess(int memorySize);     // create new process element
+int os_getProcessPid(int* process);        // get pid for a given process
+int os_getProcessPc(int* process);         // get program counter of process object
+int* os_getProcessRegister(int* process);  // get pointer to registers of a process
+int* os_getProcessMemory(int* process);    // get pointer to memory of a given process
+
+
+// functions for process scheduling:
+void os_restoreContext();                  //  restore context (reg,mem,pc) of a given process
+void os_saveContext();                     // save context of current process
+int os_contextSwitch(int notTerminated);   // carry out a context switch
+void os_fifo();                            // process scheduling modelled after fifo queue
+
+
+// create and initialize a queue, return pointer to it.
+// a queue consists of a pointer to a head and a tail.
+int* os_createQueue() {
+    int *q;
+    q = (int*)malloc(2*4);
+    *(q + 0) = 0;             // head
+    *(q + 1) = 0;             // tail
+    return q;
 }
 
-// insert:  insert new list item and initialize 'data'.
-// return:  return pointer to this new item.
-int* insert(int pc, int* mem, int* reg) {
-    int *new;
+// remove element data from list
+int* os_removeQueue(int* list, int* data) {
+    int *prev;
+    int *next;
+    int *tmp;
 
+    if (*list == 0) {
+       return 0;
+    }
+
+    if ((int)data == 0) {
+        return 0;
+    }
+
+    if ((int)data == *list) {      // case 1: we must remove the head
+         // data is head (?)
+         *list = *data;
+         tmp = (int*)*list;
+
+
+         if ((int)tmp != 0) {
+            *(tmp+1) = 0;          // set prev from new head element
+        }
+        if ((int)data == *(list+1)) {
+            *(list+1) = 0;
+        }
+    } else if ((int)data == *(list + 1)) {// case 2: we must remove the tail
+        *(list+1) = *(data + 1);
+        tmp = (int*)*(list + 1);
+        *tmp = 0;
+    } else {                       // case 3: we must remove in between.
+        prev = (int*)*(data + 1);
+        next = (int*)*(data + 0);
+        *prev = (int)next;
+        *(next + 1) = (int)prev;
+    }
+    return data;
+}
+
+// getHead: get head of list
+int* os_getHead(int* list) {
+    return (int*)*list;
+}
+
+
+// getHead: get head of list
+int* os_getTail(int* list) {
+    return (int*)*(list+1);
+}
+
+
+// append:  append a data object 'data' to the list
+int* os_appendQueue(int* list, int* data) {
+    int* head;
+    int* tail;
+    int tmp;
+
+    *data    = 0;                // next
+    *(data+1)= 0;                // prev
+    head = (int*)*(list + 0);
+    tail = (int*)*(list + 1);
+
+    if ((int)head == 0) {
+        // list is empty!
+        *list = (int)data;
+        *(list + 1) = (int)data;
+        return data;
+    } else {
+        tmp = (int)tail;
+        *tail = (int)data;
+        *(list+1) = (int)data;
+        *(data+1) = (int)tmp;
+    }
+    return 0;
+}
+
+
+// search process queue, key is a PID
+// important: list must be a list of 'process'-records.
+int* os_searchPqueue(int* list, int key) {
+    int* q;
+
+    q = (int*)*list;
+
+    while ((int)q != 0) {
+        if (*(q + 2) == key)
+            return q;
+        q = (int*)*q;
+    }
+    return 0;
+}
+
+void os_printQueue(int* list) {
+    int* q;
+    int* tail;
+    q = os_getHead(readyQ);
+    tail = os_getTail(readyQ);
+    
+    if (q == 0)    
+        return; 
+
+    printString('[','O','S',']',' ','C','u','r','r','e','n','t',' ','Q','u','e','u','e',':',' ');
+    while (q != tail) {
+        print(itoa(os_getProcessPid(q), string_buffer, 10, 0));
+        putchar(',');
+        q = (int*)*q;
+    }
+    print(itoa(os_getProcessPid(q), string_buffer, 10, 0));
+    putchar('.');
+    putchar(10);
+}
+
+// process:  create a new process object:
+// return :  return pointer to the new prrocess
+// +------------------+
+// |0 next pointer    |
+// |1 prev pointer    |
+// |2 process id      |
+// |3 program counter |
+// |4 register ptr    |
+// |5 memory ptr      |
+// +------------------+
+int* os_createProcess(int memorySize) {
+    int *new;
     new = malloc(5*4);
 
-    if ((int)head == 0)
-        head = new;
-    else
-        *tail = (int)new;
+    pid = pid + 1;   // use 0 for the operating system
 
-    *new = 0;
-    pid = pid + 1;
-    *(new + 1) = pid;
-    *(new + 2) = pc;
-    *(new + 3) = (int)reg;
-    *(new + 4) = (int)mem;
-
-    tail = new;
+    *(new + 0) = 0; // next pointer
+    *(new + 1) = 0; // prev pointer
+    *(new + 2) = pid; // PID
+    *(new + 3) = 0;             // PC
+    *(new + 4) = (int)malloc(32*4);  // registers
+    *(new + 5) = (int)malloc(memorySize*4);  // memory
 
     return new;
 }
 
 
-// remove:  remove 'item' from list (pointer to an item)
-// return:  1 if an item was removed, 0 otherwise.
-int remove(int pid) {
-    int *cursor;
-    int *next;
-
-    cursor = head;
-
-    if (*(cursor+1) == pid) {
-        head = (int*)*cursor;
-        return 1;
-    }
-
-    while ((int)cursor != 0) {
-        next = (int*)*cursor;
-        if (*(next+1) == pid) {
-            *cursor = *next;
-            if (next == tail) {
-                tail = cursor;
-            }
-            return 1;
-        }
-        cursor = (int*)*cursor;
-    }
-    return 0;
+int os_getProcessPid(int* process) {
+    return *(process + 2);
 }
 
-// search:  try to find a list item where pid == value
-// return:  return pointer to this list item if found, otherwise 0
-int* search(int pid) {
-    int *cursor;
-
-    cursor = head;
-    while ((int)cursor != 0) {
-        if (*(cursor + 1) == pid) {
-            return cursor;
-        }
-        cursor = (int*)*cursor;
-    }
-    return 0;
+int os_getProcessPc(int* process) {
+    return *(process + 3);
 }
 
-int* search_min(int field) {
-    int *cursor;
-    int *min;
-
-    cursor = head;
-    min = cursor;
-    while ((int)cursor != 0) {
-        if (*(cursor+field) < *(min+field)) {
-            min = cursor;
-        }
-        cursor = (int*)*cursor;
-    }
-    return min;
+int* os_getProcessRegister(int* process) {
+    return (int*)*(process + 4);
 }
 
-void sort(int field) {
-    int *newhead;
-    int *newtail;
-    int *new_min;
-
-    newhead = search_min(field);
-    newtail    = newhead;
-    remove(*(newhead+1));
-
-    while ((int)head != 0) {
-        new_min = search_min(field);
-        remove(*(new_min+1));
-        *newtail = (int)new_min;
-        newtail = new_min;
-    }
-
-    head = newhead;
-    tail = newtail;
+int *os_getProcessMemory(int* process) {
+    return (int*)*(process + 5);
 }
 
+// Restore Context from Head Process
+void os_restoreContext() {
+    int *process;
+
+    process = os_getHead(readyQ);
+    pc = os_getProcessPc(process);
+    registers = os_getProcessRegister(process);
+    memory = os_getProcessMemory(process);
+}
+
+// save context of current process
+void os_saveContext() {
+    int *process;
+    process = os_getHead(readyQ);
+    *(process + 3) = pc;
+}
+
+
+void os_printSwitch(int *process) {
+    if (debug_os) {
+        os_printQueue(readyQ);
+        printString('[','O','S',']',' ','s','w','i','t','c','h',' ','t','o',' ','P','I','D',' ',0);
+        itoa(os_getProcessPid(process), string_buffer, 10, 2);
+        print(string_buffer);
+        putchar(CHAR_LF);
+    }
+}
+
+int os_contextSwitch(int notTerminated) {
+    int *process;
+    int newpid;
+
+    // save old context
+    if (notTerminated) {
+        os_saveContext();
+	os_fifo();
+    }
+
+    os_restoreContext();
+    process = os_getHead(readyQ);
+    os_printSwitch(process);
+    return os_getProcessPid(process);
+}
+
+void os_fifo() {
+    int *headp;
+    headp = os_getHead(readyQ);
+    os_removeQueue(readyQ, headp);
+    os_appendQueue(readyQ, headp);
+}
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -956,10 +1102,6 @@ int *register_strings; // static strings for register names
 int *op_strings;       // static strings for debug_disassemble
 int *fct_strings;
 
-int debug_registers;
-int debug_syscalls;
-int debug_load;
-int debug_disassemble;
 
 int EXCEPTION_SIGNAL;
 int EXCEPTION_ADDRESSERROR;
@@ -970,9 +1112,9 @@ int EXCEPTION_UNKNOWNFUNCTION;
 
 // ------------------------ GLOBAL VARIABLES -----------------------
 
-int *registers; // general purpose registers
+int memorySize;
 
-int pc; // program counter
+
 int ir; // instruction record
 
 int reg_hi; // hi register for multiplication/division
@@ -1044,6 +1186,7 @@ void initInterpreter() {
     debug_syscalls    = 0;
     debug_load        = 0;
     debug_disassemble = 0;
+    debug_os          = 1;
 
     EXCEPTION_SIGNAL             = 1;
     EXCEPTION_ADDRESSERROR       = 2;
@@ -1052,14 +1195,11 @@ void initInterpreter() {
     EXCEPTION_UNKNOWNSYSCALL     = 5;
     EXCEPTION_UNKNOWNFUNCTION    = 6;
 
-    registers = (int*)malloc(32*4);
-
-    pc = 0;
     ir = 0;
-
     reg_hi = 0;
     reg_lo = 0;
 }
+
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -2969,6 +3109,7 @@ int main_compiler() {
     emitMalloc();
     emitGetchar();
     emitPutchar();
+    emitGetpid();
 
     gr_cstar();     // invoke compiler
     emitBinary();
@@ -3307,10 +3448,15 @@ void emitExit() {
 
 void syscall_exit() {
     int exitCode;
+    int* process;
+
+    process = os_getHead(readyQ);
 
     exitCode = *(registers+REG_A0);
 
-    printString('[','O','S',']',' ','T', 'e', 'r','m','i','n','a','t','e','d',' ','w','i','t','h');
+    printString('[','O','S',']',' ','P', 'I', 'D',' ',0,0,0,0,0,0,0,0,0,0,0);
+    print(itoa(os_getProcessPid(process), string_buffer, 10, 0));
+    printString( ' ', 'T', 'e', 'r','m','i','n','a','t','e','d',' ','w','i','t','h',' ',0,0,0);
     putchar(' ');
 
     *(registers+REG_V0) = exitCode;
@@ -3318,7 +3464,8 @@ void syscall_exit() {
     print(itoa(exitCode, string_buffer, 10, 0));
     putchar(CHAR_LF);
 
-    exit(0);
+    //os_process_remove(pro);
+    os_removeQueue(readyQ, process);
 }
 
 void emitRead() {
@@ -3551,6 +3698,7 @@ void syscall_getchar() {
         printString('[','O','S',']',' ','c', 'a', 'l','l',' ','g','e','t','c','h','a','r',CHAR_LF,0,0);
 }
 
+
 void emitPutchar() {
     int *label;
 
@@ -3574,6 +3722,34 @@ void emitPutchar() {
     emitRFormat(OP_SPECIAL, REG_LINK, 0, 0, FCT_JR);
 }
 
+
+void syscall_getpid() {
+    int *process;
+    process = os_getHead(readyQ);
+    *(registers+REG_V0) = os_getProcessPid(process);
+    if (debug_syscalls)
+       printString('[','O','S',']',' ','c', 'a', 'l','l',' ','g','e','t','p','i','d',CHAR_LF,0,0,0);
+}
+
+void emitGetpid() {
+    int *label;
+    // "getpid"
+    label = createString('g','e','t','p','i','d',0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+
+    createSymbolTableEntry(GLOBAL_TABLE, label, codeLength, FUNCTION, INT_T);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_GETPID);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitIFormat(OP_ADDIU, REG_V0, REG_RR, 0);
+
+    emitRFormat(OP_SPECIAL, REG_LINK, 0, 0, FCT_JR);
+}
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -3594,19 +3770,26 @@ void fct_syscall() {
         syscall_exit();
     } else if (*(registers+REG_V0) == SYSCALL_READ) {
         syscall_read();
+        pc = pc + 1;
     } else if (*(registers+REG_V0) == SYSCALL_WRITE) {
         syscall_write();
+        pc = pc + 1;
     } else if (*(registers+REG_V0) == SYSCALL_OPEN) {
         syscall_open();
+        pc = pc + 1;
     } else if (*(registers+REG_V0) == SYSCALL_MALLOC) {
         syscall_malloc();
+        pc = pc + 1;
     } else if (*(registers+REG_V0) == SYSCALL_GETCHAR) {
         syscall_getchar();
+        pc = pc + 1;
+    } else if (*(registers+REG_V0) == SYSCALL_GETPID) {
+        syscall_getpid();
+        pc = pc + 1;
     } else {
         exception_handler(EXCEPTION_UNKNOWNSYSCALL);
     }
 
-    pc = pc + 1;
 }
 
 void fct_nop() {
@@ -4052,13 +4235,40 @@ void execute() {
 }
 
 void run() {
+    int currentPID;
+    int currentInstCount;
+    int instrPerContextSwitch;
+    int* headProcess;
+
+    currentInstCount = 0;
+    instrPerContextSwitch = 1000;
+    headProcess = os_getHead(readyQ);
+    os_printSwitch(headProcess);
+    os_restoreContext();
+   
+
+    currentPID = os_getProcessPid(headProcess);
 
     while (1) {
-        fetch();
-        decode();
-        pre_debug();
-        execute();
-        post_debug();
+        headProcess = os_getHead(readyQ);
+        if ((int)headProcess == 0) {
+            exit(0);
+	} else if (currentPID != os_getProcessPid(headProcess)) {
+            currentPID = os_contextSwitch(0);
+            currentInstCount = 0;
+	} else {
+            if (currentInstCount == instrPerContextSwitch) {
+                currentPID = os_contextSwitch(1);
+                currentInstCount = 0;
+            } else {
+                fetch();
+                decode();
+                pre_debug();
+                execute();
+                post_debug();
+                currentInstCount = currentInstCount + 1;
+            }
+        }
     }
 }
 
@@ -4072,14 +4282,8 @@ void debug_boot(int memorySize) {
 
 int* parse_args(int argc, int *argv, int *cstar_argv) {
     // assert: ./selfie -m size executable {-m size executable}
-    int memorySize;
 
     memorySize = atoi((int*)*(cstar_argv+2)) * 1024 * 1024 / 4;
-
-    allocateMachineMemory(memorySize*4);
-
-    // initialize stack pointer
-    *(registers+REG_SP) = (memorySize - 1) * 4;
 
     debug_boot(memorySize);
 
@@ -4166,13 +4370,42 @@ void up_copyArguments(int argc, int *argv) {
 }
 
 int main_emulator(int argc, int *argv, int *cstar_argv) {
+    int numberOfProcesses;
+    int* filename;
+    int* new;
     initInterpreter();
 
-    *(registers+REG_GP) = loadBinary(parse_args(argc, argv, cstar_argv));
+    readyQ     = os_createQueue();
+    filename          = parse_args(argc, argv, cstar_argv);
+    numberOfProcesses = 4;
 
-    *(registers+REG_K1) = *(registers+REG_GP);
+    while (numberOfProcesses > 0) {
+        // Debug Meldung: print n
 
-    up_copyArguments(argc-3, argv+3);
+        new = os_createProcess(memorySize);
+        os_appendQueue(readyQ, new);
+
+        registers = (int*)*(new + 4);
+        memory    = (int*)*(new + 5);
+
+        // initialize stack pointer
+        *(registers+REG_SP) = (memorySize - 1) * 4;
+        // initialize global pointer
+        *(registers+REG_GP) = loadBinary(filename);
+        // initialize heap/bump pointer (malloc)
+        *(registers+REG_K1) = *(registers+REG_GP);
+
+        up_copyArguments(argc-3, argv+3);
+
+        numberOfProcesses = numberOfProcesses - 1;
+
+        if (debug_os) {
+            printString('[','O','S',']',' ','c','r','e','a','t','e',' ','p','r','o','c','e','s','s',' ');
+    	    itoa(pid, string_buffer, 10, 2);
+            print(string_buffer);
+            putchar(CHAR_LF);
+        }
+    }
 
     run();
 
