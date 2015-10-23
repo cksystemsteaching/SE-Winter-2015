@@ -3663,6 +3663,94 @@ void emitPutchar() {
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
+
+// -----------------------------------------------------------------
+// ------------------------- ASSIGNMENT 0 --------------------------
+// --------------- adapted for other Assignments -------------------
+// ------------ Double Linked List with dynamic size ---------------
+int* create_newNode(int numDataEntrys, int* node){
+	int* newNode;
+	
+	newNode = malloc((numDataEntrys + 2) * 4);
+	
+	if ((int)node != 0){
+		*newNode = (int) node; 
+		*(node + 1) = (int) newNode;  
+    } else {
+        *newNode = 0;
+    }
+    
+    *(newNode+1) = 0;
+	return newNode;
+}
+
+void set_listEntry(int pos,int* value,int *node){
+	pos = pos + 1;
+	*(node + pos) = (int) value;
+}
+
+int get_listEntry(int pos,int *node){
+	pos = pos + 1;
+	return *(node + pos);
+}
+
+void delete_Node(int* node){
+     int *prev;
+     int *next;
+     
+     prev = (int *) *node;
+     next = (int *) *(node+1);
+     
+     *(prev+1) = (int) next;
+     *next = (int) prev;  
+}
+
+int *get_nextNode(int *node){
+	return (int *) *(node+1);
+}
+
+int *get_prevNode(int *node){
+    return (int *) *node;
+}
+
+void test_list(){
+    int* list;
+    int listsize;
+    int* node;
+	
+    list = 0;
+
+    int* numberBuffer;
+    numberBuffer = (int*)malloc(4*10);
+
+    listsize = 2;
+    
+
+    list = create_newNode(listsize, list);
+    set_listEntry(1,(int*)11,list);
+    set_listEntry(2,(int*)12,list);
+    node = create_newNode(listsize, list);
+    set_listEntry(1,(int*)21,node);
+    set_listEntry(2,(int*)22,node);
+    node = create_newNode(listsize, node);
+    set_listEntry(1,(int*)31,node);
+    set_listEntry(2,(int*)32,node);
+    
+    node = list; 
+    print(itoa(get_listEntry(1,node),numberBuffer,10,0));
+    print((int*) " ");
+    print(itoa(get_listEntry(2,node),numberBuffer,10,0));
+    print((int*) " ");
+
+    while(get_nextNode(node) != 0){
+        node = get_nextNode(node);
+        print(itoa(get_listEntry(1,node),numberBuffer,10,0));
+        print((int*) " ");
+        print(itoa(get_listEntry(2,node),numberBuffer,10,0));
+        print((int*) " ");
+    }
+}
+
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -4182,7 +4270,7 @@ int main_emulator(int argc, int *argv) {
 
 int main(int argc, int *argv) {
     int *firstParameter;
-
+     
     initLibrary();
 
     initRegister();
@@ -4199,6 +4287,9 @@ int main(int argc, int *argv) {
                     main_emulator(argc, (int*) argv);
                 else
                     exit(-1);
+            }
+            else if (getCharacter(firstParameter, 1) == 't') {
+                test_list();
             }
             else {
                 exit(-1);
