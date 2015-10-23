@@ -3770,133 +3770,89 @@ void emitPutchar() {
 
 // -----------------------------------------------------------------
 // ------------------------- ASSIGNMENT 0 --------------------------
-// ------------------------- Linked List ---------------------------
-// -----------------------------------------------------------------
-
-int* insert_listentry(int data, int* list) { 
-    int* append; 
-
-    append = malloc (2*4); 
-    *append = data; 
-    *(append + 1) = list; 
-    list = append; 
-
-    return list;
+// --------------- adapted for other Assignments -------------------
+// ------------ Double Linked List with dynamic size ---------------
+int* create_newNode(int numDataEntrys, int* node){
+	int* newNode;
+	
+	newNode = malloc((numDataEntrys + 2) * 4);
+	
+	if ((int)node != 0){
+		*newNode = (int) node; 
+		*(node + 1) = (int) newNode;  
+    } else {
+        *newNode = 0;
+    }
+    
+    *(newNode+1) = 0;
+	return newNode;
 }
 
-int* delete_listentry_by_data(int data, int* list) { 
-    int* i; 
-    int* prev;
- 
-    prev = 0; 
-    i = list; 
+void set_listEntry(int pos,int* value,int *node){
+	pos = pos + 1;
+	*(node + pos) = (int) value;
+}
 
-    while ((int) i != 0) { 
-        if (*i == data) { 
-            if ((int)prev == 0) { 
-                list = *(i + 1); 
-            } else { 
-                *(prev + 1) = *(i + 1); 
-            } 
-            return; 
-        } 
-        prev = i; 
-        i = *(i + 1); 
-    } 
-    return list;
-} 
+int get_listEntry(int pos,int *node){
+	pos = pos + 1;
+	return *(node + pos);
+}
 
-int* delete_listentry_by_id(int id, int* list) { 
-    int* i; 
-    int* prev; 
-    int counter; 
+void delete_Node(int* node){
+     int *prev;
+     int *next;
+     
+     prev = (int *) *node;
+     next = (int *) *(node+1);
+     
+     *(prev+1) = (int) next;
+     *next = (int) prev;  
+}
 
-    counter = 0; 
-    prev = 0; 
-    i = list; 
+int *get_nextNode(int *node){
+	return (int *) *(node+1);
+}
 
-    while ((int) i != 0) { 
-        if (counter == id) { 
-            if ((int)prev == 0) { 
-                list = *(i + 1); 
-            } else { 
-                *(prev + 1) = *(i + 1); 
-            } 
-            return list; 
-        } 
-        prev = i; 
-        i = *(i + 1); 
-        counter = counter + 1; 
-    } 
-    return list;
-} 
-
-void print_list(int* list) { 
-    int* buffer;
-    buffer = (int*)malloc(2*4);
-
-    printString('L','i','s','t',':',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-    while ((int) list != 0) { 
-        print(itoa(*list, buffer, 10, 0));
-        printString(' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-        list = *(list + 1); 
-    } 
-    printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-} 
-
-void swap(int* a, int* b) { 
-    int tmp; 
-
-    tmp = *a; 
-    *a = *b; 
-    *b = tmp; 
-} 
-
-int* sort_list(int* list) { 
-    int* i; 
-    int* j; 
-
-    i = list; 
-    j = list; 
-
-    while (i) { 
-        while (j) { 
-            if (*j > *i) { 
-                swap (i, j); 
-            } 
-            j = *(j + 1); 
-        } 
-        j = list; 
-        i = *(i + 1); 
-    } 
-    return list;
+int *get_prevNode(int *node){
+    return (int *) *node;
 }
 
 void test_list(){
     int* list;
+    int listsize;
+    int* node;
+	
     list = 0;
+
+    int* numberBuffer;
+    numberBuffer = (int*)malloc(4*10);
+
+    listsize = 2;
     
-    printString('I','n','s','e','r','t',' ','v','a','l','u','e','s',':',10,0,0,0,0,0);
-    list = insert_listentry(26, list);
-    list = insert_listentry(15, list);
-    list = insert_listentry(7, list);
-    list = insert_listentry(94, list);
-    list = insert_listentry(67, list);
-    list = insert_listentry(3, list);
-    print_list(list);
 
-    printString('D','e','l','e','t','e',' ','v','a','l','u','e',' ','b','y',' ','d','a','t','a');
-    printString(10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-    list = delete_listentry_by_data(67, list);
-    print_list(list);
+    list = create_newNode(listsize, list);
+    set_listEntry(1,(int*)11,list);
+    set_listEntry(2,(int*)12,list);
+    node = create_newNode(listsize, list);
+    set_listEntry(1,(int*)21,node);
+    set_listEntry(2,(int*)22,node);
+    node = create_newNode(listsize, node);
+    set_listEntry(1,(int*)31,node);
+    set_listEntry(2,(int*)32,node);
+    
+    node = list; 
+    print(itoa(get_listEntry(1,node),numberBuffer,10,0));
+    print((int*) " ");
+    print(itoa(get_listEntry(2,node),numberBuffer,10,0));
+    print((int*) " ");
 
-    printString('D','e','l','e','t','e',' ','v','a','l','u','e',' ','b','y',' ','i','d',10,0);
-    list = delete_listentry_by_id(2, list);
-    print_list(list);
-
-    printString('S','o','r','t',' ','l','i','s','t',10,0,0,0,0,0,0,0,0,0,0);
-    list = sort_list(list);
-    print_list(list); 
+    while(get_nextNode(node) != 0){
+        node = get_nextNode(node);
+        print(itoa(get_listEntry(1,node),numberBuffer,10,0));
+        print((int*) " ");
+        print(itoa(get_listEntry(2,node),numberBuffer,10,0));
+        print((int*) " ");
+    }
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -4418,7 +4374,7 @@ int main_emulator(int argc, int *argv) {
 
 int main(int argc, int *argv) {
     int *firstParameter;
-
+     
     initLibrary();
 
     initRegister();
@@ -4437,7 +4393,7 @@ int main(int argc, int *argv) {
                 else
                     exit(-1);
             }
-            else if (*(firstParameter+1) == 't') {
+            else if (getCharacter(firstParameter, 1) == 't') {
                 test_list();
             }
             else {
