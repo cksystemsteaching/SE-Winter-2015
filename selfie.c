@@ -931,9 +931,9 @@ void os_printQueue(int* list) {
     int* tail;
     q = os_getHead(readyQ);
     tail = os_getTail(readyQ);
-    
-    if (q == 0)    
-        return; 
+
+    if ((int)q == 0)
+        return;
 
     printString('[','O','S',']',' ','C','u','r','r','e','n','t',' ','Q','u','e','u','e',':',' ');
     while (q != tail) {
@@ -4245,7 +4245,7 @@ void run() {
     headProcess = os_getHead(readyQ);
     os_printSwitch(headProcess);
     os_restoreContext();
-   
+
 
     currentPID = os_getProcessPid(headProcess);
 
