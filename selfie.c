@@ -771,6 +771,8 @@ void initMemory(int size, int *name) {
 
     binaryName   = name;
     binaryLength = 0;
+
+	segmentBumpPointer = memory;
 }
 
 // -----------------------------------------------------------------
@@ -921,9 +923,11 @@ int *registers; // general purpose registers
 int pc; // program counter
 int ir; // instruction record
 int* readyQueue;
+int* segmentTable;
 int exited;
 int numberOfProcesses;
 int numberOfInstructions;
+int* segmentBumpPointer;
 
 int reg_hi; // hi register for multiplication/division //TODO do we have to save reg_hi and reg_lo in context switch?
 int reg_lo; // lo register for multiplication/division
@@ -966,6 +970,10 @@ void initInterpreter() {
     readyQueue = malloc(2*4);
     *readyQueue = 0;
     *(readyQueue + 1) = 0;
+
+	segmentTable = malloc(2*4);
+	*segmentTable = 0;
+	*(segmentTable + 1) = 0;
 
     reg_hi = 0;
     reg_lo = 0;
@@ -4010,33 +4018,48 @@ void copyMemSpace(int* from, int* to, int size) {
 	}
 }
 
-void duplicateProcesses() {
+int* kmalloc(int size) {
+	if (size % 4 != 0)
+        size = size + 4 - size % 4;
+
+    if ((segmentBumpPointer - memory) + size >= memorySize) {
+        print((int*) "out of memory");
+		exit(-1);
+	}
+
+    segmentBumpPointer = segmentBumpPointer + size;
+
+	return segmentBumpPointer - size;
+}
+
+void duplicateProcesses(int argc, int *argv) {
 	int* process;
 	int processCounter;
 	
 	processCounter = numberOfProcesses;
 	
-	process = malloc(5 * 4);
+	process = malloc(4 * 4);
 	*process = 0;
 	*(process + 1) = 0;
 	*(process + 2) = 0;
 	*(process + 3) = (int) registers;
-	*(process + 4) = (int) memory;
+
+	// TODO: context needs to be correctly set (registers!)
+	up_copyArguments(argc-3, argv+3);
 	
 	enqueue(readyQueue, process);
 	
-	
 	while (processCounter - 1 > 0) {
-		process = malloc(5 * 4);
+		process = malloc(4 * 4);
 		
 		*process = 0;
 		*(process + 1) = 0;
 		*(process + 2) = 0;
 		*(process + 3) = (int) malloc(32 * 4);
-		*(process + 4) = (int) malloc(memorySize);
 		
 		copyMemSpace(registers, (int*)*(process + 3), 32);
-		copyMemSpace(memory, (int*)*(process + 4), memorySize / 4);
+
+		up_copyArguments(argc-3, argv+3);
 		
 		enqueue(readyQueue, process);
 	
@@ -4564,9 +4587,9 @@ int main_emulator(int argc, int *argv) {
 
     *(registers+REG_K1) = *(registers+REG_GP);
 
-    up_copyArguments(argc-3, argv+3);
+    //up_copyArguments(argc-3, argv+3);
 
-    duplicateProcesses();
+    duplicateProcesses(argc, argv);
     
     while (*readyQueue != 0) {
     	exited = 0;
