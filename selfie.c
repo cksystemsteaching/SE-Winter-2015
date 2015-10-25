@@ -474,8 +474,7 @@ int *currentProcedureName; // holds the name of currently parsed procedure
 
 // ------------------------- INITIALIZATION ------------------------
 
-void
-initParser() {
+void initParser() {
     // set maximum code length in bytes for emitting code
     maxBinaryLength = twoToThePowerOf(17);
 
@@ -763,6 +762,8 @@ int  memorySize;
 int *binaryName;
 int  binaryLength;
 
+int* segmentBumpPointer;
+
 // ------------------------- INITIALIZATION ------------------------
 
 void initMemory(int size, int *name) {
@@ -927,7 +928,6 @@ int* segmentTable;
 int exited;
 int numberOfProcesses;
 int numberOfInstructions;
-int* segmentBumpPointer;
 
 int reg_hi; // hi register for multiplication/division //TODO do we have to save reg_hi and reg_lo in context switch?
 int reg_lo; // lo register for multiplication/division
@@ -966,8 +966,8 @@ void initInterpreter() {
 
     pc = 0;
     ir = 0;
-    
-    readyQueue = malloc(2*4);
+
+	readyQueue = malloc(2*4);
     *readyQueue = 0;
     *(readyQueue + 1) = 0;
 
@@ -3343,19 +3343,36 @@ void decodeJFormat() {
 // -----------------------------------------------------------------
 
 int tlb(int vaddr) {
+	int* segmentEntry;
+
     if (vaddr % 4 != 0)
         exception_handler(EXCEPTION_ADDRESSERROR);
 
+	if ((int) registers == 0)
+		return vaddr / 4;
+	
+	segmentEntry = *(registers + REG_K0);
+
+	if (vaddr < 0) {
+		print((int*) "Segmentation fault");
+		exit(-1);
+	} else if (vaddr >= *(segmentEntry + 2)) {
+		print((int*) "Segmentation fault");
+		exit(-1);
+	}
+
     // physical memory is word-addressed for lack of byte-sized data type
-    return vaddr / 4;
+    return (vaddr + *(segmentEntry + 3)) / 4;
 }
 
 int loadMemory(int vaddr) {
     return *(memory + tlb(vaddr));
+	//return *((int*) tlb(vaddr));
 }
 
 void storeMemory(int vaddr, int data) {
     *(memory + tlb(vaddr)) = data;
+	//*((int*) tlb(vaddr)) = data;
 }
 
 // -----------------------------------------------------------------
@@ -4032,36 +4049,43 @@ int* kmalloc(int size) {
 	return segmentBumpPointer - size;
 }
 
-void duplicateProcesses(int argc, int *argv) {
+void duplicateProcesses() {
 	int* process;
 	int processCounter;
+	int* segmentEntry;
+	int* temp;
+	int* segToCopy;
+
+	segToCopy = *(segmentTable + 1);
 	
 	processCounter = numberOfProcesses;
-	
-	process = malloc(4 * 4);
-	*process = 0;
-	*(process + 1) = 0;
-	*(process + 2) = 0;
-	*(process + 3) = (int) registers;
 
-	// TODO: context needs to be correctly set (registers!)
-	up_copyArguments(argc-3, argv+3);
-	
-	enqueue(readyQueue, process);
+	temp = registers;
 	
 	while (processCounter - 1 > 0) {
-		process = malloc(4 * 4);
-		
+		process = malloc(4 * 4);		
 		*process = 0;
 		*(process + 1) = 0;
 		*(process + 2) = 0;
 		*(process + 3) = (int) malloc(32 * 4);
+
+		segmentEntry = malloc(4*4);
+		*segmentEntry = 0;
+		*(segmentEntry + 1) = 0;
+		*(segmentEntry + 2) = 2 * 1024 * 1024;
+		*(segmentEntry + 3) = kmalloc(2 * 1024 * 1024);
 		
 		copyMemSpace(registers, (int*)*(process + 3), 32);
+		copyMemSpace(*(segToCopy + 3), *(segmentEntry + 3), *(segToCopy + 2) / 4);
 
-		up_copyArguments(argc-3, argv+3);
+		registers = *(process + 3);
+
+		*(registers + REG_K0) = (int) segmentEntry;
+
+		registers = temp;
 		
 		enqueue(readyQueue, process);
+		enqueue(segmentTable, segmentEntry);
 	
 		processCounter = processCounter - 1;
 	}
@@ -4524,7 +4548,7 @@ void parse_args(int argc, int *argv) {
     initMemory(atoi((int*) *(argv+2)) * 1024 * 1024, (int*) *(argv+3));
 
     // initialize stack pointer
-    *(registers+REG_SP) = memorySize - 4;
+    //*(registers+REG_SP) = memorySize - 4;
 
     print(binaryName);
     print((int*) ": memory size ");
@@ -4575,11 +4599,40 @@ void up_copyArguments(int argc, int *argv) {
     }
 }
 
+void initFirstProcess() {
+	int* process;
+	int* segmentEntry;
+
+	process = malloc(4 * 4);
+	*process = 0;
+	*(process + 1) = 0;
+	*(process + 2) = 0;
+	*(process + 3) = (int) registers;
+
+	segmentEntry = malloc(4 * 4);
+	*segmentEntry = 0;
+	*(segmentEntry + 1) = 0;
+	*(segmentEntry + 2) = 2 * 1024 * 1024;
+	*(segmentEntry + 3) = kmalloc(2 * 1024 * 1024); // 2 MB per process
+
+	*(registers + REG_K0) = (int) segmentEntry; // R26 used as segment register
+	
+	enqueue(readyQueue, process);
+	enqueue(segmentTable, segmentEntry);
+}
+
 int main_emulator(int argc, int *argv) {
 	int* process;
+	int* segmentEntry;
+
     initInterpreter();
 
     parse_args(argc, argv);
+
+	initFirstProcess();
+
+	segmentEntry = *(segmentTable);
+	*(registers+REG_SP) = *(segmentEntry + 2) - 4;
 
     loadBinary();
 
@@ -4587,9 +4640,9 @@ int main_emulator(int argc, int *argv) {
 
     *(registers+REG_K1) = *(registers+REG_GP);
 
-    //up_copyArguments(argc-3, argv+3);
+    up_copyArguments(argc-3, argv+3);
 
-    duplicateProcesses(argc, argv);
+    duplicateProcesses();
     
     while (*readyQueue != 0) {
     	exited = 0;
@@ -4598,7 +4651,7 @@ int main_emulator(int argc, int *argv) {
     	
     	pc = *(process + 2);
     	registers = (int*)*(process + 3);
-    	memory = (int*)*(process + 4);
+    	//memory = (int*)*(process + 4);
     	
     	run();
 
@@ -4617,13 +4670,14 @@ int main_emulator(int argc, int *argv) {
 // ----------------------------- MAIN ------------------------------
 // -----------------------------------------------------------------
 
-int main(int argc, int *argv) {
-    int *firstParameter;
+int main(int argc, int *argv) {    
+	int *firstParameter;
     initLibrary();
 
     initRegister();
     initDecoder();
     initSyscalls();
+
 
     if (argc > 1) {
         firstParameter = (int*) *(argv+1);
@@ -4643,7 +4697,7 @@ int main(int argc, int *argv) {
 	        } else if (getCharacter(firstParameter, 1) == 'l') { // flag for testing linked list (assignment0)
 	            //test_list();
 	        } else if (getCharacter(firstParameter, 1) == 'a') { // flag for testing assignment1
-	        	numberOfProcesses = 10;
+	        	numberOfProcesses = 3;
         		numberOfInstructions = 40;
         		
         		if (argc > 3)
