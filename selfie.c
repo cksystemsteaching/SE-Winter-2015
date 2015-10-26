@@ -790,6 +790,8 @@ int ir = 0; // instruction record
 int reg_hi = 0; // hi register for multiplication/division
 int reg_lo = 0; // lo register for multiplication/division
 
+// ------------------------ OUR STUFF -----------------------------
+
 void context_switch();
 
 int *proc_list;
@@ -798,16 +800,18 @@ int number_of_proc;
 int instr_cycles;
 int exited;
 
+int* segment_table;
+
 // ------------------------- INITIALIZATION ------------------------
 
 void create_process(int argc, int* argv) {
-        initInterpreter();
+	initInterpreter();
 
-        parse_args(argc, argv);
+	parse_args(argc, argv);
 
-        loadBinary();
-        *(registers + REG_GP) = binaryLength;
-        *(registers + REG_K1) = *(registers + REG_GP);
+	loadBinary();
+	*(registers + REG_GP) = binaryLength;
+	*(registers + REG_K1) = *(registers + REG_GP);
 }
 
 void initInterpreter() {
@@ -4287,7 +4291,7 @@ int main_emulator(int argc, int *argv) {
 	int proc_count;
 
 	proc_count = 1;
-	number_of_proc = 1;
+	number_of_proc = 5;
 	instr_cycles = 1;
 
 	initInterpreter();
@@ -4302,7 +4306,7 @@ int main_emulator(int argc, int *argv) {
 
 	while (proc_count < number_of_proc) {
 
-		create_process (argc, argv);
+		create_process(argc, argv);
 
 		// Insert into list
 		proc_list = insert(pc, registers, memory, 0, proc_list);
