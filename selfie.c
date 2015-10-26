@@ -245,6 +245,23 @@ int ivalue; // stores numerical value of scanned integer string
 
 int mayBeINTMINConstant; // support INT_MIN constant
 
+int memSize; //Offset für Threads = (memorySize - Programmcode / Anzahl Prozesse)
+int memBeginProc; //Anfang memory pro Process
+
+int current_process; //Nummer aktueller Process
+int count_processes; //Gesamtanzahl Processes
+int count_switch; //Anzahl Instruktionen bei denen geswitcht wird
+
+int *listHead;
+int *listTail;
+int listSize;
+
+int* numberPrinter;
+
+int countExecInstr; //Anzahl Instructions Programmcode
+
+int memorySize; //Größe Memory
+
 // ------------------------- INITIALIZATION ------------------------
 
 void initScanner () {
@@ -3142,7 +3159,9 @@ int loadBinary(int *filename) {
     ret = 4;
 
     while (ret == 4) {
+		countExecInstr = countExecInstr + 1;
         ret = read(fd, memory + i, 4);
+
         if (debug_load) {
             memset(string_buffer, 33, 0);
             print(itoa(i * 4, string_buffer, 16, 4));
@@ -3454,7 +3473,7 @@ void emitPutchar() {
 }
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-int* numberPrinter;
+
 
 //prints a number and breaks the line (not working for negative numbers (yet))
 void printLineNumber(int n){
@@ -3520,11 +3539,6 @@ void printNumber(int n){
 	 print(numberPrinter);
 }
 
-
-int *listHead;
-int *listTail;
-int listSize;
-
 // initialize list 
 void initList(){
 	listHead = 0;
@@ -3577,15 +3591,15 @@ int* findListElement(int index){
 	return currElement;
 }
 
-// set pc (element+0), registers (element+3) and memory (element+4) of element in the list by index
+// set pc (element+0), registers (element+3) of element in the list by index
 // if element is in list
-void setListElement(int index, int pc, int* reg, int* mem){
+void setListElement(int index, int pc, int* reg, int mem){
 	int* tmp;
 	tmp = findListElement(index);
 	if(tmp != (int*)0){
 		*tmp = pc;
 		*(tmp+3) = (int)reg;
-		*(tmp+4) = (int)mem;
+		*(tmp+4) = mem;
 	}
 }
 
@@ -4019,7 +4033,7 @@ void post_debug() {
 }
 
 void fetch() {
-    ir = *(memory+pc);
+    ir = *((memory+pc));
 }
 
 void execute() {
@@ -4068,22 +4082,23 @@ void execute() {
     }
 }
 
-int current_process;
-int count_processes;
-int count_switch;
-
 void run() {
-	int i;
-	int* tmp;
-	i = 0;
-	current_process = 0;
-	count_switch = 100;
+int i;
+int* tmp;
+int mem;
+i = 0;
+current_process = 0;
+count_switch = 100;
+
 	while (1) {
-		//switch every count_switch instructions to next process
+	
+	//switch every count_switch instructions to next process
 		if(i >= count_switch){
+		
 			i = 0;
 			//save program counter of current process
 			tmp = findListElement(current_process);
+			
 			*tmp = pc;
 			current_process = current_process + 1;
 			if(current_process == count_processes){
@@ -4091,9 +4106,12 @@ void run() {
 			}
 			tmp = findListElement(current_process);
 			pc = *tmp;
-			registers = (int*)(*(tmp + 3));
-			memory = (int*)(*(tmp + 4));
+			registers = (int*)(*(tmp+3));
+			memory = (int*)(*(tmp+4));	
+			//printLineNumber(*(tmp+4));
+			
 		}
+		
         fetch();
         decode();
         pre_debug();
@@ -4113,7 +4131,7 @@ void debug_boot(int memorySize) {
 }
 
 
-void allocateMoreMemory(int memorySize){
+void appendProcList(){//OK
 	int i;
 	i=0;
 	//create empty list and add count_processes elements
@@ -4123,26 +4141,27 @@ void allocateMoreMemory(int memorySize){
 		appendListElement(0);
 		i = i + 1;
 	}
-	//set first element to default registers and memory
-	setListElement(0, 0, registers, memory);
-	//create registers and memories for every other element/process
+	//set first element to default registers
+	setListElement(0, 0, registers, countExecInstr);
+	
+	//create registers for every other element/process
 	i=1;
+	
 	while(i < count_processes){
-		setListElement(i, 0, (int*)malloc(32*4), (int*)malloc(memorySize));
+	memBeginProc = (countExecInstr + (memSize*i)); //memory jedes weiteren Processes beginnt nach Programmcode + Offset
+		setListElement(i, 0, (int*)malloc(32*4), memBeginProc);
 		i = i + 1;
 	}
 }
 
-int memSize;
-
 int* parse_args(int *argv, int *cstar_argv) {
-	int memorySize;
+	
     // assert: ./selfie -m size executable {-m size executable}
 
     memorySize = atoi((int*)*(cstar_argv+2)) * 1024 * 1024 / 4;
-	memSize = memorySize;
+
     allocateMachineMemory(memorySize*4);
-	allocateMoreMemory(memorySize*4);
+	
     // initialize stack pointer
     *(registers+REG_SP) = (memorySize - 1) * 4;
 
@@ -4235,21 +4254,25 @@ int main_emulator(int argc, int *argv, int *cstar_argv) {
 	int j;
 	int* process;
 	int* regs;
-	int* mem;
+	int mem;
 	i = 1;
     initInterpreter();
 
     *(registers+REG_GP) = loadBinary(parse_args(argv, cstar_argv));
+	
+	memSize = (memorySize-countExecInstr)/count_processes; //OK
+	appendProcList();
 
     *(registers+REG_K1) = *(registers+REG_GP);	
-
+	
     up_copyArguments(argc-3, argv+3);
+
 	
 	//copy content from registers and memory to the other processes regs and mems
 	while(i < count_processes){
 		process = findListElement(i);
 		regs = (int*)(*(process+3));
-		mem = (int*)(*(process+4));
+		
 		j = 0;
 		while(j < 32){
 			*(regs + j) = *(registers+j);
@@ -4257,8 +4280,9 @@ int main_emulator(int argc, int *argv, int *cstar_argv) {
 		}
 		j = 0;
 		while(j < memSize){
-			*(mem + j) = *(memory+j);
-			j = j + 1;
+		mem = ((*(process+4))+j);
+		*(memory + mem) = *(memory+j);
+		j = j + 1;
 		}
 		i = i + 1;
 	}
@@ -4320,7 +4344,7 @@ int main(int argc, int *argv) {
     int *firstParameter;
 
 	numberPrinter = (int*)malloc(12*4);
-	count_processes = 5;
+	count_processes = 3;
     initLibrary();
 
     initRegister();
