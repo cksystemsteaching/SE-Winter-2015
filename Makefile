@@ -32,6 +32,9 @@ test_binary:
 	mv out $(TEST_BINARY)
 	./$(EXEC) -m $(MEM_SIZE) $(TEST_BINARY)
 
+compile:
+	$(CC) $(CC_OPT) -o $(EXEC) selfie.c
+
 self_execute:
 	$(CC) $(CC_OPT) -o $(EXEC) selfie.c
 	touch out
