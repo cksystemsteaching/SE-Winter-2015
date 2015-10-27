@@ -599,6 +599,7 @@ void storeMemory(int vaddr, int data);
 // ------------------------ GLOBAL VARIABLES -----------------------
 
 int *memory;
+int *current_seg;
 int memorySize;
 
 int *binaryName;
@@ -656,6 +657,9 @@ void syscall_getchar();
 
 void emitPutchar();
 
+void emitYield();
+void syscall_yield();
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int SYSCALL_EXIT = 4001;
@@ -664,6 +668,7 @@ int SYSCALL_WRITE = 4004;
 int SYSCALL_OPEN = 4005;
 int SYSCALL_MALLOC = 5001;
 int SYSCALL_GETCHAR = 5002;
+int SYSCALL_YIELD = 5003;
 
 // Append entry (including specified payload) to a specified list
 int* insert(int pc, int* reg, int* mem, int* prev, int* next) {
@@ -800,18 +805,18 @@ int number_of_proc;
 int instr_cycles;
 int exited;
 
-int* segment_table;
+int* segment_table = 0;
 
 // ------------------------- INITIALIZATION ------------------------
 
-void create_process(int argc, int* argv) {
+void create_process(int argc, int* argv, int count, int seg_size) {
 	initInterpreter();
 
-	parse_args(argc, argv);
-
 	loadBinary();
-	*(registers + REG_GP) = binaryLength;
+
+	*(registers + REG_GP) = (count - 1) * seg_size + binaryLength;
 	*(registers + REG_K1) = *(registers + REG_GP);
+	*(registers + REG_SP) = (count * seg_size) - 4;
 }
 
 void initInterpreter() {
@@ -3122,6 +3127,7 @@ int main_compiler() {
 	emitMalloc();
 	emitGetchar();
 	emitPutchar();
+	emitYield();
 
 	// parser
 	gr_cstar();
@@ -3771,6 +3777,25 @@ void emitPutchar() {
 	emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
+void emitYield() {
+        createSymbolTableEntry(GLOBAL_TABLE, (int*) "yield", binaryLength,
+                        FUNCTION, INT_T, 0);
+
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+        emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_YIELD);
+        emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+        emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_yield() {
+	context_switch();
+}
+
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -3799,6 +3824,8 @@ void fct_syscall() {
 		syscall_malloc();
 	} else if (*(registers + REG_V0) == SYSCALL_GETCHAR) {
 		syscall_getchar();
+	} else if (*(registers + REG_V0) == SYSCALL_YIELD) {
+		syscall_yield();
 	} else {
 		exception_handler(EXCEPTION_UNKNOWNSYSCALL);
 	}
@@ -4200,10 +4227,15 @@ void execute() {
 
 void run() {
 	int instr_count;
+
 	instr_count = 0;
+
+	print((int*)"well\n");
+
 	while (1) {
 		while (instr_count < instr_cycles) {
 			if (exited) {
+				// do nothing
 			} else {
 				fetch();
 				decode();
@@ -4211,21 +4243,29 @@ void run() {
 				execute();
 				post_debug();
 			}
+
 			instr_count = instr_count + 1;
 		}
+
 		instr_count = 0;
 		context_switch();
 	}
 }
+
 void context_switch() {
 	*current_proc = pc; // Save old program counter
+
 	current_proc = *(current_proc + 4);
+
 	if ((int) current_proc == 0) {
 		current_proc = proc_list;
 	}
+
 	exited = 0;
+
 	registers = (int*) *(current_proc + 1);
-	memory = (int*) *(current_proc + 2);
+	current_seg = (int*) *(current_proc + 2);
+//	memory = (int*) *(current_proc + 2);
 	pc = *current_proc;
 }
 
@@ -4256,6 +4296,7 @@ void up_push(int value) {
 
 	// store value
 	storeMemory(vaddr, value);
+
 }
 
 int up_malloc(int size) {
@@ -4287,34 +4328,57 @@ void up_copyArguments(int argc, int *argv) {
 	}
 }
 
+void populate_seg_tbl () {
+	int proc_count;
+	int seg_size;
+
+	proc_count = 0;
+	seg_size = memorySize / number_of_proc;
+
+	while (proc_count != number_of_proc) {
+		segment_table = insert(seg_size, memory + proc_count * seg_size, number_of_proc - proc_count, 0, segment_table);
+		proc_count = proc_count + 1;
+	}
+}
+
 int main_emulator(int argc, int *argv) {
 	int proc_count;
+	int seg_size;
 
 	proc_count = 1;
 	number_of_proc = 5;
-	instr_cycles = 1;
+	instr_cycles = 100;
 
 	initInterpreter();
 
 	parse_args(argc, argv);
 
-	loadBinary();
-	*(registers + REG_GP) = binaryLength;
-	*(registers + REG_K1) = *(registers + REG_GP);
+	seg_size = memorySize / number_of_proc;
 
-	proc_list = insert(pc, registers, memory, 0, 0);
+	while (seg_size % 4 != 0)
+		seg_size = seg_size - 1;
+
+	populate_seg_tbl();
+
+	loadBinary();
+
+	*(registers + REG_GP) = (number_of_proc - 1) * seg_size + binaryLength;
+	*(registers + REG_K1) = *(registers + REG_GP);
+	*(registers + REG_SP) = number_of_proc * seg_size - 4;
+
+	proc_list = insert(pc, registers, segment_table, 0, 0);
 
 	while (proc_count < number_of_proc) {
-
-		create_process(argc, argv);
+		create_process(argc, argv, number_of_proc - proc_count, seg_size);
 
 		// Insert into list
-		proc_list = insert(pc, registers, memory, 0, proc_list);
+		segment_table = *(segment_table + 4);
+		proc_list = insert(pc, registers, segment_table, 0, proc_list);
 		proc_count = proc_count + 1;
-
 	}
 
 	current_proc = proc_list;
+	current_seg = *(proc_list + 2);
 
 	up_copyArguments(argc - 3, argv + 3);
 

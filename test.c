@@ -1,4 +1,3 @@
-
 int main() {
 	putchar('H');
 	putchar('A');
@@ -6,8 +5,7 @@ int main() {
 	putchar('L');
 	putchar('O');
 
-	putchar(10);
-	putchar(10);
+	putchar('3');
 
 	exit(0);
 }

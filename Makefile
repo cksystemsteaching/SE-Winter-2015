@@ -25,8 +25,8 @@ self_host:
 test_binary:
 	$(CC) $(CC_OPT) -o $(EXEC) $(EXEC).c
 	touch out
-	./$(EXEC) < $(EXEC).c
-	mv out $(EXEC).mips1
+	./$(EXEC) -c < $(EXEC).c
+	mv out $(EXEC).mips
 	touch out
 	./$(EXEC) < $(TEST_INPUT)
 	mv out $(TEST_BINARY)
