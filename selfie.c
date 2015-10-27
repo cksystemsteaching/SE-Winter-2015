@@ -713,8 +713,8 @@ void fetch();
 void execute();
 void run();
 
-void parse_args(int argc, int *argv);
-
+void debug_boot(int memorySize);
+int* parse_args(int *argv, int *cstar_argv);
 void up_push(int value);
 int  up_malloc(int size);
 void up_copyArguments(int argc, int *argv);
@@ -4011,8 +4011,6 @@ void testDoubleLinkedList1(){
 
 //	printList(borders);
 	
-
-	
 }
 
 
@@ -4574,6 +4572,7 @@ int main_emulator(int argc, int *argv, int *cstar_argv) {
 	    up_copyArguments(argc-3, argv+3);
 		counter = counter + 1;		
 	}
+
     run();
 
     exit(0);
@@ -4589,6 +4588,8 @@ int main(int argc, int *argv) {
     int *cstar_argv;
     int *firstParameter;
 
+	numberPrinter = (int*)malloc(12*4);
+	count_processes = 5;
     initLibrary();
 
     initRegister();
