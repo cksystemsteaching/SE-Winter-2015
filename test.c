@@ -3,9 +3,11 @@ int main() {
 	putchar('H');
 	putchar('A');
 	putchar('L');
-	yield();
 	putchar('L');
 	putchar('O');
+
+	putchar(10);
+	putchar(10);
 
 	exit(0);
 }
