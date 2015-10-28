@@ -1,4 +1,4 @@
-default: a1
+default: a2
 
 selfcompilation: 
 	clang -v -w -m32 -D'main(a, b)=main(int argc, char **argv)' -o selfie selfie.c
@@ -13,4 +13,10 @@ a1:
 	clang -v -w -m32 -D'main(a, b)=main(int argc, char **argv)' -o selfie selfie.c
 	touch out
 	./selfie < ourBinary.c
+	./selfie -a 32 out
+	
+a2:
+	clang -v -w -m32 -D'main(a, b)=main(int argc, char **argv)' -o selfie selfie.c
+	touch out
+	./selfie < yieldExample.c
 	./selfie -a 32 out

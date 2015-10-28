@@ -818,6 +818,9 @@ void syscall_malloc();
 void emitGetchar();
 void syscall_getchar();
 
+void emitYield();
+void syscall_yield();
+
 void emitPutchar();
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
@@ -828,6 +831,7 @@ int SYSCALL_WRITE;
 int SYSCALL_OPEN;
 int SYSCALL_MALLOC;
 int SYSCALL_GETCHAR;
+int SYSCALL_YIELD;
 
 // ------------------------- INITIALIZATION ------------------------
 
@@ -838,6 +842,7 @@ void initSyscalls() {
     SYSCALL_OPEN    = 4005;
     SYSCALL_MALLOC  = 5001;
     SYSCALL_GETCHAR = 5002;
+    SYSCALL_YIELD   = 5003;
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -926,6 +931,7 @@ int ir; // instruction record
 int* readyQueue;
 int* segmentTable;
 int exited;
+int calledYield;
 int numberOfProcesses;
 int numberOfInstructions;
 
@@ -3149,6 +3155,7 @@ int main_compiler() {
     emitMalloc();
     emitGetchar();
     emitPutchar();
+    emitYield();
 
     // parser
     gr_cstar();
@@ -3367,12 +3374,10 @@ int tlb(int vaddr) {
 
 int loadMemory(int vaddr) {
     return *(memory + tlb(vaddr));
-	//return *((int*) tlb(vaddr));
 }
 
 void storeMemory(int vaddr, int data) {
     *(memory + tlb(vaddr)) = data;
-	//*((int*) tlb(vaddr)) = data;
 }
 
 // -----------------------------------------------------------------
@@ -3731,7 +3736,7 @@ void emitMalloc() {
 void syscall_malloc() {
     int size;
     int bump;
-
+	
     size = *(registers+REG_A0);
 
     if (size % 4 != 0)
@@ -3739,7 +3744,7 @@ void syscall_malloc() {
 
     bump = *(registers+REG_K1);
 
-    if (bump + size >= *(registers+REG_SP))
+	if (bump + size >= *(registers+REG_SP))
         exception_handler(EXCEPTION_HEAPOVERFLOW);
 
     *(registers+REG_K1) = bump + size;
@@ -3782,6 +3787,24 @@ void syscall_getchar() {
         printCharacter(c);
         println();
     }
+}
+
+void emitYield() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "yield", binaryLength, FUNCTION, INT_T);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_YIELD);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_yield() {
+	calledYield = 1;
 }
 
 void emitPutchar() {
@@ -4072,8 +4095,8 @@ void duplicateProcesses() {
 		segmentEntry = malloc(4*4);
 		*segmentEntry = 0;
 		*(segmentEntry + 1) = 0;
-		*(segmentEntry + 2) = 2 * 1024 * 1024;
-		*(segmentEntry + 3) = (int) kmalloc(2 * 1024 * 1024);
+		*(segmentEntry + 2) = 4 * 1024 * 1024;
+		*(segmentEntry + 3) = (int) kmalloc(4 * 1024 * 1024);
 		
 		copyMemSpace(registers, (int*)*(process + 3), 32);
 		copyMemSpace(memory + (*(segToCopy + 3) / 4), memory + (*(segmentEntry + 3) / 4), *(segToCopy + 2) / 4);
@@ -4120,6 +4143,8 @@ void fct_syscall() {
         syscall_malloc();
     } else if (*(registers+REG_V0) == SYSCALL_GETCHAR) {
         syscall_getchar();
+    } else if (*(registers+REG_V0) == SYSCALL_YIELD) {
+    	syscall_yield();
     } else {
         exception_handler(EXCEPTION_UNKNOWNSYSCALL);
     }
@@ -4536,9 +4561,30 @@ void run() {
         
         if (exited == 1) {
         	return;
+        } else if (calledYield == 1) {
+        	return;
         }
         
     }
+}
+
+int* restore() {
+	int* process;
+	
+	exited = 0;
+	calledYield = 0;
+	process = dequeue(readyQueue);
+	pc = *(process + 2);
+	registers = (int*)*(process + 3);
+	
+	return process;
+}
+
+void save(int* process) {
+	if (exited == 0) {
+		*(process + 2) = pc;
+		enqueue(readyQueue, process);
+	}
 }
 
 void parse_args(int argc, int *argv) {
@@ -4612,8 +4658,8 @@ void initFirstProcess() {
 	segmentEntry = malloc(4 * 4);
 	*segmentEntry = 0;
 	*(segmentEntry + 1) = 0;
-	*(segmentEntry + 2) = 2 * 1024 * 1024;
-	*(segmentEntry + 3) = (int) kmalloc(2 * 1024 * 1024); // 2 MB per process
+	*(segmentEntry + 2) = 4 * 1024 * 1024;
+	*(segmentEntry + 3) = (int) kmalloc(4 * 1024 * 1024); // 2 MB per process
 
 	*(registers + REG_K0) = (int) segmentEntry; // R26 used as segment register
 	
@@ -4626,9 +4672,7 @@ int main_emulator(int argc, int *argv) {
 	int* segmentEntry;
 
     initInterpreter();
-
     parse_args(argc, argv);
-
 	initFirstProcess();
 
 	segmentEntry = (int*) *(segmentTable);
@@ -4637,30 +4681,16 @@ int main_emulator(int argc, int *argv) {
     loadBinary();
 
     *(registers+REG_GP) = binaryLength;
-
     *(registers+REG_K1) = *(registers+REG_GP);
 
     up_copyArguments(argc-3, argv+3);
-
     duplicateProcesses();
     
-    while (*readyQueue != 0) {
-    	exited = 0;
-
-    	process = dequeue(readyQueue);
-    	
-    	pc = *(process + 2);
-    	registers = (int*)*(process + 3);
-    	//memory = (int*)*(process + 4);
-    	
-    	run();
-
-    	if (exited == 0) {
-    		*(process + 2) = pc;
-    		enqueue(readyQueue, process);
-    	}
-    	
-    	
+    //scheduling
+    while (*readyQueue != 0) {    
+    	process = restore();    	
+    	run();		
+		save(process);
     }
 
     exit(0);
@@ -4697,7 +4727,7 @@ int main(int argc, int *argv) {
 	        } else if (getCharacter(firstParameter, 1) == 'l') { // flag for testing linked list (assignment0)
 	            //test_list();
 	        } else if (getCharacter(firstParameter, 1) == 'a') { // flag for testing assignment1
-	        	numberOfProcesses = 10;
+	        	numberOfProcesses = 3;
         		numberOfInstructions = 40;
         		
         		if (argc > 3)
