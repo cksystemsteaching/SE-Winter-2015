@@ -925,6 +925,9 @@ int* begin_process_list;
 int* end_process_list;
 int* begin_segment_table;
 int* end_segment_table;
+int* segment_table;
+int* last_segment;
+int num_segments;
 int end_procress;
 int num_processes;
 int num_instructions;
@@ -3883,12 +3886,23 @@ void test_list(){
 // -----------------------------------------------------------------
 
 void create_processes(){
+
     int* process;
     int memSize;
     int count;
+    int segmentSize = memorySize / num_processes;
+
+    while (segmentSize % 4 != 0)
+        segmentSize = segmentSize - 1;
+    *(registers + REG_SP) = segmentSize - 4;
+    if (num_segments == 0) {
+	segment_table = insert_segment(memory, 0, 0, segmentSize);
+ 	last_segment = segment_table;
+    } else {
+	last_segment  = insert_segment( *last_segment + *(last_segment+1), last_segment, 0, segmentSize);
+    }
 
     count = num_processes;
-    
     begin_process_list = create_newNode(3, begin_process_list);
     set_listEntry(1,0,list);
     set_listEntry(2,registers,list);
@@ -3902,6 +3916,25 @@ void create_processes(){
     }
 
     end_process_list = process;
+}
+
+
+int* insert_segment(int* begin, int* prev, int* next, int size) {	
+
+    int* node;
+ 
+    node = create_newNode(3, (int) begin);
+    set_listEntry(1,size, node);
+    set_listEntry(2,(int) prev, node); 
+    set_listEntry(3,(int) next, node);
+	
+    if ((int) prev != 0) {
+	*(prev + 3) = (int) node;
+    }
+    if ((int) next != 0) {
+	*(next + 2) = (int) node;
+    }
+	return node;
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
