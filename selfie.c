@@ -773,7 +773,7 @@ void initMemory(int size, int *name) {
     binaryName   = name;
     binaryLength = 0;
 
-	segmentBumpPointer = memory;
+	segmentBumpPointer = (int*) 0;
 }
 
 // -----------------------------------------------------------------
@@ -3351,7 +3351,7 @@ int tlb(int vaddr) {
 	if ((int) registers == 0)
 		return vaddr / 4;
 	
-	segmentEntry = *(registers + REG_K0);
+	segmentEntry = (int*) *(registers + REG_K0);
 
 	if (vaddr < 0) {
 		print((int*) "Segmentation fault");
@@ -3362,7 +3362,7 @@ int tlb(int vaddr) {
 	}
 
     // physical memory is word-addressed for lack of byte-sized data type
-    return (vaddr + *(segmentEntry + 3)) / 4;
+    return ((int) ((int*) *(segmentEntry + 3) + (vaddr / 4))) / 4;
 }
 
 int loadMemory(int vaddr) {
@@ -4039,14 +4039,14 @@ int* kmalloc(int size) {
 	if (size % 4 != 0)
         size = size + 4 - size % 4;
 
-    if ((segmentBumpPointer - memory) + size >= memorySize) {
+    if ((int) (segmentBumpPointer + size / 4) >= memorySize) {
         print((int*) "out of memory");
 		exit(-1);
 	}
 
-    segmentBumpPointer = segmentBumpPointer + size;
+    segmentBumpPointer = segmentBumpPointer + size / 4;
 
-	return segmentBumpPointer - size;
+	return segmentBumpPointer + (size / (-4));
 }
 
 void duplicateProcesses() {
@@ -4056,7 +4056,7 @@ void duplicateProcesses() {
 	int* temp;
 	int* segToCopy;
 
-	segToCopy = *(segmentTable + 1);
+	segToCopy = (int*) *(segmentTable + 1);
 	
 	processCounter = numberOfProcesses;
 
@@ -4073,12 +4073,12 @@ void duplicateProcesses() {
 		*segmentEntry = 0;
 		*(segmentEntry + 1) = 0;
 		*(segmentEntry + 2) = 2 * 1024 * 1024;
-		*(segmentEntry + 3) = kmalloc(2 * 1024 * 1024);
+		*(segmentEntry + 3) = (int) kmalloc(2 * 1024 * 1024);
 		
 		copyMemSpace(registers, (int*)*(process + 3), 32);
-		copyMemSpace(*(segToCopy + 3), *(segmentEntry + 3), *(segToCopy + 2) / 4);
+		copyMemSpace(memory + (*(segToCopy + 3) / 4), memory + (*(segmentEntry + 3) / 4), *(segToCopy + 2) / 4);
 
-		registers = *(process + 3);
+		registers = (int*) *(process + 3);
 
 		*(registers + REG_K0) = (int) segmentEntry;
 
@@ -4613,7 +4613,7 @@ void initFirstProcess() {
 	*segmentEntry = 0;
 	*(segmentEntry + 1) = 0;
 	*(segmentEntry + 2) = 2 * 1024 * 1024;
-	*(segmentEntry + 3) = kmalloc(2 * 1024 * 1024); // 2 MB per process
+	*(segmentEntry + 3) = (int) kmalloc(2 * 1024 * 1024); // 2 MB per process
 
 	*(registers + REG_K0) = (int) segmentEntry; // R26 used as segment register
 	
@@ -4631,7 +4631,7 @@ int main_emulator(int argc, int *argv) {
 
 	initFirstProcess();
 
-	segmentEntry = *(segmentTable);
+	segmentEntry = (int*) *(segmentTable);
 	*(registers+REG_SP) = *(segmentEntry + 2) - 4;
 
     loadBinary();
@@ -4697,7 +4697,7 @@ int main(int argc, int *argv) {
 	        } else if (getCharacter(firstParameter, 1) == 'l') { // flag for testing linked list (assignment0)
 	            //test_list();
 	        } else if (getCharacter(firstParameter, 1) == 'a') { // flag for testing assignment1
-	        	numberOfProcesses = 3;
+	        	numberOfProcesses = 10;
         		numberOfInstructions = 40;
         		
         		if (argc > 3)
