@@ -921,6 +921,15 @@ int *registers; // general purpose registers
 int pc; // program counter
 int ir; // instruction record
 
+int* begin_process_list;
+int* end_process_list;
+int* begin_segment_table;
+int* end_segment_table;
+int end_procress;
+int num_processes;
+int num_instructions;
+
+
 int reg_hi; // hi register for multiplication/division
 int reg_lo; // lo register for multiplication/division
 
@@ -3527,7 +3536,9 @@ void syscall_exit() {
     print(itoa(exitCode, string_buffer, 10, 0));
     println();
 
-    exit(0);
+    end_process = 1;
+
+    //exit(0);
 }
 
 void emitRead() {
@@ -3772,6 +3783,7 @@ void emitPutchar() {
 // ------------------------- ASSIGNMENT 0 --------------------------
 // --------------- adapted for other Assignments -------------------
 // ------------ Double Linked List with dynamic size ---------------
+
 int* create_newNode(int numDataEntrys, int* node){
 	int* newNode;
 	
@@ -3788,6 +3800,14 @@ int* create_newNode(int numDataEntrys, int* node){
 	return newNode;
 }
 
+int* append_Node(int* node, int* annex){
+    *annex = (int) node;
+	*(node + 1) = (int) annex;
+    *(annex + 1) = 0;
+
+    return annex;
+}
+
 void set_listEntry(int pos,int* value,int *node){
 	pos = pos + 1;
 	*(node + pos) = (int) value;
@@ -3798,7 +3818,7 @@ int get_listEntry(int pos,int *node){
 	return *(node + pos);
 }
 
-void delete_Node(int* node){
+int* delete_Node(int* node){
      int *prev;
      int *next;
      
@@ -3807,6 +3827,8 @@ void delete_Node(int* node){
      
      *(prev+1) = (int) next;
      *next = (int) prev;  
+
+    return next;
 }
 
 int *get_nextNode(int *node){
@@ -3853,6 +3875,33 @@ void test_list(){
         print(itoa(get_listEntry(2,node),numberBuffer,10,0));
         print((int*) " ");
     }
+}
+
+// -----------------------------------------------------------------
+// ------------------------- ASSIGNMENT 1/2 ------------------------
+// ----------------------- multiple processes ----------------------
+// -----------------------------------------------------------------
+
+void create_processes(){
+    int* process;
+    int memSize;
+    int count;
+
+    count = num_processes;
+    
+    begin_process_list = create_newNode(3, begin_process_list);
+    set_listEntry(1,0,list);
+    set_listEntry(2,registers,list);
+    set_listEntry(3,memory,list);
+
+    while(count - 1 > 0){
+        process = create_newNode(listsize, begin_process_list);
+        set_listEntry(1,0,process);
+        set_listEntry(2,registers,process);
+        set_listEntry(3,memory,process);
+    }
+
+    end_process_list = process;
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -4283,12 +4332,21 @@ void execute() {
 }
 
 void run() {
-    while (1) {
+    int count;
+    count = num_instructions;
+
+    while (count > 0) {
         fetch();
         decode();
         pre_debug();
         execute();
         post_debug();
+
+        count = count - 1;
+
+        if(end_process == 1) {
+            return;
+        }
     }
 }
 
@@ -4351,19 +4409,35 @@ void up_copyArguments(int argc, int *argv) {
 }
 
 int main_emulator(int argc, int *argv) {
+    int* actuell_process;
+    begin_process_list = 0;
+
     initInterpreter();
-
     parse_args(argc, argv);
-
     loadBinary();
-
     *(registers+REG_GP) = binaryLength;
-
     *(registers+REG_K1) = *(registers+REG_GP);
-
     up_copyArguments(argc-3, argv+3);
 
-    run();
+    create_processes();
+    
+    while(*begin_process_list == *end_process_list){
+        end_process = 0;
+        
+        actuell_process = begin_process_list; 
+        begin_process_list = delete_Node(begin_process_list);
+        
+        pc = getListEntry(1,list);
+        registers = getListEntry(2,list);
+        memory = getListEntry(3,list);
+
+        run();
+        
+        if(end_process == 0){
+            set_listEntry(1,pc,actuell_process);
+            end_process_list = append_Node(end_process_list, actuell_process);
+        }
+    }
 
     exit(0);
 }
@@ -4381,6 +4455,7 @@ int main(int argc, int *argv) {
     initDecoder();
     initSyscalls();
 
+
     if (argc > 1) {
         firstParameter = (int*) *(argv+1);
 
@@ -4388,9 +4463,11 @@ int main(int argc, int *argv) {
             if (getCharacter(firstParameter, 1) == 'c')
                 main_compiler();
             else if (getCharacter(firstParameter, 1) == 'm') {
-                if (argc > 3)
+                if (argc > 3){
+                    num_processes = 5;
+                    num_instructions = 2;
                     main_emulator(argc, (int*) argv);
-                else
+                } else
                     exit(-1);
             }
             else if (getCharacter(firstParameter, 1) == 't') {
