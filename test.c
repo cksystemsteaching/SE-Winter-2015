@@ -1,11 +1,13 @@
 int main() {
-	putchar('H');
-	putchar('A');
-	putchar('L');
-	putchar('L');
-	putchar('O');
+	int counter;
 
-	putchar('3');
+	counter = 48;
+
+	while (counter != 53) {
+		putchar(counter),
+		counter = counter + 1;
+		sched_yield();
+	}
 
 	exit(0);
 }
