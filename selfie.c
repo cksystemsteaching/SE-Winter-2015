@@ -965,131 +965,6 @@ void initInterpreter() {
 }
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
-// ---------------------     O S   ---------------------------------
-// -----------------------------------------------------------------
-// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
-
-// -----------------------------------------------------------------
-// ------------------------- Assignment 0 Linked List --------------
-// -----------------------------------------------------------------
-// @Team
-// Eg.: Size 2
-// list
-// We add 2 to the given size
-// for the pointer 
-// The size variable defines the 
-// entrys you need for data
-// Changed to Martins proposal 
-// +---------------+
-// | Pr next 0     |
-// +---------------+
-// | Pr Prev 0     |
-// +---------------+
-// | Data 	   |
-// +---------------+
-// | ...	   |
-// +---------------+
-
-int *createLList(int size){
-	int *list;
-	list = malloc((size + 2) * 4);
-	//next
-	*list = (int) list;
-	//prev
-	*(list + 1) = (int) list;
-	return list;
-}
-
-int *addNodeToLList(int size,int* list){
-	int *node;
-	int *pr;
-	node = malloc((size + 2) * 4);
-	pr = (int *) *(list + 1);
-	//Prev	
-	*(list + 1) = (int) node;
-	*pr = (int) node;
-	*node = (int) list;
-	*(node + 1) = (int) pr;
-	return node;
-}
-
-void removeNode(int *node){
-  int *next;
-  int *prev;
-  next = (int *) *node;
-  prev = (int *) *(node+1);
-  *prev = (int) next;
-  *(next+1) = (int) prev;
-}
-
-int *getNextNode(int *node){
-	return (int *) *node;
-}
-
-int *getPrevNode(int *node){
-	return (int *) *(node + 1);
-}
-
-int getListEntry(int pos,int *node){
-	pos = pos + 1;
-	return *(node + pos);
-}
-
-void setListEntry(int pos,int value,int *node){
-	pos = pos + 1;
-	*(node + pos) = value;
-}
-// -----------------------------------------------------------------
-// -------------------Assignment 1 Loading, Scheduling, Switching --
-// -----------------------------------------------------------------
-//@Team
-//We Create the Linked List with 3 entry's
-//And copy the actual state of the reg, pc, and the memory pointer
-//into the list
-//List View:
-//+-------------------+
-//| PC		      |
-//+-------------------+
-//| *reg	      |
-//+-------------------+
-//| *mem 	      |
-//+-------------------+
-//Note for now we don't switch 
-//the memory because we use the same binary
-//and thus the same memory
-//But we create the list in mind that we maybe
-//must load more binaries in the future
-
-void prepareContext(){
-	int *node;
-	int *registerDummy;
-	int i;
-	pList = (int*)createLList(3);
-	setListEntry(1,pc,pList);
-	setListEntry(2,(int)registers,pList);
-	while(instances > 1){
-		registerDummy = (int*) malloc(32 * 4);
-		i = 0;
-		while(i < 32){
-			*(registerDummy+i) = *(registers+i);
-			i = i + 1;
-		}
-		node = (int*)addNodeToLList(3,pList);
-		setListEntry(1,pc,node);
-		setListEntry(2,(int)registerDummy,node);
-		instances = instances - 1;
-	}
-}
-void contextSwitch(){
-	setListEntry(1,pc,pList);
-	setListEntry(2,(int)registers,pList);
-	pList = getNextNode(pList);
-	pc = getListEntry(1,pList);
-	registers = (int *)getListEntry(2,pList);	
-}
-
-// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
-// -----------------------------------------------------------------
 // ---------------------     L I B R A R Y     ---------------------
 // -----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -4299,3 +4174,130 @@ int main(int argc, int *argv) {
         // default: compiler
         main_compiler();
 }
+
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+// -----------------------------------------------------------------
+// ---------------------     O S   ---------------------------------
+// -----------------------------------------------------------------
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+
+// -----------------------------------------------------------------
+// ------------------------- Assignment 0 Linked List --------------
+// -----------------------------------------------------------------
+// @Team
+// Eg.: Size 2
+// list
+// We add 2 to the given size
+// for the pointer 
+// The size variable defines the 
+// entrys you need for data
+// Changed to Martins proposal 
+// +---------------+
+// | Pr next 0     |
+// +---------------+
+// | Pr Prev 0     |
+// +---------------+
+// | Data 	   |
+// +---------------+
+// | ...	   |
+// +---------------+
+
+int *createLList(int size){
+	int *list;
+	list = malloc((size + 2) * 4);
+	//next
+	*list = (int) list;
+	//prev
+	*(list + 1) = (int) list;
+	return list;
+}
+
+int *addNodeToLList(int size,int* list){
+	int *node;
+	int *pr;
+	node = malloc((size + 2) * 4);
+	pr = (int *) *(list + 1);
+	//Prev	
+	*(list + 1) = (int) node;
+	*pr = (int) node;
+	*node = (int) list;
+	*(node + 1) = (int) pr;
+	return node;
+}
+
+void removeNode(int *node){
+  int *next;
+  int *prev;
+  next = (int *) *node;
+  prev = (int *) *(node+1);
+  *prev = (int) next;
+  *(next+1) = (int) prev;
+}
+
+int *getNextNode(int *node){
+	return (int *) *node;
+}
+
+int *getPrevNode(int *node){
+	return (int *) *(node + 1);
+}
+
+int getListEntry(int pos,int *node){
+	pos = pos + 1;
+	return *(node + pos);
+}
+
+void setListEntry(int pos,int value,int *node){
+	pos = pos + 1;
+	*(node + pos) = value;
+}
+// -----------------------------------------------------------------
+// -------------------Assignment 1 Loading, Scheduling, Switching --
+// -----------------------------------------------------------------
+//@Team
+//We Create the Linked List with 3 entry's
+//And copy the actual state of the reg, pc, and the memory pointer
+//into the list
+//List View:
+//+-------------------+
+//| PC		      |
+//+-------------------+
+//| *reg	      |
+//+-------------------+
+//| *mem 	      |
+//+-------------------+
+//Note for now we don't switch 
+//the memory because we use the same binary
+//and thus the same memory
+//But we create the list in mind that we maybe
+//must load more binaries in the future
+
+void prepareContext(){
+	int *node;
+	int *registerDummy;
+	int i;
+	pList = (int*)createLList(3);
+	setListEntry(1,pc,pList);
+	setListEntry(2,(int)registers,pList);
+	while(instances > 1){
+		registerDummy = (int*) malloc(32 * 4);
+		i = 0;
+		while(i < 32){
+			*(registerDummy+i) = *(registers+i);
+			i = i + 1;
+		}
+		node = (int*)addNodeToLList(3,pList);
+		setListEntry(1,pc,node);
+		setListEntry(2,(int)registerDummy,node);
+		instances = instances - 1;
+	}
+}
+void contextSwitch(){
+	setListEntry(1,pc,pList);
+	setListEntry(2,(int)registers,pList);
+	pList = getNextNode(pList);
+	pc = getListEntry(1,pList);
+	registers = (int *)getListEntry(2,pList);	
+}
+
+
