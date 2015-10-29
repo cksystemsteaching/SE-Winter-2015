@@ -3723,7 +3723,7 @@ void emitYield() {
 
 
 int segment_size;			// size of a segment in segmentTable
-int segmentAllocator = 0;	// Boumpointer of segmentTable
+int segmentAllocator ;	// Boumpointer of segmentTable
 int *readyProcesses;		// list for ready processes
 int *blockingProcesses;		// list of process waiting for a data or interrupt, ...
 int *runningProcess;		// current process in cpu 
