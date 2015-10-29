@@ -1,16 +1,13 @@
 int main() {
-  int a;
-  int pid;
-  a = add(100);
-  pid = getpid();
-  putchar(pid+'0');
-  putchar(10);
-  exit(a);
-}
+  int a; 
 
-int add(int n) {
-  if (n == 0)
-    return 0;
-  else 
-    return add(n-1) + n;
+  a = 1; 
+
+  while (a < 5){
+     putchar(a + '0');
+     putchar(10);
+     yield();
+     a = a + 1; 
+  }
+  exit(0);
 }

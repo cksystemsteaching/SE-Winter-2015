@@ -184,6 +184,8 @@ int getSymbol();
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
+int isEmulator = 0;
+
 int SYM_EOF          = -1; // end of file
 int SYM_IDENTIFIER   = 0;  // identifier
 int SYM_INTEGER      = 1;  // integer
@@ -634,18 +636,25 @@ int debug_write   = 0;
 int debug_open    = 0;
 int debug_malloc  = 0;
 int debug_getchar = 0;
-int debug_syscalls= 0;
 int debug_getpid  = 0;
-int debug_os      = 1;
+int debug_yield   = 1;
+
+int debug_sm      = 1;
+int debug_pr      = 0;
 
 int debug_registers   = 0;
 int debug_disassemble = 0;
 
 
 
-int pid;                 // last process identifier
+int pid          = 0;                   // last process identifier
+int sr           = 0;                   // segment register
+
+int segment_size;
+int segmentBumpPointer = 0;
 
 int *readyQ;
+
 
 // List Operations (generic)
 int* os_createQueue();                     // create empty queue
@@ -658,17 +667,18 @@ int* os_searchPqueue(int* list, int key);  //  search process queue for given pi
 void os_printQueue(int* list);
 
 // process functions
-int* os_createProcess(int memorySize);     // create new process element
-int  os_getProcessPid(int* process);        // get pid for a given process
-int  os_getProcessPc(int* process);         // get program counter of process object
+int* os_createProcess();     // create new process element
+int  os_getProcessID(int* process);        // get pid for a given process
+int  os_getProcessPc(int* process);        // get program counter of process object
 int* os_getProcessRegister(int* process);  // get pointer to registers of a process
-int* os_getProcessMemory(int* process);    // get pointer to memory of a given process
+int os_getProcessSegment(int* process);    // get pointer to memory of a given process
 
 
 // functions for process scheduling:
 void os_restoreContext();                  //  restore context (reg,mem,pc) of a given process
 void os_saveContext();                     // save context of current process
-int  os_contextSwitch(int notTerminated);   // carry out a context switch
+int  os_contextSwitch(int notTerminated);  // carry out a context switch
+int  os_kmalloc();                         // allocate segment memory
 void os_fifo();                            // process scheduling modelled after fifo queue
 
 
@@ -697,9 +707,9 @@ int* os_removeQueue(int* list, int* data) {
     }
 
     if ((int)data == *list) {      // case 1: we must remove the head
-         // data is head (?)
-         *list = *data;
-         tmp = (int*)*list;
+        // data is head (?)
+        *list = *data;
+        tmp = (int*)*list;
 
 
          if ((int)tmp != 0) {
@@ -783,16 +793,14 @@ void os_printQueue(int* list) {
     if ((int)q == 0)
         return;
 
-    //printString('[','O','S',']',' ','C','u','r','r','e','n','t',' ','Q','u','e','u','e',':',' ');
-    print((int*) "[OS] Current Queue :");
+    print((int*) "[PR] Current Queue: ");
     while (q != tail) {
-        print(itoa(os_getProcessPid(q), string_buffer, 10, 0));
+        print(itoa(os_getProcessID(q), string_buffer, 10, 0));
         putchar(',');
         q = (int*)*q;
     }
-    print(itoa(os_getProcessPid(q), string_buffer, 10, 0));
-    putchar('.');
-    putchar(10);
+    print(itoa(os_getProcessID(q), string_buffer, 10, 0));
+    println();
 }
 
 // process:  create a new process object:
@@ -805,24 +813,38 @@ void os_printQueue(int* list) {
 // |4 register ptr    |
 // |5 memory ptr      |
 // +------------------+
-int* os_createProcess(int memorySize) {
+int* os_createProcess() {
     int *new;
     new = malloc(5*4);
 
     pid = pid + 1;   // use 0 for the operating system
 
-    *(new + 0) = 0; // next pointer
-    *(new + 1) = 0; // prev pointer
-    *(new + 2) = pid; // PID
-    *(new + 3) = 0;             // PC
+    *(new + 0) = 0;                  // next pointer
+    *(new + 1) = 0;                  // prev pointer
+    *(new + 2) = pid;                // PID
+    *(new + 3) = 0;                  // PC
     *(new + 4) = (int)malloc(32*4);  // registers
-    *(new + 5) = (int)malloc(memorySize);  // memory
+    *(new + 5) = sr;                 // segment register
 
+    *(registers + REG_ZR) = 0;
+
+    if (debug_pr) {
+        print((int*) "[PR] create process ");
+    	itoa(pid, string_buffer, 10, 2);
+        print(string_buffer);
+        putchar(CHAR_LF);
+    }
+    if (debug_sm) {
+        print((int*) "[SM] Current SR: ");
+        print(itoa(sr, string_buffer, 10, 10));
+        println();
+    }
     return new;
+
 }
 
 
-int os_getProcessPid(int* process) {
+int os_getProcessID(int* process) {
     return *(process + 2);
 }
 
@@ -834,8 +856,8 @@ int* os_getProcessRegister(int* process) {
     return (int*)*(process + 4);
 }
 
-int *os_getProcessMemory(int* process) {
-    return (int*)*(process + 5);
+int os_getProcessSegment(int* process) {
+    return *(process + 5);
 }
 
 // Restore Context from Head Process
@@ -845,7 +867,7 @@ void os_restoreContext() {
     process = os_getHead(readyQ);
     pc = os_getProcessPc(process);
     registers = os_getProcessRegister(process);
-    memory = os_getProcessMemory(process);
+    sr = os_getProcessSegment(process);
 }
 
 // save context of current process
@@ -857,10 +879,10 @@ void os_saveContext() {
 
 
 void os_printSwitch(int *process) {
-    if (debug_os) {
+    if (debug_pr) {
         os_printQueue(readyQ);
-        print((int*) "[OS] switch to PID");
-        itoa(os_getProcessPid(process), string_buffer, 10, 2);
+        print((int*) "[PR] switch to PID");
+        itoa(os_getProcessID(process), string_buffer, 10, 2);
         print(string_buffer);
         putchar(CHAR_LF);
     }
@@ -879,7 +901,7 @@ int os_contextSwitch(int notTerminated) {
     os_restoreContext();
     process = os_getHead(readyQ);
     os_printSwitch(process);
-    return os_getProcessPid(process);
+    return os_getProcessID(process);
 }
 
 void os_fifo() {
@@ -889,6 +911,13 @@ void os_fifo() {
     os_appendQueue(readyQ, headp);
 }
 
+
+int os_kmalloc() {
+    int old;
+    old = segmentBumpPointer;
+    segmentBumpPointer = segmentBumpPointer + segment_size;
+    return old;
+}
 
 
 // -----------------------------------------------------------------
@@ -936,6 +965,9 @@ void emitPutchar();
 void emitGetpid();
 void syscall_getpid();
 
+void emitYield();
+void syscall_yield();
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int SYSCALL_EXIT    = 4001;
@@ -943,6 +975,7 @@ int SYSCALL_READ    = 4003;
 int SYSCALL_WRITE   = 4004;
 int SYSCALL_OPEN    = 4005;
 int SYSCALL_GETPID  = 4020;
+int SYSCALL_YIELD   = 4162;
 int SYSCALL_MALLOC  = 5001;
 int SYSCALL_GETCHAR = 5002;
 
@@ -993,6 +1026,7 @@ void fetch();
 void execute();
 void run();
 
+void initRegisterPointers(int *process);
 void parse_args(int argc, int *argv);
 
 void up_push(int value);
@@ -1009,6 +1043,7 @@ int EXCEPTION_UNKNOWNINSTRUCTION = 3;
 int EXCEPTION_HEAPOVERFLOW       = 4;
 int EXCEPTION_UNKNOWNSYSCALL     = 5;
 int EXCEPTION_UNKNOWNFUNCTION    = 6;
+int EXCEPTION_SEGMENTATIONFAULT  = 7;
 
 int *EXCEPTIONS; // array of strings representing exceptions
 
@@ -1023,7 +1058,7 @@ int reg_lo = 0; // lo register for multiplication/division
 // ------------------------- INITIALIZATION ------------------------
 
 void initInterpreter() {
-    EXCEPTIONS = malloc(7*4);
+    EXCEPTIONS = malloc(8*4);
 
     *(EXCEPTIONS + EXCEPTION_SIGNAL)             = (int) "signal";
     *(EXCEPTIONS + EXCEPTION_ADDRESSERROR)       = (int) "address error";
@@ -1031,6 +1066,7 @@ void initInterpreter() {
     *(EXCEPTIONS + EXCEPTION_HEAPOVERFLOW)       = (int) "heap overflow";
     *(EXCEPTIONS + EXCEPTION_UNKNOWNSYSCALL)     = (int) "unknown syscall";
     *(EXCEPTIONS + EXCEPTION_UNKNOWNFUNCTION)    = (int) "unknown function";
+    *(EXCEPTIONS + EXCEPTION_SEGMENTATIONFAULT)  = (int) "Segmentation Fault";
 
     registers = malloc(32*4);
 }
@@ -3296,6 +3332,7 @@ int main_compiler() {
     emitGetchar();
     emitPutchar();
     emitGetpid();
+    emitYield();
 
     // parser
     gr_cstar();
@@ -3493,8 +3530,15 @@ int tlb(int vaddr) {
     if (vaddr % 4 != 0)
         exception_handler(EXCEPTION_ADDRESSERROR);
 
+    if (isEmulator) {
+        if (vaddr > sr + segment_size)
+            exception_handler(EXCEPTION_SEGMENTATIONFAULT);
+        if (vaddr < 0)
+            exception_handler(EXCEPTION_SEGMENTATIONFAULT);
+        return (sr + vaddr) / 4;
+    }
     // physical memory is word-addressed for lack of byte-sized data type
-    return vaddr / 4;
+    return vaddr/4;
 }
 
 int loadMemory(int vaddr) {
@@ -3665,6 +3709,7 @@ void loadBinary() {
 // --------------------------- SYSCALLS ----------------------------
 // -----------------------------------------------------------------
 
+
 void emitExit() {
     createSymbolTableEntry(GLOBAL_TABLE, (int*) "exit", binaryLength, FUNCTION, INT_T, 0);
 
@@ -3679,21 +3724,6 @@ void emitExit() {
     emitRFormat(0, 0, 0, 0, FCT_SYSCALL);
 }
 
-//void syscall_exit() {
-//    int exitCode;
-//
-//    exitCode = *(registers+REG_A0);
-//
-//    *(registers+REG_V0) = exitCode;
-//
-//    print(binaryName);
-//    print((int*) ": exiting with error code ");
-//    print(itoa(exitCode, string_buffer, 10, 0));
-//    println();
-//
-//    exit(0);
-//}
-
 void syscall_exit() {
     int exitCode;
     int* process;
@@ -3703,7 +3733,7 @@ void syscall_exit() {
     exitCode = *(registers+REG_A0);
 
     print((int*)"[OS] PID");
-    print(itoa(os_getProcessPid(process), string_buffer, 10, 0));
+    print(itoa(os_getProcessID(process), string_buffer, 10, 0));
     print((int*)" Terminated with ");
 
     *(registers+REG_V0) = exitCode;
@@ -3956,7 +3986,7 @@ void emitPutchar() {
 void syscall_getpid() {
     int *process;
     process = os_getHead(readyQ);
-    *(registers+REG_V0) = os_getProcessPid(process);
+    *(registers+REG_V0) = os_getProcessID(process);
     if (debug_getpid) {
         print(binaryName);
         print((int*) ": getpid ");
@@ -3980,6 +4010,39 @@ void emitGetpid() {
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
+void emitYield() {
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "yield", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_YIELD);
+    emitRFormat(0, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_yield() {
+    int* process;
+
+    process = os_getHead(readyQ);
+
+    if (debug_yield) {
+        print(binaryName);
+        print((int*) ": yield on PID ");
+        print(itoa(os_getProcessID(process), string_buffer, 10, 3));
+        println();
+    }
+
+    os_saveContext();
+    os_removeQueue(readyQ, process);
+    os_appendQueue(readyQ, process);
+
+
+}
+
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -4000,21 +4063,28 @@ void fct_syscall() {
         syscall_exit();
     } else if (*(registers+REG_V0) == SYSCALL_READ) {
         syscall_read();
+        pc = pc + 4;
     } else if (*(registers+REG_V0) == SYSCALL_WRITE) {
         syscall_write();
+        pc = pc + 4;
     } else if (*(registers+REG_V0) == SYSCALL_OPEN) {
         syscall_open();
+        pc = pc + 4;
     } else if (*(registers+REG_V0) == SYSCALL_MALLOC) {
         syscall_malloc();
+        pc = pc + 4;
     } else if (*(registers+REG_V0) == SYSCALL_GETCHAR) {
         syscall_getchar();
+        pc = pc + 4;
     } else if (*(registers+REG_V0) == SYSCALL_GETPID) {
         syscall_getpid();
+        pc = pc + 4;
+    } else if (*(registers+REG_V0) == SYSCALL_YIELD) {
+        pc = pc + 4;
+        syscall_yield();
     } else {
         exception_handler(EXCEPTION_UNKNOWNSYSCALL);
     }
-
-    pc = pc + 4;
 }
 
 void fct_nop() {
@@ -4409,15 +4479,6 @@ void execute() {
     }
 }
 
-//void run() {
-//    while (1) {
-//        fetch();
-//        decode();
-//        pre_debug();
-//        execute();
-//        post_debug();
-//    }
-//}
 void run() {
     int currentPID;
     int currentInstCount;
@@ -4425,19 +4486,19 @@ void run() {
     int* headProcess;
 
     currentInstCount = 0;
-    instrPerContextSwitch = 10;
+    instrPerContextSwitch = 50;
     headProcess = os_getHead(readyQ);
+
     os_printSwitch(headProcess);
     os_restoreContext();
 
-
-    currentPID = os_getProcessPid(headProcess);
+    currentPID = os_getProcessID(headProcess);
 
     while (1) {
         headProcess = os_getHead(readyQ);
         if ((int)headProcess == 0) {
             exit(0);
-	} else if (currentPID != os_getProcessPid(headProcess)) {
+	} else if (currentPID != os_getProcessID(headProcess)) {
             currentPID = os_contextSwitch(0);
             currentInstCount = 0;
 	} else {
@@ -4456,32 +4517,22 @@ void run() {
     }
 }
 
-//int* parse_args(int argc, int *argv, int *cstar_argv) {
-//    // assert: ./selfie -m size executable {-m size executable}
-//
-//    memorySize = atoi((int*)*(cstar_argv+2)) * 1024 * 1024 / 4;
-//
-//    debug_boot(memorySize);
-//
-//    // return executable file name
-//    return (int*)*(argv+3);
-//}
+void initRegisterPointers(int* process) {
+    registers           = (int*)*(process + 4);
+    // initialize stack pointer
+    *(registers+REG_SP) = segment_size - 4;
+    // initialize global pointer
+    *(registers+REG_GP) = binaryLength;
+    // initialize heap/bump pointer (malloc)
+    *(registers+REG_K1) = *(registers+REG_GP);
+    binaryLength = 0;
+}
 
 void parse_args(int argc, int *argv) {
     // assert: ./selfie -m size executable {-m size executable}
-    int tmp;
 
     // memory size in bytes and executable file name
-    //initMemory(atoi((int*) *(argv+2)) * 1024 * 1024, (int*) *(argv+3));
-    // memory     = malloc(size);
-
-    tmp = atoi((int*) *(argv + 2));
-    memorySize = tmp * 1024 * 1024;
-    binaryName   = (int*) *(argv+3);
-    binaryLength = 0;
-
-    // initialize stack pointer
-    // *(registers+REG_SP) = memorySize - 4;
+    initMemory(atoi((int*) *(argv+2)) * 1024 * 1024, (int*) *(argv+3));
 
     print(binaryName);
     print((int*) ": memory size ");
@@ -4532,67 +4583,46 @@ void up_copyArguments(int argc, int *argv) {
     }
 }
 
+
 int main_emulator(int argc, int *argv) {
     int numberOfProcesses;
-    int* filename;
-    int* new;
+    int* process;
+
     initInterpreter();
 
-    readyQ            = os_createQueue();
+    isEmulator        = 1;
+    segment_size      = 8 * 1024 * 1024;
+    numberOfProcesses = 4;
+
+    readyQ = os_createQueue();
     parse_args(argc, argv);
-    numberOfProcesses = 2;
 
     while (numberOfProcesses > 0) {
-        // Debug Meldung: print n
+        sr      = os_kmalloc();
+        process = os_createProcess();
+        os_appendQueue(readyQ, process);
 
-        new = os_createProcess(memorySize);
-        os_appendQueue(readyQ, new);
-
-        registers = (int*)*(new + 4);
-        *(registers + 0) = 0;
-        memory    = (int*)*(new + 5);
-
-        // initialize stack pointer
-        *(registers+REG_SP) = (memorySize - 4) ;
-        // initialize global pointer
         loadBinary(binaryName);
-        *(registers+REG_GP) = binaryLength;
-        // initialize heap/bump pointer (malloc)
-        *(registers+REG_K1) = *(registers+REG_GP);
 
+        initRegisterPointers(process);
         up_copyArguments(argc-3, argv+3);
 
         numberOfProcesses = numberOfProcesses - 1;
-        binaryLength = 0;
 
-        if (debug_os) {
-            print((int*) "[OS] create process");
-    	    itoa(pid, string_buffer, 10, 2);
-            print(string_buffer);
-            putchar(CHAR_LF);
+        if (debug_sm) {
+            print((int*) "[SM] current SP: ");
+            print(itoa(*(registers+REG_SP)+sr, string_buffer, 10, 10));
+            println();
+            print((int*) "--------------------------");
+            println();
         }
     }
     run();
 
     exit(0);
 }
-//int main_emulator(int argc, int *argv) {
-//    initInterpreter();
-//
-//    parse_args(argc, argv);
-//
-//    loadBinary();
-//
-//    *(registers+REG_GP) = binaryLength;
-//
-//    *(registers+REG_K1) = *(registers+REG_GP);
-//
-//    up_copyArguments(argc-3, argv+3);
-//
-//    run();
-//
-//    exit(0);
-//}
+
+
 
 // -----------------------------------------------------------------
 // ----------------------------- MAIN ------------------------------
