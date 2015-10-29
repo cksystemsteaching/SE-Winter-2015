@@ -686,6 +686,7 @@ int toYield = 0;
 int switchAfterMInstructions;
 int switchIn;
 int *pList;
+int *segTable;
 
 int *createLList(int size);
 int *addNodeToLList(int size, int *list);
@@ -4384,9 +4385,17 @@ void prepareContext(){
 	int *node;
 	int *registerDummy;
 	int i;
+    int *segNode;
+    int bumpPointer;
+    bumpPointer = 0;
 	pList = (int*)createLList(3);
-	setListEntry(1,pc,pList);
+	segTable = (int*)createLList(2);
+    setListEntry(1,pc,pList);
 	setListEntry(2,(int)registers,pList);
+    setListEntry(3,(int)segTable,pList);
+    setListEntry(1,(int)memory,segTable);
+    setListEntry(2,binaryLength,segTable);
+    bumpPointer = bumpPointer + binaryLength;
 	while(instances > 1){
 		registerDummy = (int*) malloc(32 * 4);
 		i = 0;
@@ -4395,15 +4404,25 @@ void prepareContext(){
 			i = i + 1;
 		}
 		node = (int*)addNodeToLList(3,pList);
-		setListEntry(1,pc,node);
+	    segNode = (int*)addNodeToLList(2,segTable);
+        setListEntry(1,pc,node);
 		setListEntry(2,(int)registerDummy,node);
+        setListEntry(3,(int)segNode,node);
+        setListEntry(1,(int)(memory + bumpPointer),segNode);
+        setListEntry(2,binaryLength,segNode);
+        bumpPointer = bumpPointer + binaryLength;
+        printf("%d\n", bumpPointer); //@debug
 		instances = instances - 1;
 	}
 }
 void contextSwitch(){
+    int *node;
 	setListEntry(1,pc,pList);
 	setListEntry(2,(int)registers,pList);
 	pList = getNextNode(pList);
 	pc = getListEntry(1,pList);
-	registers = (int *)getListEntry(2,pList);	
+	registers = (int *)getListEntry(2,pList);
+    node = (int*)getListEntry(3,pList);
+    printf("memory: %d\n", node); //@debug    
+    memory = (int *)getListEntry(1,node);
 }
