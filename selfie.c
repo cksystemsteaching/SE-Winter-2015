@@ -603,12 +603,12 @@ int *memory;
 int  memorySize;
 int *processList;
 int  counterProcesses;
-
+int  isEmulator;
+int *currProcess;
 int *segmentationTable;
 int *currMemoryPos;
 int  usedMemorySize;
 int  segmentSize;
-int  memOffset;
 
 int *binaryName;
 int  binaryLength;
@@ -3237,6 +3237,8 @@ int tlb(int vaddr) {
     if (vaddr % 4 != 0)
         exception_handler(EXCEPTION_ADDRESSERROR);
 
+	if (isEmulator == 1)
+		return (vaddr+*(currProcess+5))/4;
     // physical memory is word-addressed for lack of byte-sized data type
     return vaddr / 4;
 }
@@ -3736,6 +3738,30 @@ int* initList(){
 	return borders;
 }
 
+int* getSegmentStart(int key){
+	if(key < 0){
+		print((int*)"getSegmentStart: key < 0");
+		exit(0);
+	}
+	if(key > counterProcesses){
+		print((int*)"getSegmentStart: key > counterProcesses");
+		exit(0);
+	}
+	return (int*)*(segmentationTable + 2*key);
+}
+
+int getSegmentSize(int key){
+	if(key < 0){
+		print((int*)"getSegmentEnd: key < 0");
+		exit(0);
+	}
+	if(key > counterProcesses){
+		print((int*)"getSegmentEnd: key > counterProcesses");
+		exit(0);
+	}
+	return *(segmentationTable+2*key+1);
+}
+
 // create list element
 // data is the key of the process and must be an integer
 // starts at 0 and increases per process
@@ -3747,8 +3773,8 @@ int* createListElement(int data){
 	*(newElement+2) = data;	// key
 	*(newElement+3) = 0; // pc
 	*(newElement+4) = (int)malloc(32*4); // registers
-	*(newElement+5) = (int)segmentationTable;//(int)malloc(memorySize*4);
-	*(newElement+6) = *(segmentationTable+1);
+	*(newElement+5) = (int)getSegmentStart(data);//(int)segmentationTable;//(int)malloc(memorySize*4);
+	*(newElement+6) = getSegmentSize(data);//*(segmentationTable+1);
 	
 	return newElement;
 }
@@ -3946,7 +3972,7 @@ void setProcessState(int *currProcess){
 void createSegmentationTable(){
 	int segmentSize;
 	int counter;
-	segmentSize = 1024*1024;
+	segmentSize = 8*1024;
 	
 	segmentationTable = malloc(counterProcesses*2*4);
 	
@@ -3959,57 +3985,11 @@ void createSegmentationTable(){
 
 		usedMemorySize = usedMemorySize + segmentSize;
 		counter = counter+1;
+		if(usedMemorySize >= memorySize){
+			print(itoa(usedMemorySize, string_buffer, 10 , 0));println();
+			print(itoa(memorySize, string_buffer, 10 , 0));println();
+		}
 	}
-	if(usedMemorySize >= memorySize){
-		print(itoa(usedMemorySize, string_buffer, 10 , 0));println();
-		print(itoa(memorySize, string_buffer, 10 , 0));println();
-//		print((int*)"createSegmentationTable: memory out of bounds");println();
-	}
-
-
-}
-
-int getSegmentStart(int key){
-	if(key < 0){
-		print((int*)"getSegmentStart: key < 0");
-		exit(0);
-	}
-	if(key > counterProcesses){
-		print((int*)"getSegmentStart: key > counterProcesses");
-		exit(0);
-	}
-	return *(segmentationTable + 2*key);
-}
-int getSegmentSize(int key){
-	if(key < 0){
-		print((int*)"getSegmentEnd: key < 0");
-		exit(0);
-	}
-	if(key > counterProcesses){
-		print((int*)"getSegmentEnd: key > counterProcesses");
-		exit(0);
-	}
-	return *(segmentationTable+2*key+1);
-}
-
-void testDoubleLinkedList1(){
-	int *borders;
-	int *head;
-	int *newElement;
-	int *find;
-	borders = initList();
-	newElement = createListElement('A');
-	appendListElement(newElement, borders);
-	newElement = createListElement('B');
-	appendListElement(newElement, borders);
-	newElement = createListElement('C');
-	appendListElement(newElement, borders);
-	
-	printList(borders);
-	
-	find = findElementByData('D', borders);
-	printListElement(find);
-	
 }
 
 void testDoubleLinkedList(){
@@ -4021,7 +4001,6 @@ void testDoubleLinkedList(){
 
 	newElement = createListElement('A');
 	appendListElement(newElement, borders);
-
 
 	// expected output: 0,65,0 	
 	printList(borders);
@@ -4533,27 +4512,25 @@ void run() {
 	int counterInstructions;
 	int instructionsPerSwitch;
 	int *head;
-	int *tmp;
 
 	counterInstructions = 0;
-	instructionsPerSwitch = 30;
+	instructionsPerSwitch = 50;
 	
 	head = pollListHead(processList);
 	if(*head != 0){
-		tmp = removeFirst(processList);
-		setProcessState(tmp);
+		currProcess = removeFirst(processList);
+		setProcessState(currProcess);
 	}
  	while (1) {
 		if(counterInstructions == instructionsPerSwitch){
 			// save current state and add element at the end of the list
-			saveProcessState(tmp);
-			appendListElement(tmp, processList);
-
+			saveProcessState(currProcess);
+			appendListElement(currProcess, processList);
 			// switch to next process
 			head = pollListHead(processList);
 			if(*head != 0){
-				tmp = removeFirst(processList);
-				setProcessState(tmp);
+				currProcess = removeFirst(processList);
+				setProcessState(currProcess);
 			}
 			
 			counterInstructions = 0;
@@ -4624,35 +4601,37 @@ void up_copyArguments(int argc, int *argv) {
 
 int main_emulator(int argc, int *argv) {
 	int counter;
-	int *file;
-	int *currProcess;
+//	int *currProcess;
 	int *currMemoryPos;
+	isEmulator =1;
 	counter = 0;
-	counterProcesses = 5;
+	counterProcesses = 3;
 	processList = initList();
     
     initInterpreter();
+
     parse_args(argc, argv);
 
 	createSegmentationTable();
-	while(counter < counterProcesses){
 
+	while(counter < counterProcesses){
+		
 		currProcess = createListElement(counter);
 		appendListElement(currProcess, processList);
+		
 		registers = (int*)*(currProcess + 4);
 		currMemoryPos = (int*)*(currProcess + 5);
 		memory = (int*)*currMemoryPos;
+		
 		loadBinary();
-		*(registers+REG_GP) = binaryLength;
 
+		*(registers+REG_GP) = binaryLength;
 		*(registers+REG_K1) = *(registers+REG_GP);
 	    *(registers+REG_SP) = *(currProcess+6)-4;
 
-		saveProcessState(currProcess);
-		
+		binaryLength = 0;
 	    up_copyArguments(argc-3, argv+3);
-
-		counter = counter + 1;		
+		counter = counter + 1;
 	}	
 
     run();
@@ -4666,12 +4645,13 @@ int main_emulator(int argc, int *argv) {
 
 int main(int argc, int *argv) {
     int *firstParameter;
-
+	
     initLibrary();
 
     initRegister();
     initDecoder();
     
+    isEmulator = 0;
     if (argc > 1) {
         firstParameter = (int*) *(argv+1);
 
