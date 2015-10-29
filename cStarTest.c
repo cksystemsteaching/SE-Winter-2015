@@ -27,6 +27,9 @@ int main() {
 //	putchar('Y');
 //	putchar('Z');
 
+	putchar(10);
+
+
 	exit(0);
 
 }

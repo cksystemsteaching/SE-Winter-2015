@@ -753,6 +753,9 @@ int debug_getchar = 0;
 int debug_registers   = 0;
 int debug_disassemble = 0;
 
+///// for yield scheduling
+int debug_yield   = 1;
+
 int EXCEPTION_SIGNAL             = 1;
 int EXCEPTION_ADDRESSERROR       = 2;
 int EXCEPTION_UNKNOWNINSTRUCTION = 3;
@@ -3730,6 +3733,7 @@ void syscall_yield() {
 //   |mem |
 //   +----+  
 
+
 // print pre neighbour, the element itself and next neighbour
 void printListElement(int *element){
 
@@ -4022,6 +4026,27 @@ void createSegmentationTable(){
 	}
 }
 
+
+void testDoubleLinkedList1(){
+	int *borders;
+	int *head;
+	int *newElement;
+	int *find;
+	borders = initList();
+	newElement = createListElement('A');
+	appendListElement(newElement, borders);
+	newElement = createListElement('B');
+	appendListElement(newElement, borders);
+	newElement = createListElement('C');
+	appendListElement(newElement, borders);
+	
+	printList(borders);
+	
+	find = findElementByData('D', borders);
+	printListElement(find);
+	
+}
+
 void testDoubleLinkedList(){
 	int *borders;
 	int *head;
@@ -4141,6 +4166,8 @@ void fct_syscall() {
         syscall_getchar();
     } else if (*(registers+REG_V0) == SYSCALL_YIELD){
 		syscall_yield();    
+    } else if (*(registers+REG_V0) == SYSCALL_YIELD) {
+        syscall_yield();
     } else {
         exception_handler(EXCEPTION_UNKNOWNSYSCALL);
     }
@@ -4544,6 +4571,7 @@ void run() {
 	int counterInstructions;
 	int instructionsPerSwitch;
 	int *head;
+	int *tmp;
 
 	counterInstructions = 0;
 	instructionsPerSwitch = 50;
@@ -4564,7 +4592,6 @@ void run() {
 				currProcess = removeFirst(processList);
 				setProcessState(currProcess);
 			}
-			
 			counterInstructions = 0;
 		} else {
 		    fetch();
@@ -4640,6 +4667,7 @@ int main_emulator(int argc, int *argv) {
 	processList = initList();
     
     initInterpreter();
+    parse_args(argc, argv);
 
     parse_args(argc, argv);
 
@@ -4653,10 +4681,9 @@ int main_emulator(int argc, int *argv) {
 		registers = (int*)*(currProcess + 4);
 		currMemoryPos = (int*)*(currProcess + 5);
 		memory = (int*)*currMemoryPos;
-		
 		loadBinary();
-
 		*(registers+REG_GP) = binaryLength;
+
 		*(registers+REG_K1) = *(registers+REG_GP);
 	    *(registers+REG_SP) = *(currProcess+6)-4;
 
