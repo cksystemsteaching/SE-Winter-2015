@@ -601,6 +601,14 @@ void storeMemory(int vaddr, int data);
 
 int *memory;
 int  memorySize;
+int *processList;
+int  counterProcesses;
+int  isEmulator;
+int *currProcess;
+int *segmentationTable;
+int *currMemoryPos;
+int  usedMemorySize;
+int  segmentSize;
 
 int *binaryName;
 int  binaryLength;
@@ -609,6 +617,10 @@ int  binaryLength;
 
 void initMemory(int size, int *name) {
     memory     = malloc(size);
+    
+    currMemoryPos = memory;
+    usedMemorySize = 0;
+    
     memorySize = size;
 
     binaryName   = name;
@@ -657,6 +669,9 @@ void syscall_getchar();
 
 void emitPutchar();
 
+void emitYield();
+void syscall_yield();
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int SYSCALL_EXIT    = 4001;
@@ -665,6 +680,7 @@ int SYSCALL_WRITE   = 4004;
 int SYSCALL_OPEN    = 4005;
 int SYSCALL_MALLOC  = 5001;
 int SYSCALL_GETCHAR = 5002;
+int SYSCALL_YIELD   = 6000;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -696,6 +712,9 @@ void fct_slt();
 void op_sw();
 void op_teq();
 
+void appendListElement(int *newElement, int *borders);
+void saveProcessState(int *currProcess);
+
 // -----------------------------------------------------------------
 // -------------------------- INTERPRETER --------------------------
 // -----------------------------------------------------------------
@@ -714,7 +733,7 @@ void execute();
 void run();
 
 void debug_boot(int memorySize);
-int* parse_args(int *argv, int *cstar_argv);
+void parse_args(int argc, int *argv);
 void up_push(int value);
 int  up_malloc(int size);
 void up_copyArguments(int argc, int *argv);
@@ -747,9 +766,8 @@ int *EXCEPTIONS; // array of strings representing exceptions
 
 int *registers; // general purpose registers
 
-int memorySize;
-int pc; // program counter
-int ir; // instruction record
+int pc = 0; // program counter
+int ir = 0; // instruction record
 
 int reg_hi = 0; // hi register for multiplication/division
 int reg_lo = 0; // lo register for multiplication/division
@@ -3008,7 +3026,6 @@ void emitMainEntry() {
 // -----------------------------------------------------------------
 
 int main_compiler() {
-	
     initScanner();
     initParser();
 
@@ -3030,6 +3047,7 @@ int main_compiler() {
     emitMalloc();
     emitGetchar();
     emitPutchar();
+    emitYield();
 
     // parser
     gr_cstar();
@@ -3227,6 +3245,8 @@ int tlb(int vaddr) {
     if (vaddr % 4 != 0)
         exception_handler(EXCEPTION_ADDRESSERROR);
 
+	if (isEmulator == 1)
+		return (vaddr+*(currProcess+5))/4;
     // physical memory is word-addressed for lack of byte-sized data type
     return vaddr / 4;
 }
@@ -3665,7 +3685,35 @@ void emitPutchar() {
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
-//-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+void emitYield(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "yield", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_YIELD);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);	
+}
+
+void syscall_yield() {
+			
+	if(currProcess != 0){
+		saveProcessState(currProcess);
+		appendListElement(currProcess, processList);
+	}
+}
+
+
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+// -----------------------------------------------------------------
+// ---------------------    Operating System   ---------------------
+// -----------------------------------------------------------------
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+
 // double linked list has following structure: 
 //
 // 0 +----+
@@ -3677,10 +3725,10 @@ void emitPutchar() {
 // 3 +----+  
 //   | pc |
 // 4 +----+  
-//   |reg |
+//   |reg |--> malloc (32*4)
 // 5 +----+  
 //   |mem |
-// 1 +----+  
+//   +----+  
 
 // print pre neighbour, the element itself and next neighbour
 void printListElement(int *element){
@@ -3691,16 +3739,16 @@ void printListElement(int *element){
 	next = (int*)*(element+1);
 
 	putchar(10);
-	printString('p','r','e',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-	if(prev != 0)
+	print((int*)"pre ");
+	if(prev != (int*)0)
 		print(itoa(*(prev+2), string_buffer, 10, 0));
 	putchar(10);
-	printString('c','u','r','r',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-	if(element != 0)
+	print((int*)"curr ");
+	if(element != (int*)0)
 		print(itoa(*(element+2), string_buffer, 10, 0));
 	putchar(10);
-	printString('n','e','x','t',' ',0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
-	if(next != 0)
+	print((int*)"next ");
+	if(next != (int*)0)
 		print(itoa(*(next+2), string_buffer, 10, 0));
 	putchar(10);
 	putchar(10);
@@ -3721,17 +3769,44 @@ int* initList(){
 	return borders;
 }
 
+int* getSegmentStart(int key){
+	if(key < 0){
+		print((int*)"getSegmentStart: key < 0");
+		exit(0);
+	}
+	if(key > counterProcesses){
+		print((int*)"getSegmentStart: key > counterProcesses");
+		exit(0);
+	}
+	return (int*)*(segmentationTable + 2*key);
+}
+
+int getSegmentSize(int key){
+	if(key < 0){
+		print((int*)"getSegmentEnd: key < 0");
+		exit(0);
+	}
+	if(key > counterProcesses){
+		print((int*)"getSegmentEnd: key > counterProcesses");
+		exit(0);
+	}
+	return *(segmentationTable+2*key+1);
+}
+
 // create list element
+// data is the key of the process and must be an integer
+// starts at 0 and increases per process
 int* createListElement(int data){
 	int *newElement;
-	newElement = malloc (6*4);
+	newElement = malloc (7*4);
 	*(newElement+0) = 0;	//prev
 	*(newElement+1) = 0;	//next
 	*(newElement+2) = data;	// key
 	*(newElement+3) = 0; // pc
 	*(newElement+4) = (int)malloc(32*4); // registers
-	*(newElement+5) = (int)malloc(memorySize*4); // memory
-
+	*(newElement+5) = (int)getSegmentStart(data);
+	*(newElement+6) = getSegmentSize(data); 
+	
 	return newElement;
 }
 
@@ -3770,7 +3845,6 @@ void appendListElement(int *newElement, int *borders){
 	*(newElement+1) = 0;
 }
 
-// insert new element at specified index
 void insertListElementAtBeginning(int *newElement, int *borders){
 	int *head;
 	int *tail;
@@ -3797,7 +3871,7 @@ void printList(int *borders){
 	tail = pollListTail(borders);
 
 	putchar(10);
-	printString('l','i','s','t',' ','s','t','a','r','t',0,0,0,0,0,0,0,0,0,0);
+	print((int*)"print list start");
 
 	if(*head != 0){
 		curr = (int*)*head;
@@ -3812,7 +3886,7 @@ void printList(int *borders){
 		putchar(10);
 	}
 
-	printString('l','i','s','t',' ','e','n','d',0,0,0,0,0,0,0,0,0,0,0,0);
+	print((int*)"print list end");
 	putchar(10);
 
 }
@@ -3824,19 +3898,21 @@ int* removeFirst(int *borders){
 	int *next;
 	int *h;
 	int *t;
+
 	head = pollListHead(borders);
 	tail = pollListTail(borders);
 	
 	if(*head == 0){
-		return 0;
+		return (int*)0;
 	} else if(*head == *tail){
+		curr = (int*)*head;
 		h = malloc(4);
 		t = malloc(4);
 		*h = 0;
 		*t = 0;
 		*borders = (int)h;
 		*(borders+1) = (int)t;
-		return 0;
+		return curr;
 	} else {
 		curr = (int*)*head;
 		next = (int*)*(curr+1);
@@ -3847,6 +3923,8 @@ int* removeFirst(int *borders){
 	}
 }
 
+// does only sort the key attributes at the moment
+//TODO reset pointer
 void sortList(int *borders){
 	int *head;
 	int *tail;
@@ -3903,20 +3981,45 @@ int* findElementByData(int data, int *borders){
 			return curr;
 		}
 	}
-	return 0;
+	return (int*)0;
 
 }
 
 void saveProcessState(int *currProcess){
 	*(currProcess+3) = pc;
 	*(currProcess+4) = (int)registers;
-	*(currProcess+5) = (int)memory;
+
 }
 
 void setProcessState(int *currProcess){
+	int *memSegmentPos;
+	memSegmentPos = (int*)*(currProcess+5);
 	pc = *(currProcess+3);
 	registers = (int*)*(currProcess+4);
-	memory = (int*)*(currProcess+5);
+	memory = (int*)*memSegmentPos;
+}
+
+void createSegmentationTable(){
+	int segmentSize;
+	int counter;
+	segmentSize = 8*1024;
+	
+	segmentationTable = malloc(counterProcesses*2*4);
+	
+	counter = 0;
+	
+	while(counter < counterProcesses){
+		*(segmentationTable + 2 *counter) = (int)currMemoryPos;
+		*(segmentationTable + 2 * counter + 1) = segmentSize;
+		currMemoryPos = currMemoryPos+segmentSize;
+
+		usedMemorySize = usedMemorySize + segmentSize;
+		counter = counter+1;
+		if(usedMemorySize >= memorySize){
+			print(itoa(usedMemorySize, string_buffer, 10 , 0));println();
+			print(itoa(memorySize, string_buffer, 10 , 0));println();
+		}
+	}
 }
 
 void testDoubleLinkedList(){
@@ -3928,7 +4031,6 @@ void testDoubleLinkedList(){
 
 	newElement = createListElement('A');
 	appendListElement(newElement, borders);
-
 
 	// expected output: 0,65,0 	
 	printList(borders);
@@ -3958,7 +4060,7 @@ void testDoubleLinkedList(){
 	
 }
 
-void testDoubleLinkedList1(){
+void testDoubleLinkedList2(){
 	int *borders;
 	int *head;
 	int *newElement;
@@ -4005,18 +4107,9 @@ void testDoubleLinkedList1(){
 	// expected output: 0,68,0
 	printList(borders);
 
-//	newElement = createListElement('A');
-//	appendListElement(newElement, borders);
-//	sortList(borders);
-
-//	printList(borders);
-	
 }
 
 
-
-
-//--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -4046,6 +4139,8 @@ void fct_syscall() {
         syscall_malloc();
     } else if (*(registers+REG_V0) == SYSCALL_GETCHAR) {
         syscall_getchar();
+    } else if (*(registers+REG_V0) == SYSCALL_YIELD){
+		syscall_yield();    
     } else {
         exception_handler(EXCEPTION_UNKNOWNSYSCALL);
     }
@@ -4445,44 +4540,33 @@ void execute() {
     }
 }
 
-int *processList;
-
 void run() {
 	int counterInstructions;
 	int instructionsPerSwitch;
 	int *head;
 
 	counterInstructions = 0;
-	instructionsPerSwitch = 20;
-
-	printList(processList);
-
-	head = removeFirst(processList);
-	setProcessState(head);
-
-    while (1) {
-    	
+	instructionsPerSwitch = 50;
+	
+	head = pollListHead(processList);
+	if(*head != 0){
+		currProcess = removeFirst(processList);
+		setProcessState(currProcess);
+	}
+ 	while (1) {
 		if(counterInstructions == instructionsPerSwitch){
-			printListElement(head);
-			
 			// save current state and add element at the end of the list
-			saveProcessState(head);
-			appendListElement(head, processList);
-			
-			printList(processList);
-			
+			saveProcessState(currProcess);
+			appendListElement(currProcess, processList);
 			// switch to next process
-			head = removeFirst(processList);
-			
-			// get process state
-			if(head != 0){
-				setProcessState(head);
-			} else {
-				exit(0);
+			head = pollListHead(processList);
+			if(*head != 0){
+				currProcess = removeFirst(processList);
+				setProcessState(currProcess);
 			}
 			
 			counterInstructions = 0;
-		}  else {
+		} else {
 		    fetch();
 		    decode();
 		    pre_debug();
@@ -4491,11 +4575,12 @@ void run() {
 		    
 		    counterInstructions = counterInstructions + 1;
 		}
-    }
-	
+	}	
 }
 
 void parse_args(int argc, int *argv) {
+    // assert: ./selfie -m size executable {-m size executable}
+
     // memory size in bytes and executable file name
     initMemory(atoi((int*) *(argv+2)) * 1024 * 1024, (int*) *(argv+3));
 
@@ -4508,13 +4593,12 @@ void parse_args(int argc, int *argv) {
 
 void up_push(int value) {
     int vaddr;
-
     // allocate space for one value on the stack
     *(registers+REG_SP) = *(registers+REG_SP) - 4;
 
     // compute address
     vaddr = *(registers+REG_SP);
-
+	
     // store value
     storeMemory(vaddr, value);
 }
@@ -4529,7 +4613,6 @@ int up_malloc(int size) {
 
 void up_copyArguments(int argc, int *argv) {
     int vaddr;
-
     up_push(argc);
 
     vaddr = up_malloc(argc * 4);
@@ -4548,30 +4631,39 @@ void up_copyArguments(int argc, int *argv) {
     }
 }
 
-int main_emulator(int argc, int *argv, int *cstar_argv) {
-	int counterProcesses;
+int main_emulator(int argc, int *argv) {
 	int counter;
-	int *currProcess;
+	int *currMemoryPos;
+	isEmulator =1;
 	counter = 0;
-	counterProcesses = 2;
+	counterProcesses = 3;
 	processList = initList();
-
+    
     initInterpreter();
 
+    parse_args(argc, argv);
+
+	createSegmentationTable();
+
 	while(counter < counterProcesses){
-		binaryName = parse_args(argc, argv, cstar_argv);
-		loadBinary();
+		
 		currProcess = createListElement(counter);
 		appendListElement(currProcess, processList);
+		
 		registers = (int*)*(currProcess + 4);
-		memory = (int*)*(currProcess + 5);
-		*(registers+REG_SP) = (memorySize - 1) * 4;
+		currMemoryPos = (int*)*(currProcess + 5);
+		memory = (int*)*currMemoryPos;
+		
+		loadBinary();
+
 		*(registers+REG_GP) = binaryLength;
 		*(registers+REG_K1) = *(registers+REG_GP);
-		
+	    *(registers+REG_SP) = *(currProcess+6)-4;
+
+		binaryLength = 0;
 	    up_copyArguments(argc-3, argv+3);
-		counter = counter + 1;		
-	}
+		counter = counter + 1;
+	}	
 
     run();
 
@@ -4583,18 +4675,13 @@ int main_emulator(int argc, int *argv, int *cstar_argv) {
 // -----------------------------------------------------------------
 
 int main(int argc, int *argv) {
-	memorySize = 32;
-
-    int *cstar_argv;
     int *firstParameter;
-
-	numberPrinter = (int*)malloc(12*4);
-	count_processes = 5;
     initLibrary();
 
     initRegister();
     initDecoder();
     
+    isEmulator = 0;
     if (argc > 1) {
         firstParameter = (int*) *(argv+1);
 
@@ -4606,8 +4693,7 @@ int main(int argc, int *argv) {
                     main_emulator(argc, (int*) argv);
                 else
                     exit(-1);
-            }
-            else if(*(firstParameter+1) == 'l'){
+            } else if(getCharacter(firstParameter, 1) == 'l'){
             	testDoubleLinkedList();
             }
             else {
@@ -4620,4 +4706,3 @@ int main(int argc, int *argv) {
         // default: compiler
         main_compiler();
 }
-
