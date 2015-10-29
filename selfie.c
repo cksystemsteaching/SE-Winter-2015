@@ -926,9 +926,11 @@ int* end_process_list;
 int* begin_segment_table;
 int* end_segment_table;
 int* segment_table;
+int* active_segment;
+int* active_process;
 int* last_segment;
 int num_segments;
-int end_procress;
+int end_process;
 int num_processes;
 int num_instructions;
 
@@ -3346,11 +3348,13 @@ int tlb(int vaddr) {
 }
 
 int loadMemory(int vaddr) {
-    return *(memory + tlb(vaddr));
+    int* memory_adress = (int*) *active_segment;
+    return *(memory_adress  + tlb(vaddr)) = data;
 }
 
 void storeMemory(int vaddr, int data) {
-    *(memory + tlb(vaddr)) = data;
+    int* memory_adress = (int*) *active_segment;
+    *(memory_adress  + tlb(vaddr)) = data;
 }
 
 // -----------------------------------------------------------------
@@ -3916,6 +3920,7 @@ void create_processes(){
     }
 
     end_process_list = process;
+    active_segment = (int*) *(begin_process_list+2);
 }
 
 
@@ -3935,6 +3940,18 @@ int* insert_segment(int* begin, int* prev, int* next, int size) {
 	*(next + 2) = (int) node;
     }
 	return node;
+}
+
+void context_switch() {
+    *active_process = pc;
+    active_process  = (int*) *(active_process + 1);
+    if ((int) active_process == 0) {
+	active_process = begin_process_list;
+    }
+    registers = (int*) *(active_process + 2);
+    active_segment = (int*) *(active_process  + 3);
+    pc = *active_process;
+
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
