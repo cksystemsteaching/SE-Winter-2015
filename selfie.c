@@ -4396,7 +4396,7 @@ void up_copyArguments(int argc, int *argv) {
 
 int main_emulator(int argc, int *argv) {
 
-	number_of_proc = 1;
+	number_of_proc = 10;
 
 	proc_count = 0;
 	seg_count=0;
