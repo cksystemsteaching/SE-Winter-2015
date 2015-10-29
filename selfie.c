@@ -677,6 +677,7 @@ int SYSCALL_WRITE   = 4004;
 int SYSCALL_OPEN    = 4005;
 int SYSCALL_MALLOC  = 5001;
 int SYSCALL_GETCHAR = 5002;
+int SYSCALL_YIELD   = 6000;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -3040,6 +3041,7 @@ int main_compiler() {
     emitMalloc();
     emitGetchar();
     emitPutchar();
+    emitYield();
 
     // parser
     gr_cstar();
@@ -3677,6 +3679,29 @@ void emitPutchar() {
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
+void emitYield(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "yield", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_YIELD);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);	
+}
+
+void syscall_yield() {
+			
+	if(currProcess != 0){
+		saveProcessState(currProcess);
+		appendListElement(currProcess, processList);
+	}
+}
+
+
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------    Operating System   ---------------------
@@ -3773,8 +3798,8 @@ int* createListElement(int data){
 	*(newElement+2) = data;	// key
 	*(newElement+3) = 0; // pc
 	*(newElement+4) = (int)malloc(32*4); // registers
-	*(newElement+5) = (int)getSegmentStart(data);//(int)segmentationTable;//(int)malloc(memorySize*4);
-	*(newElement+6) = getSegmentSize(data);//*(segmentationTable+1);
+	*(newElement+5) = (int)getSegmentStart(data);
+	*(newElement+6) = getSegmentSize(data); 
 	
 	return newElement;
 }
@@ -4109,6 +4134,8 @@ void fct_syscall() {
         syscall_malloc();
     } else if (*(registers+REG_V0) == SYSCALL_GETCHAR) {
         syscall_getchar();
+    } else if (*(registers+REG_V0) == SYSCALL_YIELD){
+		syscall_yield();    
     } else {
         exception_handler(EXCEPTION_UNKNOWNSYSCALL);
     }
