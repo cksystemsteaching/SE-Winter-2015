@@ -71,5 +71,5 @@ Build this assignment on top of Assignment 2. Make sure that segmentation of mem
 * Deadline: Nov 5, end of day
 
 * Bonus: implement basic multi-threading support
-** Idia: threads share one address space, processes don't
-** when duplicating processes, create threads instead, i.e., shared code, heap, globals, but private call stacks, private PC, private registers
+ * Idea: threads share one address space, processes don't
+ * when duplicating processes, create threads instead, i.e., shared code, heap, globals, but private call stacks, private PC, private registers
