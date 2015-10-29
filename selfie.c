@@ -669,6 +669,9 @@ void syscall_getchar();
 
 void emitPutchar();
 
+void emitYield();
+void syscall_yield();
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int SYSCALL_EXIT    = 4001;
@@ -708,6 +711,9 @@ void op_lw();
 void fct_slt();
 void op_sw();
 void op_teq();
+
+void appendListElement(int *newElement, int *borders);
+void saveProcessState(int *currProcess);
 
 // -----------------------------------------------------------------
 // -------------------------- INTERPRETER --------------------------
