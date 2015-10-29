@@ -792,7 +792,7 @@ void initInterpreter() {
 	*(EXCEPTIONS + EXCEPTION_UNKNOWNFUNCTION)    = (int) "unknown function";
 
 	registers = malloc(32*4);
-
+	
 	coop = 1;
 	instances = 3;
 	switchAfterMInstructions = 1;
