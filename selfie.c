@@ -694,6 +694,8 @@ int* pList;
 int* segTable;
 int segStart = 0;
 int segSize = 0;
+int stackSize = 10000000;
+int heapSize = 10000000;
 
 int* createLList(int size);
 int* addNodeToLList(int size, int* list);
@@ -755,17 +757,17 @@ int main_emulator(int argc, int* argv);
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
-int debug_load = 1;
+int debug_load = 0;
 
-int debug_read = 1;
-int debug_write = 1;
-int debug_open = 1;
-int debug_malloc = 1;
-int debug_getchar = 1;
-int debug_yield = 1;
+int debug_read = 0;
+int debug_write = 0;
+int debug_open = 0;
+int debug_malloc = 0;
+int debug_getchar = 0;
+int debug_yield = 0;
 
-int debug_registers = 1;
-int debug_disassemble = 1;
+int debug_registers = 0;
+int debug_disassemble = 0;
 
 int EXCEPTION_SIGNAL = 1;
 int EXCEPTION_ADDRESSERROR = 2;
@@ -3429,7 +3431,7 @@ int tlb(int vaddr)
 	exception_handler(EXCEPTION_ADDRESSERROR);
 
     // physical memory is word-addressed for lack of byte-sized data type
-    return (vaddr + segStart) / 4;
+	return (vaddr + segStart) / 4;
 }
 
 int loadMemory(int vaddr)
@@ -4657,37 +4659,46 @@ void prepareContext()
     int i;
     int* segNode;
     int bumpPointer;
+    int count;
     bumpPointer = 0;
     pList = (int*)createLList(3);
     segTable = (int*)createLList(2);
     setListEntry(1, pc, pList);
     setListEntry(2, (int)registers, pList);
     setListEntry(3, (int)segTable, pList);
-    setListEntry(1, (int)memory, segTable);
-    setListEntry(2, binaryLength, segTable);
-    //bumpPointer = bumpPointer + binaryLength;
-    while (instances > 1) {
+    setListEntry(1, 0, segTable);
+    setListEntry(2, (binaryLength + stackSize + heapSize), segTable);
+    bumpPointer = bumpPointer + binaryLength + stackSize + heapSize;
+    *(registers + REG_SP) = bumpPointer;
+	*(registers + REG_K1) = binaryLength;
+	while (instances > 1) {
 	registerDummy = (int*)malloc(32 * 4);
 	i = 0;
 	while (i < 32) {
 	    *(registerDummy + i) = *(registers + i);
 	    i = i + 1;
 	}
+	count = 0;
+	while(count < (binaryLength/4)){
+		*(memory + count + (bumpPointer/4)) = *(memory + count);
+		count = count + 1;
+	}
+    *(registerDummy + REG_SP) = bumpPointer;
+	*(registerDummy + REG_K1) = binaryLength;
 	node = (int*)addNodeToLList(3, pList);
 	segNode = (int*)addNodeToLList(2, segTable);
 	setListEntry(1, pc, node);
 	setListEntry(2, (int)registerDummy, node);
 	setListEntry(3, (int)segNode, node);
-	setListEntry(1, (int)(memory + bumpPointer), segNode);
+	setListEntry(1, bumpPointer, segNode);
 	setListEntry(2, binaryLength, segNode);
-	bumpPointer = bumpPointer + binaryLength;
+	bumpPointer = bumpPointer + binaryLength + stackSize + heapSize;
 	instances = instances - 1;
     }
 }
 void contextSwitch()
 {
     int* node;
-    printf("pList %0X\n",(int)pList);
     setListEntry(1, pc, pList);
     setListEntry(2, (int)registers, pList);
     pList = getNextNode(pList);
@@ -4695,6 +4706,4 @@ void contextSwitch()
     registers = (int*)getListEntry(2, pList);
     node = (int*)getListEntry(3, pList);
     segStart = getListEntry(1, node);
-    printf("node %0X\n",(int)node);
-    printf("segStart %d\n"segStart);
 }
