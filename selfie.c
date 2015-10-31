@@ -687,25 +687,35 @@ int SYSCALL_YIELD = 5003;
 //OS
 int instances;
 int coop;
-int toYield = 0;
 int switchAfterMInstructions;
 int switchIn;
-int* pList;
 int* segTable;
-int segStart = 0;
-int segSize = 0;
 int stackSize = 10000000;
 int heapSize = 10000000;
 
-int* createLList(int size);
-int* addNodeToLList(int size, int* list);
-void removeNode(int* node);
-int* getNextNode(int* node);
-int* getPrevNode(int* node);
-int getListEntry(int pos, int* node);
-void setListEntry(int pos, int value, int* node);
-void prepareContext();
-void contextSwitch();
+int* os_readyQ;
+int* os_runQ;
+int* os_lockQ;
+int os_segSize;
+int os_segStart = 0;
+int os_bumpPointer;
+
+//PID's of new Processes
+int os_pId;
+
+int* os_createLList(int size);
+int* os_addNodeToLList(int size, int* list);
+void os_removeNode(int* node);
+void os_moveNode(int* node, int* toList);
+int* os_getNextNode(int* node);
+int* os_getPrevNode(int* node);
+int os_getListEntry(int pos, int* node);
+void os_setListEntry(int pos, int value, int* node);
+void os_prepareContext();
+void os_contextSwitch();
+int os_kmalloc(int size);
+void os_prepare();
+void os_createProcess();
 // -----------------------------------------------------------------
 // ------------------------- INSTRUCTIONS --------------------------
 // -----------------------------------------------------------------
@@ -756,7 +766,7 @@ void up_copyArguments(int argc, int* argv);
 int main_emulator(int argc, int* argv);
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
-
+//@Debug
 int debug_load = 0;
 
 int debug_read = 0;
@@ -765,6 +775,8 @@ int debug_open = 0;
 int debug_malloc = 0;
 int debug_getchar = 0;
 int debug_yield = 0;
+
+int debug_contextSwitch = 0;
 
 int debug_registers = 0;
 int debug_disassemble = 0;
@@ -803,11 +815,6 @@ void initInterpreter()
     *(EXCEPTIONS + EXCEPTION_UNKNOWNFUNCTION) = (int)"unknown function";
 
     registers = malloc(32 * 4);
-
-    coop = 1;
-    instances = 1;
-    switchAfterMInstructions = 1;
-    switchIn = switchAfterMInstructions;
 }
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -3431,7 +3438,7 @@ int tlb(int vaddr)
 	exception_handler(EXCEPTION_ADDRESSERROR);
 
     // physical memory is word-addressed for lack of byte-sized data type
-	return (vaddr + segStart) / 4;
+    return (vaddr + os_segStart) / 4;
 }
 
 int loadMemory(int vaddr)
@@ -3634,10 +3641,10 @@ void emitYield()
 
 void syscall_yield()
 {
-    contextSwitch();
+    os_contextSwitch();
     if (debug_yield) {
-	print("SYSCALL YIELD");
-	println();
+		print("SYSCALL YIELD");
+		println();
     }
 }
 
@@ -3654,12 +3661,14 @@ void emitExit()
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_EXIT);
     emitRFormat(0, 0, 0, 0, FCT_SYSCALL);
+    
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
 void syscall_exit()
 {
     int exitCode;
-
+	int *node;
     exitCode = *(registers + REG_A0);
 
     *(registers + REG_V0) = exitCode;
@@ -3667,9 +3676,16 @@ void syscall_exit()
     print(binaryName);
     print((int*)": exiting with error code ");
     print(itoa(exitCode, string_buffer, 10, 0));
+	print((int*)" [PID] ");
+	print(itoa(os_pId,string_buffer,10,0));
     println();
-
-    exit(0);
+	
+	node = os_readyQ;
+	os_removeNode(node);
+	if(*os_readyQ == 0){
+    	exit(0);
+	}
+	os_contextSwitch();
 }
 
 void emitRead()
@@ -4402,13 +4418,9 @@ void execute()
 
 //@Team We call here our context switch
 //after post_debug();
-//prepareContext(); Creates the instance list
-//And prepares the pc and registers
-//for all instances
 
 void run()
 {
-    prepareContext();
     while (1) {
 	fetch();
 	decode();
@@ -4419,7 +4431,7 @@ void run()
 	}
 	else {
 	    if (switchIn == 0) {
-		contextSwitch();
+		os_contextSwitch();
 		switchIn = switchAfterMInstructions;
 	    }
 	    else {
@@ -4437,7 +4449,8 @@ void parse_args(int argc, int* argv)
     initMemory(atoi((int*)*(argv + 2)) * 1024 * 1024, (int*)*(argv + 3));
 
     // initialize stack pointer
-    *(registers + REG_SP) = memorySize - 4;
+    //See main_emulator
+	//*(registers + REG_SP) = memorySize - 4;
 
     print(binaryName);
     print((int*)": memory size ");
@@ -4497,13 +4510,28 @@ int main_emulator(int argc, int* argv)
 
     parse_args(argc, argv);
 
-    loadBinary();
+    os_prepare();
 
-    *(registers + REG_GP) = binaryLength;
+    while (instances > 0) {
 
-    *(registers + REG_K1) = *(registers + REG_GP);
+	os_createProcess();
+	
+	loadBinary();
 
-    up_copyArguments(argc - 3, argv + 3);
+	*(registers + REG_GP) = binaryLength;
+
+	*(registers + REG_K1) = *(registers + REG_GP);
+
+	*(registers + REG_SP) = os_bumpPointer - 4;
+
+	up_copyArguments(argc - 3, argv + 3);
+    
+	instances = instances - 1;
+
+	}
+	pc = os_getListEntry(1,os_readyQ);
+	registers = (int *) os_getListEntry(2,os_readyQ);
+	os_pId = os_getListEntry(4,os_readyQ);
 
     run();
 
@@ -4575,7 +4603,7 @@ int main(int argc, int* argv)
 // | ...	   |
 // +---------------+
 
-int* createLList(int size)
+int* os_createLList(int size)
 {
     int* list;
     list = malloc((size + 2) * 4);
@@ -4586,7 +4614,7 @@ int* createLList(int size)
     return list;
 }
 
-int* addNodeToLList(int size, int* list)
+int* os_addNodeToLList(int size, int* list)
 {
     int* node;
     int* pr;
@@ -4600,7 +4628,7 @@ int* addNodeToLList(int size, int* list)
     return node;
 }
 
-void removeNode(int* node)
+void os_removeNode(int* node)
 {
     int* next;
     int* prev;
@@ -4608,25 +4636,46 @@ void removeNode(int* node)
     prev = (int*)*(node + 1);
     *prev = (int)next;
     *(next + 1) = (int)prev;
+    
+	if (next == node) {
+		*next = 0;
+		*prev = 0;
+		return;
+    }
 }
 
-int* getNextNode(int* node)
+void os_moveNode(int* node, int* toList)
+{
+    int* pr;
+    os_removeNode(node);
+    if (toList == 0) {
+	toList = node;
+	return;
+    }
+    pr = os_getPrevNode(toList);
+    *(toList + 1) = (int)node;
+    *pr = (int)node;
+    *node = (int)toList;
+    *(node + 1) = (int)pr;
+}
+
+int* os_getNextNode(int* node)
 {
     return (int*)*node;
 }
 
-int* getPrevNode(int* node)
+int* os_getPrevNode(int* node)
 {
     return (int*)*(node + 1);
 }
 
-int getListEntry(int pos, int* node)
+int os_getListEntry(int pos, int* node)
 {
     pos = pos + 1;
     return *(node + pos);
 }
 
-void setListEntry(int pos, int value, int* node)
+void os_setListEntry(int pos, int value, int* node)
 {
     pos = pos + 1;
     *(node + pos) = value;
@@ -4635,75 +4684,92 @@ void setListEntry(int pos, int value, int* node)
 // -------------------Assignment 1 Loading, Scheduling, Switching --
 // -----------------------------------------------------------------
 //@Team
-//We Create the Linked List with 3 entry's
-//And copy the actual state of the reg, pc, and the memory pointer
-//into the list
-//List View:
-//+-------------------+
-//| PC		      |
-//+-------------------+
-//| *reg	      |
-//+-------------------+
-//| *mem 	      |
-//+-------------------+
-//Note for now we don't switch
-//the memory because we use the same binary
-//and thus the same memory
-//But we create the list in mind that we maybe
-//must load more binaries in the future
-
-void prepareContext()
+void os_contextSwitch()
 {
-    int* node;
-    int* registerDummy;
-    int i;
-    int* segNode;
-    int bumpPointer;
-    int count;
-    bumpPointer = 0;
-    pList = (int*)createLList(3);
-    segTable = (int*)createLList(2);
-    setListEntry(1, pc, pList);
-    setListEntry(2, (int)registers, pList);
-    setListEntry(3, (int)segTable, pList);
-    setListEntry(1, 0, segTable);
-    setListEntry(2, (binaryLength + stackSize + heapSize), segTable);
-    bumpPointer = bumpPointer + binaryLength + stackSize + heapSize;
-    *(registers + REG_SP) = bumpPointer;
-	*(registers + REG_K1) = binaryLength;
-	while (instances > 1) {
-	registerDummy = (int*)malloc(32 * 4);
-	i = 0;
-	while (i < 32) {
-	    *(registerDummy + i) = *(registers + i);
-	    i = i + 1;
+    os_setListEntry(1, pc, os_readyQ);
+    os_setListEntry(2, (int)registers, os_readyQ);
+    os_readyQ = os_getNextNode(os_readyQ);
+ 	if(debug_contextSwitch){
+		println();
+		print((int*)"Switch From [PID] ");
+		print(itoa(os_pId,string_buffer,10,0));
+	}   
+	pc = os_getListEntry(1, os_readyQ);
+    registers = (int*)os_getListEntry(2, os_readyQ);
+    os_segStart = os_getListEntry(3, os_readyQ);
+	os_pId = os_getListEntry(4,os_readyQ);
+	if(debug_contextSwitch){
+		print((int *)"to [PID] ");
+		print(itoa(os_pId,string_buffer,10,0));
+		println();	
 	}
-	count = 0;
-	while(count < (binaryLength/4)){
-		*(memory + count + (bumpPointer/4)) = *(memory + count);
-		count = count + 1;
-	}
-    *(registerDummy + REG_SP) = bumpPointer;
-	*(registerDummy + REG_K1) = binaryLength;
-	node = (int*)addNodeToLList(3, pList);
-	segNode = (int*)addNodeToLList(2, segTable);
-	setListEntry(1, pc, node);
-	setListEntry(2, (int)registerDummy, node);
-	setListEntry(3, (int)segNode, node);
-	setListEntry(1, bumpPointer, segNode);
-	setListEntry(2, binaryLength, segNode);
-	bumpPointer = bumpPointer + binaryLength + stackSize + heapSize;
-	instances = instances - 1;
-    }
 }
-void contextSwitch()
+//Kernel Malloc function
+//Reserve the segments
+int os_kmalloc(int size)
 {
-    int* node;
-    setListEntry(1, pc, pList);
-    setListEntry(2, (int)registers, pList);
-    pList = getNextNode(pList);
-    pc = getListEntry(1, pList);
-    registers = (int*)getListEntry(2, pList);
-    node = (int*)getListEntry(3, pList);
-    segStart = getListEntry(1, node);
+    int oldBP;
+    oldBP = os_bumpPointer;
+    os_bumpPointer = os_bumpPointer + size;
+    return oldBP;
+}
+
+void os_prepare()
+{
+    //Prepare Scheduler
+    os_readyQ = 0;
+    os_runQ = 0;
+    os_lockQ = 0;
+
+    coop = 1;
+    instances = 3;
+    switchAfterMInstructions = 1;
+    switchIn = switchAfterMInstructions;
+    //Our Memory segments are 15MB in size
+    os_segSize = 15 * 1024 * 1024;
+    os_bumpPointer = 0;
+}
+//----------------------------------------------------//
+//					+----------------+
+//					|	   next	 	 |
+//					+----------------+
+//					|	   prev	 	 |
+//					+----------------+
+//					|	   pc		 |
+//					+----------------+
+//					|	   reg	 	 |
+//					+----------------+
+//					|	   memSeg	 |
+//					+----------------+
+//					|	   pid	     |
+//					+----------------+
+//-----------------------------------------------------//
+//We Assume that createProcess only get called
+//on emulator start, so we set the pc and reg
+//in this function new for our convenience
+void os_createProcess()
+{
+    int* newP;
+    int* dRegister;
+    int seg = os_kmalloc(os_segSize);
+    if (os_readyQ == 0) {
+	newP = os_createLList(4);
+	os_readyQ = newP;
+	os_pId = 1;
+    }
+    else {
+	newP = os_addNodeToLList(4, os_readyQ);
+	os_pId = os_pId + 1;
+    }
+    dRegister = malloc(32 * 4);
+    os_setListEntry(1, 0, newP);
+    os_setListEntry(2, (int)dRegister, newP);
+    os_setListEntry(3, seg, newP);
+    os_setListEntry(4, os_pId, newP);
+
+    pc = os_getListEntry(1, newP);
+    registers = (int*)os_getListEntry(2, newP);
+    os_segStart = os_getListEntry(3, newP);
+	//Set Global binaryLength to 0
+	binaryLength = 0;
 }
