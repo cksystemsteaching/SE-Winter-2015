@@ -1,4 +1,4 @@
-// Copyright (c) 2015, the Selfie Project authors. All rights reserved.
+    // Copyright (c) 2015, the Selfie Project authors. All rights reserved.
 // Please see the AUTHORS file for details. Use of this source code is
 // governed by a BSD license that can be found in the LICENSE file.
 //
@@ -687,6 +687,8 @@ int switchAfterMInstructions;
 int switchIn;
 int *pList;
 int *segTable;
+int segStart = 0;
+int segSize = 0;
 
 int *createLList(int size);
 int *addNodeToLList(int size, int *list);
@@ -748,17 +750,17 @@ int main_emulator(int argc, int *argv);
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
-int debug_load = 0;
+int debug_load = 1;
 
-int debug_read    = 0;
-int debug_write   = 0;
-int debug_open    = 0;
-int debug_malloc  = 0;
-int debug_getchar = 0;
-int debug_yield   = 0;
+int debug_read    = 1;
+int debug_write   = 1;
+int debug_open    = 1;
+int debug_malloc  = 1;
+int debug_getchar = 1;
+int debug_yield   = 1;
 
-int debug_registers   = 0;
-int debug_disassemble = 0;
+int debug_registers   = 1;
+int debug_disassemble = 1;
 
 int EXCEPTION_SIGNAL             = 1;
 int EXCEPTION_ADDRESSERROR       = 2;
@@ -795,7 +797,7 @@ void initInterpreter() {
 	registers = malloc(32*4);
 
 	coop = 1;
-	instances = 3;
+	instances = 1;
 	switchAfterMInstructions = 1;
 	switchIn = switchAfterMInstructions;
 }
@@ -3257,7 +3259,7 @@ int tlb(int vaddr) {
 		exception_handler(EXCEPTION_ADDRESSERROR);
 
 	// physical memory is word-addressed for lack of byte-sized data type
-	return vaddr / 4;
+	return (vaddr + segStart) / 4;
 }
 
 int loadMemory(int vaddr) {
@@ -4411,7 +4413,6 @@ void prepareContext(){
         setListEntry(1,(int)(memory + bumpPointer),segNode);
         setListEntry(2,binaryLength,segNode);
         bumpPointer = bumpPointer + binaryLength;
-        printf("%d\n", bumpPointer); //@debug
 		instances = instances - 1;
 	}
 }
@@ -4423,6 +4424,5 @@ void contextSwitch(){
 	pc = getListEntry(1,pList);
 	registers = (int *)getListEntry(2,pList);
     node = (int*)getListEntry(3,pList);
-    printf("memory: %d\n", node); //@debug    
-    memory = (int *)getListEntry(1,node);
+    segStart =getListEntry(1,node);
 }
