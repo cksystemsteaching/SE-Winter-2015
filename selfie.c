@@ -809,7 +809,7 @@ int number_of_proc;
 int proc_count;
 int instr_count;
 int instr_cycles;
-int exited;
+int triggerContextSwitch;
 int yielding = 0;
 
 int *segment_table;
@@ -3637,7 +3637,7 @@ void syscall_exit() {
 
 	proc_list = remove(current_proc, proc_list);
 	
-	exited = 1;
+	triggerContextSwitch = 1;
 
 	if ((int) proc_list == 0)
 		exit(0);
@@ -3722,7 +3722,7 @@ void syscall_write() {
     vaddr = *(registers+REG_A1);
     fd    = *(registers+REG_A0);
 
-    buffer = memory + tlb(vaddr);
+    buffer = ((int*) *current_seg) + tlb(vaddr);
 
     size = write(fd, buffer, size);
 
@@ -3858,8 +3858,7 @@ void emitPutchar() {
 }
 
 void emitYield() {
-	createSymbolTableEntry(GLOBAL_TABLE, (int*) "sched_yield", binaryLength,
-			FUNCTION, INT_T, 0);
+	createSymbolTableEntry(GLOBAL_TABLE, (int*) "sched_yield", binaryLength,FUNCTION, INT_T, 0);
 
 	emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
 	emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
@@ -3873,7 +3872,7 @@ void emitYield() {
 }
 
 void syscall_yield() {
-	context_switch();
+	triggerContextSwitch = 1;
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -3931,9 +3930,7 @@ void fct_syscall() {
     } else if (*(registers+REG_V0) == SYSCALL_MALLOC) {
         syscall_malloc();
     } else if (*(registers+REG_V0) == SYSCALL_YIELD) {
-	instr_count = 0;
-	syscall_yield();
-	instr_count = 0;
+	   syscall_yield();
     } else {
         exception_handler(EXCEPTION_UNKNOWNSYSCALL);
     }
@@ -4338,7 +4335,7 @@ void run() {
 
 	while (1) {
 		while (instr_count < instr_cycles) {
-			if (exited) {
+			if (triggerContextSwitch) {
 				context_switch();
 			} else {
 				fetch();
@@ -4363,7 +4360,7 @@ void context_switch() {
 		current_proc = proc_list;
 	}
 
-	exited = 0;
+	triggerContextSwitch = 0;
 
 	registers = (int*) *(current_proc + 1);
 	current_seg = (int*) *(current_proc + 2);
@@ -4474,17 +4471,17 @@ void emulate(int argc, int *argv) {
     seg_size = memorySize / number_of_proc;
 
     while (proc_count < number_of_proc) {
-	resetInterpreter();
+	   resetInterpreter();
 
-	create_process(argc, argv);
+	   create_process(argc, argv);
 
-    	copyBinaryToMemory();
+       copyBinaryToMemory();
 
-	*(registers+REG_SP) = seg_size - 4;
-   	*(registers+REG_GP) = binaryLength;
-    	*(registers+REG_K1) = *(registers+REG_GP);
+	   *(registers+REG_SP) = seg_size - 4;
+   	   *(registers+REG_GP) = binaryLength;
+       *(registers+REG_K1) = *(registers+REG_GP);
 
-	up_copyArguments(argc, argv);
+	   up_copyArguments(argc, argv);
     }
 
     run();
