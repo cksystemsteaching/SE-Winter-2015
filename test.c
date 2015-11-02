@@ -4,7 +4,7 @@ int main() {
 	counter = 48;
 
 	while (counter != 53) {
-		putchar(counter),
+		putchar(counter);
 		counter = counter + 1;
 		sched_yield();
 	}
