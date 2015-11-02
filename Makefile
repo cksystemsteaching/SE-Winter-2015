@@ -8,13 +8,15 @@ selfcompilation:
 	diff -s selfie1.mips selfie2.mips
 				 
 a1: 
-	clang -v -w -m32 -D'main(a, b)=main(int argc, char **argv)' -o selfie selfie.c
+	clang -v -w -m32 -D'main(a, b)=main(int argc, char **argv)' selfie.c -o selfie
 	touch out
-	./selfie < ourBinary.c
-	./selfie -a 32 out
-	
+	./selfie -c ourBinary.c -o out
+	./selfie -l out -m 32
+
 a2:
-	clang -v -w -m32 -D'main(a, b)=main(int argc, char **argv)' -o selfie selfie.c
+	clang -v -w -m32 -D'main(a, b)=main(int argc, char **argv)' selfie.c -o selfie
 	touch out
-	./selfie < yieldExample.c
-	./selfie -a 32 out
+	./selfie -c yieldExample.c -o out
+	./selfie -l out -m 32
+
+	
