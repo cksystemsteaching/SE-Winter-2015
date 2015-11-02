@@ -663,6 +663,12 @@ void emitPutchar();
 void emitYield();
 void syscall_yield();
 
+void emitLock();
+void syscall_lock();
+
+void emitUnlock();
+void syscall_unlock();
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int SYSCALL_EXIT    = 4001;
@@ -672,6 +678,8 @@ int SYSCALL_OPEN    = 4005;
 int SYSCALL_MALLOC  = 5001;
 int SYSCALL_GETCHAR = 5002;
 int SYSCALL_YIELD   = 5003;
+int SYSCALL_LOCK    = 5004;
+int SYSCALL_UNLOCK  = 5005;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -817,6 +825,9 @@ int *current_seg;
 int *last_created_segment;
 int seg_count;
 int seg_size;
+
+int* lock_owner = (int*) 0;
+int* blocking_queue = (int*) 0;
 
 // --------------------------- PROCESS -----------------------------
 
@@ -3218,6 +3229,8 @@ void compile() {
     emitMalloc();
     emitPutchar();
     emitYield();
+    emitLock();
+    emitUnlock();
 
     // parser
     gr_cstar();
@@ -3722,7 +3735,7 @@ void syscall_write() {
     vaddr = *(registers+REG_A1);
     fd    = *(registers+REG_A0);
 
-    buffer = memory + tlb(vaddr);
+    buffer = (int*)*current_seg + tlb(vaddr);
 
     size = write(fd, buffer, size);
 
@@ -3873,7 +3886,48 @@ void emitYield() {
 }
 
 void syscall_yield() {
+	pc = pc + 4;
 	context_switch();
+}
+
+void emitLock() {
+        createSymbolTableEntry(GLOBAL_TABLE, (int*) "lock", binaryLength,
+                        FUNCTION, INT_T, 0);
+
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+        emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_LOCK);
+        emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+        emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_lock() {
+	// has to be atomic
+	// check if lock owner existant, if not current process is new lock owner, off you go
+	// if there's a lock owner, insert yourself into the blocking queue (+ remove from ready queue!), context switch
+}
+
+void emitUnlock() {
+        createSymbolTableEntry(GLOBAL_TABLE, (int*) "unlock", binaryLength,
+                        FUNCTION, INT_T, 0);
+
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+        emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_UNLOCK);
+        emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+        emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_unlock() {
+	// set lock owner to 0, move one(!) process from blocking to ready queue
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -3931,14 +3985,17 @@ void fct_syscall() {
     } else if (*(registers+REG_V0) == SYSCALL_MALLOC) {
         syscall_malloc();
     } else if (*(registers+REG_V0) == SYSCALL_YIELD) {
-	instr_count = 0;
 	syscall_yield();
-	instr_count = 0;
+    } else if (*(registers+REG_V0) == SYSCALL_LOCK) {
+	syscall_lock();
+    } else if (*(registers+REG_V0) == SYSCALL_UNLOCK) {
+	syscall_unlock();
     } else {
         exception_handler(EXCEPTION_UNKNOWNSYSCALL);
     }
 
-    pc = pc + 4;
+    if (*(registers+REG_V0) != SYSCALL_YIELD)
+    	pc = pc + 4;
 }
 
 void fct_nop() {
