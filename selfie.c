@@ -805,9 +805,10 @@ int reg_lo = 0; // lo register for multiplication/division
 
 void context_switch();
 
-int* insert_process(int pc, int* reg, int* seg, int* prev, int* next);
+int* insert_process(int pc, int* reg, int* seg, int* prev, int* next, int pid);
 int* insert_segment(int* begin, int size, int* prev, int* next);
 int* remove(int* node, int* list);
+void iter_list(int* list);
 
 int *proc_list;
 int *current_proc;
@@ -817,7 +818,7 @@ int number_of_proc;
 int proc_count;
 int instr_count;
 int instr_cycles;
-int exited;
+int triggerContextSwitch;
 int yielding = 0;
 
 int *segment_table;
@@ -826,8 +827,8 @@ int *last_created_segment;
 int seg_count;
 int seg_size;
 
-int* lock_owner = (int*) 0;
-int* blocking_queue = (int*) 0;
+int* lock_owner;
+int* blocked_queue;
 
 // --------------------------- PROCESS -----------------------------
 
@@ -853,10 +854,10 @@ void create_process(int argc, int* argv) {
 
   	// Create process
 	if (proc_count == 0) {
-		proc_list = insert_process(pc, registers, last_created_segment, 0, 0);
+		proc_list = insert_process(pc, registers, last_created_segment, 0, 0, proc_count);
 		last_created_proc = proc_list;
 	} else {
-		last_created_proc = insert_process(pc, registers, last_created_segment, last_created_proc, 0);
+		last_created_proc = insert_process(pc, registers, last_created_segment, last_created_proc, 0, proc_count);
 	}
 	proc_count = proc_count + 1;
 
@@ -3650,7 +3651,7 @@ void syscall_exit() {
 
 	proc_list = remove(current_proc, proc_list);
 	
-	exited = 1;
+	triggerContextSwitch = 1;
 
 	if ((int) proc_list == 0)
 		exit(0);
@@ -3735,9 +3736,10 @@ void syscall_write() {
     vaddr = *(registers+REG_A1);
     fd    = *(registers+REG_A0);
 
-    buffer = (int*)*current_seg + tlb(vaddr);
+    buffer = ((int*) *current_seg) + tlb(vaddr);
 
     size = write(fd, buffer, size);
+    println();
 
     *(registers+REG_V0) = size;
 
@@ -3871,8 +3873,7 @@ void emitPutchar() {
 }
 
 void emitYield() {
-	createSymbolTableEntry(GLOBAL_TABLE, (int*) "sched_yield", binaryLength,
-			FUNCTION, INT_T, 0);
+	createSymbolTableEntry(GLOBAL_TABLE, (int*) "sched_yield", binaryLength,FUNCTION, INT_T, 0);
 
 	emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
 	emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
@@ -3886,48 +3887,76 @@ void emitYield() {
 }
 
 void syscall_yield() {
-	pc = pc + 4;
-	context_switch();
+	triggerContextSwitch = 1;
 }
 
 void emitLock() {
-        createSymbolTableEntry(GLOBAL_TABLE, (int*) "lock", binaryLength,
-                        FUNCTION, INT_T, 0);
+	createSymbolTableEntry(GLOBAL_TABLE, (int*) "lock", binaryLength,FUNCTION, INT_T, 0);
 
-        emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
-        emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
-        emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
-        emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
 
-        emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_LOCK);
-        emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_LOCK);
+	emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
 
-        emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+	emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void printLists() {
+		print((int*) "Ready + Run Processes:\n");
+		iter_list(proc_list);
+
+		print((int*) "Blocking Processes:\n");
+		iter_list(blocked_queue);
 }
 
 void syscall_lock() {
-	// has to be atomic
-	// check if lock owner existant, if not current process is new lock owner, off you go
-	// if there's a lock owner, insert yourself into the blocking queue (+ remove from ready queue!), context switch
+	int* locked_process;
+
+	if ((int) lock_owner == 0) {
+		print((int*) "\nHey noone's got the lock, lemme take it!\n");
+		lock_owner = current_proc;
+	} else {
+		print((int*) "\nAwks, looks like I gotta stop and wait here! :(\n");
+		
+		locked_process = current_proc;
+
+		proc_list = remove (locked_process, proc_list);
+		blocked_queue = insert_process (*locked_process, *(locked_process + 1), *(locked_process + 2), 0, blocked_queue, *(locked_process + 5));
+		triggerContextSwitch = 1;	
+	}
 }
 
 void emitUnlock() {
-        createSymbolTableEntry(GLOBAL_TABLE, (int*) "unlock", binaryLength,
-                        FUNCTION, INT_T, 0);
+	createSymbolTableEntry(GLOBAL_TABLE, (int*) "unlock", binaryLength,FUNCTION, INT_T, 0);
 
-        emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
-        emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
-        emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
-        emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
 
-        emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_UNLOCK);
-        emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_UNLOCK);
+	emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
 
-        emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+	emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
 void syscall_unlock() {
-	// set lock owner to 0, move one(!) process from blocking to ready queue
+	int* next_unblocked_process;
+
+	lock_owner = (int*) 0;
+
+	print((int*) "Unlocking!\n");
+
+	next_unblocked_process = blocked_queue;
+
+	blocked_queue = remove(next_unblocked_process, blocked_queue);
+
+	if ((int) next_unblocked_process != 0)
+		proc_list = insert_process(*next_unblocked_process, *(next_unblocked_process + 1), *(next_unblocked_process + 2), 0, proc_list, *(next_unblocked_process + 5));
+	triggerContextSwitch = 1;	
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -3985,7 +4014,7 @@ void fct_syscall() {
     } else if (*(registers+REG_V0) == SYSCALL_MALLOC) {
         syscall_malloc();
     } else if (*(registers+REG_V0) == SYSCALL_YIELD) {
-	syscall_yield();
+	   syscall_yield();
     } else if (*(registers+REG_V0) == SYSCALL_LOCK) {
 	syscall_lock();
     } else if (*(registers+REG_V0) == SYSCALL_UNLOCK) {
@@ -3994,8 +4023,7 @@ void fct_syscall() {
         exception_handler(EXCEPTION_UNKNOWNSYSCALL);
     }
 
-    if (*(registers+REG_V0) != SYSCALL_YIELD)
-    	pc = pc + 4;
+    pc = pc + 4;
 }
 
 void fct_nop() {
@@ -4395,7 +4423,7 @@ void run() {
 
 	while (1) {
 		while (instr_count < instr_cycles) {
-			if (exited) {
+			if (triggerContextSwitch) {
 				context_switch();
 			} else {
 				fetch();
@@ -4420,7 +4448,7 @@ void context_switch() {
 		current_proc = proc_list;
 	}
 
-	exited = 0;
+	triggerContextSwitch = 0;
 
 	registers = (int*) *(current_proc + 1);
 	current_seg = (int*) *(current_proc + 2);
@@ -4526,22 +4554,22 @@ void emulate(int argc, int *argv) {
     proc_count = 0;
     seg_count = 0;
 
-    instr_cycles = 10;
+    instr_cycles = 50;
 
     seg_size = memorySize / number_of_proc;
 
     while (proc_count < number_of_proc) {
-	resetInterpreter();
+	   resetInterpreter();
 
-	create_process(argc, argv);
+	   create_process(argc, argv);
 
-    	copyBinaryToMemory();
+       copyBinaryToMemory();
 
-	*(registers+REG_SP) = seg_size - 4;
-   	*(registers+REG_GP) = binaryLength;
-    	*(registers+REG_K1) = *(registers+REG_GP);
+	   *(registers+REG_SP) = seg_size - 4;
+   	   *(registers+REG_GP) = binaryLength;
+       *(registers+REG_K1) = *(registers+REG_GP);
 
-	up_copyArguments(argc, argv);
+	   up_copyArguments(argc, argv);
     }
 
     run();
@@ -4551,17 +4579,34 @@ void emulate(int argc, int *argv) {
 // ----------------------------- LIST ------------------------------
 // -----------------------------------------------------------------
 
+void iter_list (int* list) {
+	int* cursor;
+
+	print((int*) "\n-------------------\n");
+	
+	cursor = list;
+
+	while ((int) cursor != 0) {
+		print(itoa(*cursor, string_buffer, 10, 0));
+		cursor = *(cursor + 4);
+		print((int*)"\n");
+	}
+
+	print((int*) "\n-------------------\n");
+}
+
 // Append entry (including specified process payload) to a specified list
-int* insert_process(int pc, int* reg, int* seg, int* prev, int* next) {
+int* insert_process(int pc, int* reg, int* seg, int* prev, int* next, int pid) {
 	int* node;
 
-	node = malloc(4 * 5);
+	node = malloc(6 * 4);
 
 	*node = pc;
 	*(node + 1) = (int) reg;
 	*(node + 2) = (int) seg;
 	*(node + 3) = (int) prev;
 	*(node + 4) = (int) next;
+	*(node + 5) = pid;
 
 	if ((int) prev != 0) {
 		*(prev + 4) = (int) node;
@@ -4597,13 +4642,19 @@ int* insert_segment(int* begin, int size, int* prev, int* next) {
 int* remove(int* node, int* list) {
 	int* next;
 	int* prev;
+
+	if ((int) node == 0)
+		return list;
+
 	next = (int*) *(node + 4);
 	prev = (int*) *(node + 3);
+
 	if ((int) prev != 0) {
 		*(prev + 4) = (int) next;
 	} else {
 		list = next;
 	}
+
 	if ((int) next != 0) {
 		*(next + 3) = (int) prev;
 	}
@@ -4703,3 +4754,4 @@ int main(int argc, int *argv) {
         println();
     }
 }
+

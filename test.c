@@ -3,10 +3,23 @@ int main() {
 
 	counter = 48;
 
-	while (counter != 53) {
+	while (counter != 50) {
 		putchar(counter);
 		counter = counter + 1;
-		sched_yield();
+	}
+
+	lock();
+
+	while (counter != 55) {
+		putchar(counter);
+		counter = counter + 1;
+	}
+
+	unlock();
+
+	while (counter != 56) {
+		putchar(counter);
+		counter = counter + 1;
 	}
 
 	exit(0);
