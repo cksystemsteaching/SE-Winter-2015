@@ -50,3 +50,4 @@ clean:
 	rm -f $(EXEC)
 	rm -f out
 	rm -f $(TEST_BINARY)
+	rm -f *~

@@ -3389,9 +3389,6 @@ void decodeJFormat() {
 int tlb(int vaddr) {
 	if (vaddr % 4 != 0)
 		exception_handler(EXCEPTION_ADDRESSERROR);
-	else if( vaddr >= (int) *(current_seg+1) ) {
-		//exception_handler(EXCEPTION_SEGFAULT);
-	}
 
 	// physical memory is word-addressed for lack of byte-sized data type
 	return vaddr / 4;
@@ -3858,7 +3855,7 @@ void emitPutchar() {
 }
 
 void emitYield() {
-	createSymbolTableEntry(GLOBAL_TABLE, (int*) "yield", binaryLength,
+	createSymbolTableEntry(GLOBAL_TABLE, (int*) "sched_yield", binaryLength,
 			FUNCTION, INT_T, 0);
 
 	emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
@@ -4399,7 +4396,7 @@ void up_copyArguments(int argc, int *argv) {
 
 int main_emulator(int argc, int *argv) {
 
-	number_of_proc = 10;
+	number_of_proc = 1;
 
 	proc_count = 0;
 	seg_count=0;
@@ -4459,3 +4456,4 @@ int main(int argc, int *argv) {
 		// default: compiler
 		main_compiler();
 }
+
