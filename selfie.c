@@ -601,14 +601,17 @@ void storeMemory(int vaddr, int data);
 
 int *memory;
 int  memorySize;
-int *processList;
-int  counterProcesses;
-int  isEmulator;
-int *currProcess;
-int *segmentationTable;
-int *currMemoryPos;
+int *memoryBumpPointer;
 int  usedMemorySize;
-int  segmentSize;
+
+
+int *processList;
+int *currProcess;
+int  counterProcesses;
+
+int *segmentationTable;
+int *currSegment;
+
 
 int *binaryName;
 int  binaryLength;
@@ -618,7 +621,7 @@ int  binaryLength;
 void initMemory(int size, int *name) {
     memory     = malloc(size);
     
-    currMemoryPos = memory;
+    memoryBumpPointer = memory;
     usedMemorySize = 0;
     
     memorySize = size;
@@ -712,8 +715,12 @@ void fct_slt();
 void op_sw();
 void op_teq();
 
-void appendListElement(int *newElement, int *borders);
-void saveProcessState(int *currProcess);
+void appendListElement(int *newElement, int *list);
+void saveProcessState();
+int* findElementByKey(int key, int *list);
+void setProcessState();
+int* pollListHead(int *borders);
+int* removeFirst(int *borders);
 
 // -----------------------------------------------------------------
 // -------------------------- INTERPRETER --------------------------
@@ -753,15 +760,13 @@ int debug_getchar = 0;
 int debug_registers   = 0;
 int debug_disassemble = 0;
 
-///// for yield scheduling
-int debug_yield   = 1;
-
 int EXCEPTION_SIGNAL             = 1;
 int EXCEPTION_ADDRESSERROR       = 2;
 int EXCEPTION_UNKNOWNINSTRUCTION = 3;
 int EXCEPTION_HEAPOVERFLOW       = 4;
 int EXCEPTION_UNKNOWNSYSCALL     = 5;
 int EXCEPTION_UNKNOWNFUNCTION    = 6;
+int EXCEPTION_SEGMENTATIONFAULT  = 7;
 
 int *EXCEPTIONS; // array of strings representing exceptions
 
@@ -778,7 +783,7 @@ int reg_lo = 0; // lo register for multiplication/division
 // ------------------------- INITIALIZATION ------------------------
 
 void initInterpreter() {
-    EXCEPTIONS = malloc(7*4);
+    EXCEPTIONS = malloc(8*4);
 
     *(EXCEPTIONS + EXCEPTION_SIGNAL)             = (int) "signal";
     *(EXCEPTIONS + EXCEPTION_ADDRESSERROR)       = (int) "address error";
@@ -786,6 +791,7 @@ void initInterpreter() {
     *(EXCEPTIONS + EXCEPTION_HEAPOVERFLOW)       = (int) "heap overflow";
     *(EXCEPTIONS + EXCEPTION_UNKNOWNSYSCALL)     = (int) "unknown syscall";
     *(EXCEPTIONS + EXCEPTION_UNKNOWNFUNCTION)    = (int) "unknown function";
+    *(EXCEPTIONS + EXCEPTION_SEGMENTATIONFAULT)  = (int) "segmentation fault [added]";
 
     registers = malloc(32*4);
 }
@@ -3248,8 +3254,6 @@ int tlb(int vaddr) {
     if (vaddr % 4 != 0)
         exception_handler(EXCEPTION_ADDRESSERROR);
 
-	if (isEmulator == 1)
-		return (vaddr+*(currProcess+5))/4;
     // physical memory is word-addressed for lack of byte-sized data type
     return vaddr / 4;
 }
@@ -3442,7 +3446,7 @@ void syscall_exit() {
     exitCode = *(registers+REG_A0);
 
     *(registers+REG_V0) = exitCode;
-
+	println();
     print(binaryName);
     print((int*) ": exiting with error code ");
     print(itoa(exitCode, string_buffer, 10, 0));
@@ -3703,11 +3707,11 @@ void emitYield(){
 }
 
 void syscall_yield() {
-			
-	if(currProcess != 0){
-		saveProcessState(currProcess);
-		appendListElement(currProcess, processList);
-	}
+	saveProcessState();
+	appendListElement(currProcess, processList);
+	
+	currProcess = removeFirst(processList);
+	setProcessState();
 }
 
 
@@ -3717,237 +3721,319 @@ void syscall_yield() {
 // -----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 
-// double linked list has following structure: 
+// a process has following structure:
 //
-// 0 +----+
-//   |prev|
-// 1 +----+  
-//   |next|
-// 2 +----+  
-//   |data|
-// 3 +----+  
-//   | pc |
-// 4 +----+  
-//   |reg |--> malloc (32*4)
-// 5 +----+  
-//   |mem |
-//   +----+  
+// 0 +-----+
+//   |prev | pointer to previous element in list, 0 if non-existent
+// 1 +-----+  
+//   |next | pointer to next element in list, 0 if non-existent
+// 2 +-----+  
+//   |key  | unique identifier of list element
+// 3 +-----+  
+//   | pc  | program counter
+// 4 +-----+  
+//   |reg  | pointer to registers
+// 5 +-----+  
+//   |mem  | pointer to  entry in segmentation table
+// 6 +-----+ 
 
-
-// print pre neighbour, the element itself and next neighbour
-void printListElement(int *element){
-
+// print segmentation table entry
+void printSegmentationTableEntry(int *element){
 	int *prev;
 	int *next;
 	prev = (int*)*element;
 	next = (int*)*(element+1);
 
-	putchar(10);
+	println();
 	print((int*)"pre ");
 	if(prev != (int*)0)
 		print(itoa(*(prev+2), string_buffer, 10, 0));
-	putchar(10);
-	print((int*)"curr ");
-	if(element != (int*)0)
-		print(itoa(*(element+2), string_buffer, 10, 0));
-	putchar(10);
+	println();
+
 	print((int*)"next ");
 	if(next != (int*)0)
 		print(itoa(*(next+2), string_buffer, 10, 0));
-	putchar(10);
-	putchar(10);
+	println();
+
+	print((int*)"key ");
+	if(element != (int*)0)
+		print(itoa(*(element+2), string_buffer, 10, 0));
+	println();
+
+	print((int*)"segPos ");
+	if(element != (int*)0)
+		print(itoa(*(element+3), string_buffer, 10, 0));
+	println();
+
+	print((int*)"segSize ");
+	if(element != (int*)0)
+		print(itoa(*(element+4), string_buffer, 10, 0));
+	println();
+	println();
+
+}
+
+void printProcess(int *element){
+	int *prev;
+	int *next;
+	int *segEntry;
+	prev = (int*)*element;
+	next = (int*)*(element+1);
+	segEntry = (int*)*(element+5);
+
+	println();
+	print((int*)"pre ");
+	if(prev != (int*)0)
+		print(itoa(*(prev+2), string_buffer, 10, 0));
+	println();
+
+	print((int*)"next ");
+	if(next != (int*)0)
+		print(itoa(*(next+2), string_buffer, 10, 0));
+	println();
+
+	print((int*)"key ");
+	if(element != (int*)0)
+		print(itoa(*(element+2), string_buffer, 10, 0));
+	println();
+
+	print((int*)"pc ");
+	if(element != (int*)0)
+		print(itoa(*(element+3), string_buffer, 10, 0));
+	println();
+	
+	print((int*)"segPos ");
+	if(segEntry != (int*)0)
+		print(itoa((int)(segEntry+3), string_buffer, 10, 0));
+	println();
+
+	print((int*)"segSize ");
+	if(segEntry != (int*)0)
+		print(itoa((int)(segEntry+4), string_buffer, 10, 0));
+	println();
+	println();
+
+}
+// print list element 
+void printListElement(int *element){
+	int *prev;
+	int *next;
+	prev = (int*)*element;
+	next = (int*)*(element+1);
+
+	println();
+	print((int*)"pre ");
+	if(prev != (int*)0)
+		print(itoa(*(prev+2), string_buffer, 10, 0));
+	println();
+
+	print((int*)"next ");
+	if(next != (int*)0)
+		print(itoa(*(next+2), string_buffer, 10, 0));
+	println();
+
+	print((int*)"key ");
+	if(element != (int*)0)
+		print(itoa(*(element+2), string_buffer, 10, 0));
+	println();
+
+	print((int*)"pc ");
+	if(element != (int*)0)
+		print(itoa(*(element+3), string_buffer, 10, 0));
+	println();
+	
 }
 
 //initialize head and tail
+//@return: initialized borders
 int* initList(){
-	int *borders;
+	int *list;
 	int *head;
 	int *tail;
-	borders = malloc (2*4);
+	// borders are head and tail of the list
+	// head and tail point to its allocated memory that contain the address of head and tail
+	list = malloc (2*4);
 	head = malloc(4);
 	tail = malloc(4);
 	*head = 0;
 	*tail = 0;
-	*borders = (int)head;
-	*(borders+1) = (int)tail;
-	return borders;
+	*list = (int)head;
+	*(list+1) = (int)tail;
+	return list;
 }
 
-int* getSegmentStart(int key){
-	if(key < 0){
-		print((int*)"getSegmentStart: key < 0");
-		exit(0);
-	}
-	if(key > counterProcesses){
-		print((int*)"getSegmentStart: key > counterProcesses");
-		exit(0);
-	}
-	return (int*)*(segmentationTable + 2*key);
-}
-
-int getSegmentSize(int key){
-	if(key < 0){
-		print((int*)"getSegmentEnd: key < 0");
-		exit(0);
-	}
-	if(key > counterProcesses){
-		print((int*)"getSegmentEnd: key > counterProcesses");
-		exit(0);
-	}
-	return *(segmentationTable+2*key+1);
+int* getSegmentationTableEntry(int key, int *list){
+	int *entry;
+	entry = findElementByKey(key, list);
+	return entry;
 }
 
 // create list element
-// data is the key of the process and must be an integer
-// starts at 0 and increases per process
-int* createListElement(int data){
+// key starts at 0 and increases per process
+// @return: new list element
+int* createProcess(int key){
 	int *newElement;
-	newElement = malloc (7*4);
-	*(newElement+0) = 0;	//prev
-	*(newElement+1) = 0;	//next
-	*(newElement+2) = data;	// key
-	*(newElement+3) = 0; // pc
-	*(newElement+4) = (int)malloc(32*4); // registers
-	*(newElement+5) = (int)getSegmentStart(data);
-	*(newElement+6) = getSegmentSize(data); 
+	int *segEntry;
+	newElement = malloc (6*4);
+	*(newElement+0) = 0;	// prev
+	*(newElement+1) = 0;	// next
+	*(newElement+2) = key;	// unique key
+	*(newElement+3) = 0;	// pc
+	*(newElement+4) = (int)malloc(32*4);	// registers
+	segEntry = getSegmentationTableEntry(key, segmentationTable);
+	*(newElement+5) = (int)segEntry;	// pointer to entry in segmentation table
 	
 	return newElement;
 }
 
-int isListEmpty(int *borders){
-	if(*borders == 0)
+
+// @return: pointer to first element of list
+int* pollListHead(int *list){
+	return (int*)*list;
+}
+
+// @return: pointer to last element of list
+int* pollListTail(int *list){
+	return (int*)*(list+1);
+}
+
+// @return: 1 if list is empty
+// 			0 otherwise
+int isListEmpty(int *list){
+	int *pToHead;
+	pToHead = pollListHead(list);
+	if(*pToHead == 0)
 		return 1;
 	return 0;
 }
 
-// get first element of list
-int* pollListHead(int *borders){
-	return (int*)*borders;
-}
-
-// get last element of list
-int* pollListTail(int *borders){
-	return (int*)*(borders+1);
-}
 
 // add element at the end of the list
-void appendListElement(int *newElement, int *borders){
-	int *head;
-	int *tail;
+void appendListElement(int *newElement, int *list){
+	int *pToHead;
 	int *pToTail;
-	head = pollListHead(borders);
-	tail = pollListTail(borders);
-
-	if(*head == 0){
-		*head = (int)newElement;
-	} else {
-		*newElement = *tail;
-		pToTail = (int*)*tail;
-		*(pToTail+1) = (int)newElement;
+	int *tail;
+	pToHead = pollListHead(list);
+	pToTail = pollListTail(list);
+	if(isListEmpty(list)){	// if list is empty
+		*pToHead = (int)newElement;
+	} else {	// otherwise
+		*newElement = *pToTail;
+		tail = (int*)*pToTail;
+		*(tail+1) = (int)newElement;
 	}
-	*tail = (int)newElement;
+	*pToTail = (int)newElement;
 	*(newElement+1) = 0;
 }
 
-void insertListElementAtBeginning(int *newElement, int *borders){
-	int *head;
-	int *tail;
+void insertListElementAtBeginning(int *newElement, int *list){
 	int *pToHead;
-	head = pollListHead(borders);
-	tail = pollListTail(borders);
+	int *pToTail;
+	int *head;
+	pToHead = pollListHead(list);
+	pToTail = pollListTail(list);
 
-	if(*head == 0){
-		*tail = (int)newElement;
-	} else {
-		*(newElement+1) = *head;
-		pToHead = (int*)*head;
-		*pToHead = (int)newElement;
+	if(isListEmpty(list)){	// if list is empty
+		*pToTail = (int)newElement;
+	} else {	// otherwise
+		*(newElement+1) = *pToHead;
+		head = (int*)*pToHead;
+		*head = (int)newElement;
 	}
-	*head = (int)newElement;
+	*pToHead = (int)newElement;
 
 }
 
-void printList(int *borders){
-	int *head;
-	int *tail;
+// print the list
+// if type == 0: print processes
+// if type == 1: print segmentation table 
+void printList(int *list, int type){
+	int *pToHead;
+	int *pToTail;
 	int *curr;
-	head = pollListHead(borders);
-	tail = pollListTail(borders);
+	pToHead = pollListHead(list);
+	pToTail = pollListTail(list);
 
-	putchar(10);
+	println();
 	print((int*)"print list start");
-
-	if(*head != 0){
-		curr = (int*)*head;
-	
-		while(curr != (int*)*tail){
-			printListElement(curr);
+	println();
+	if(isListEmpty(list)==0){	// if list not empty
+		curr = (int*)*pToHead;
+		while((int)curr != 0){
+			if(type == 0)
+				printListElement(curr);
+			else if(type == 1)
+				printSegmentationTableEntry(curr);
+			else if(type ==2)
+				printProcess(curr);
 			curr = (int*)*(curr+1);
 		}
-		printListElement(curr);
 	} else {
-		putchar(10);
-		putchar(10);
+		println();
 	}
 
+	println();
 	print((int*)"print list end");
-	putchar(10);
+	println();
+	println();
 
 }
 
-int* removeFirst(int *borders){
-	int *head;
-	int *tail;
+// remove first element of the list
+// @return: pointer to the element
+//		    0 if list is empty
+int* removeFirst(int *list){
+	int *pToHead;
+	int *pToTail;
 	int *curr;
 	int *next;
-	int *h;
-	int *t;
+	int *head;
+	int *tail;
 
-	head = pollListHead(borders);
-	tail = pollListTail(borders);
+	pToHead = pollListHead(list);
+	pToTail = pollListTail(list);
 	
-	if(*head == 0){
+	if(isListEmpty(list)){ // list is empty
 		return (int*)0;
-	} else if(*head == *tail){
-		curr = (int*)*head;
-		h = malloc(4);
-		t = malloc(4);
-		*h = 0;
-		*t = 0;
-		*borders = (int)h;
-		*(borders+1) = (int)t;
-		return curr;
-	} else {
-		curr = (int*)*head;
+	} else if(*pToHead == *pToTail){ // list contains only 1 element
+		curr = (int*)*pToHead;
+		head = malloc(4);
+		tail = malloc(4);
+		*head = 0;
+		*tail = 0;
+		*list = (int)head;
+		*(list+1) = (int)tail;
+	} else {	// otherwise
+		curr = (int*)*pToHead;
 		next = (int*)*(curr+1);
 		*(curr+1) = 0;
 		*next = 0;
-		*head = (int)next;
-		return curr;
+		*pToHead = (int)next;
 	}
+	return curr;
 }
 
 // does only sort the key attributes at the moment
 //TODO reset pointer
 void sortList(int *borders){
-	int *head;
-	int *tail;
+	int *pToHead;
+	int *pToTail;
 	int *curr;
 	int *next;
 	int unsorted;
 	int changes;
 	int tmp;
 
-	head = pollListHead(borders);
-	tail = pollListTail(borders);
+	pToHead = pollListHead(borders);
+	pToTail = pollListTail(borders);
 	
 	unsorted = 1;
 	changes = 0;
 	
-	while(unsorted == 1){
-		next = (int*)*head;
+	while(unsorted){
+		next = (int*)*pToHead;
 		changes = 0;
-		while(next != (int*)*tail){
+		while(next != (int*)*pToTail){
 			curr = next;
 			next = (int*)*(curr+1);
 			
@@ -3964,87 +4050,60 @@ void sortList(int *borders){
 	}
 }
 
-
-int* findElementByData(int data, int *borders){
-	int *head;
-	int *tail;
+// @return: list element with key "key"
+//			0 if not in list
+int* findElementByKey(int key, int *list){
+	int *pToHead;
+	int *pToTail;
 	int *curr;
-	head = pollListHead(borders);
-	tail = pollListTail(borders);
-	if(*head != 0){
+	pToHead = pollListHead(list);
+	pToTail = pollListTail(list);
 
-		curr = (int*)*head;
-		while(curr != (int*)*tail){
-	
-			if(*(curr+2) == data){
+	if(isListEmpty(list) == 0){
+		curr = (int*)*pToHead;
+		while(curr != (int*)*pToTail){
+			if(*(curr+2) == key){
 				return curr;
 			}
 			curr = (int*)*(curr+1);
 		}
-		if(*(curr+2) == data){
+		if(*(curr+2) == key){
 			return curr;
 		}
 	}
 	return (int*)0;
-
 }
 
-void saveProcessState(int *currProcess){
+// save pc and registers of current process
+void saveProcessState(){
 	*(currProcess+3) = pc;
 	*(currProcess+4) = (int)registers;
+}
+
+// set pc, registers and memory segment of current process
+void setProcessState(){
+	currSegment = (int*)*(currProcess + 5);
+	registers = (int*)*(currProcess + 4);
+	pc = *(currProcess + 3);
+	memory = (int*)*(currSegment + 3);
 
 }
 
-void setProcessState(int *currProcess){
-	int *memSegmentPos;
-	memSegmentPos = (int*)*(currProcess+5);
-	pc = *(currProcess+3);
-	registers = (int*)*(currProcess+4);
-	memory = (int*)*memSegmentPos;
-}
-
-void createSegmentationTable(){
-	int segmentSize;
-	int counter;
-	segmentSize = 8*1024;
-	
-	segmentationTable = malloc(counterProcesses*2*4);
-	
-	counter = 0;
-	
-	while(counter < counterProcesses){
-		*(segmentationTable + 2 *counter) = (int)currMemoryPos;
-		*(segmentationTable + 2 * counter + 1) = segmentSize;
-		currMemoryPos = currMemoryPos+segmentSize;
-
-		usedMemorySize = usedMemorySize + segmentSize;
-		counter = counter+1;
-		if(usedMemorySize >= memorySize){
-			print(itoa(usedMemorySize, string_buffer, 10 , 0));println();
-			print(itoa(memorySize, string_buffer, 10 , 0));println();
-		}
+int* createSegmentationTableEntry(int key, int segmentSize){
+	int *newSegmentationTableEntry;
+	usedMemorySize = usedMemorySize + segmentSize;
+	if(usedMemorySize > memorySize){
+		exception_handler(EXCEPTION_SEGMENTATIONFAULT);
 	}
-}
+	newSegmentationTableEntry = malloc(5*4);
+	*(newSegmentationTableEntry+0) = 0;	// prev
+	*(newSegmentationTableEntry+1) = 0;	// next
+	*(newSegmentationTableEntry+2) = key;	// unique key
+	*(newSegmentationTableEntry+3) = (int)memoryBumpPointer;	// memory segment
+	*(newSegmentationTableEntry+4) = segmentSize;		// segmentSize
+	memoryBumpPointer = memoryBumpPointer + segmentSize;
 
-
-void testDoubleLinkedList1(){
-	int *borders;
-	int *head;
-	int *newElement;
-	int *find;
-	borders = initList();
-	newElement = createListElement('A');
-	appendListElement(newElement, borders);
-	newElement = createListElement('B');
-	appendListElement(newElement, borders);
-	newElement = createListElement('C');
-	appendListElement(newElement, borders);
-	
-	printList(borders);
-	
-	find = findElementByData('D', borders);
-	printListElement(find);
-	
+	return newSegmentationTableEntry;
 }
 
 void testDoubleLinkedList(){
@@ -4052,89 +4111,40 @@ void testDoubleLinkedList(){
 	int *head;
 	int *newElement;
 	int *find;
+	print((int*)"testDoubleLinkedList");
 	borders = initList();
+	segmentationTable = initList();
 
-	newElement = createListElement('A');
+	newElement = createProcess(65);
 	appendListElement(newElement, borders);
 
 	// expected output: 0,65,0 	
-	printList(borders);
+	printList(borders, 0);
 
-	newElement = createListElement('B');
+	newElement = createProcess(66);
 	appendListElement(newElement, borders);
 
 	// expected output: 0,65,66		65,66,0
-	printList(borders);
+	printList(borders, 0);
 
 	newElement = pollListHead(borders);
 	removeFirst(borders);
 
 	// expected output: 0,66,0 	
-	printList(borders);
+	printList(borders, 0);
 	
 	removeFirst(borders);
 
 	// expected output:  	
-	printList(borders);
+	printList(borders, 0);
 	
 	printListElement((int*)*newElement);
 	appendListElement((int*)*newElement, borders);
 
 	// expected output: 0,66,0 	
-	printList(borders);
+	printList(borders, 0);
 	
 }
-
-void testDoubleLinkedList2(){
-	int *borders;
-	int *head;
-	int *newElement;
-	int *find;
-	borders = initList();
-
-	newElement = createListElement('A');
-	appendListElement(newElement, borders);
-
-
-	// expected output: 0,65,0 	
-	printList(borders);
-
-	newElement = createListElement('B');
-	appendListElement(newElement, borders);
-
-	// expected output: 0,65,66		65,66,0
-	printList(borders);
-
-	removeFirst(borders);
-
-	// expected output: 0,66,0 	
-	printList(borders);
-	
-	newElement = createListElement('C');
-	appendListElement(newElement, borders);
-
-	// expected output: 0,66,67		66,67,0
-	printList(borders);
-
-	removeFirst(borders);
-
-	// expected output: 0,67,0
-	printList(borders);
-
-	removeFirst(borders);
-
-	// expected output: 
-	printList(borders);
-	
-	newElement = createListElement('D');
-	appendListElement(newElement, borders);
-	
-	// expected output: 0,68,0
-	printList(borders);
-
-}
-
-
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -4568,41 +4578,21 @@ void execute() {
 }
 
 void run() {
-	int counterInstructions;
-	int instructionsPerSwitch;
 	int *head;
-	int *tmp;
-
-	counterInstructions = 0;
-	instructionsPerSwitch = 50;
-	
+	int counter;
+	counter = 0;
 	head = pollListHead(processList);
-	if(*head != 0){
-		currProcess = removeFirst(processList);
-		setProcessState(currProcess);
-	}
+	currProcess = removeFirst(processList);
+	setProcessState();
+
  	while (1) {
-		if(counterInstructions == instructionsPerSwitch){
-			// save current state and add element at the end of the list
-			saveProcessState(currProcess);
-			appendListElement(currProcess, processList);
-			// switch to next process
-			head = pollListHead(processList);
-			if(*head != 0){
-				currProcess = removeFirst(processList);
-				setProcessState(currProcess);
-			}
-			counterInstructions = 0;
-		} else {
-		    fetch();
-		    decode();
-		    pre_debug();
-		    execute();
-		    post_debug();
-		    
-		    counterInstructions = counterInstructions + 1;
-		}
+	    fetch();
+	    decode();
+	    pre_debug();
+	    execute();
+	    post_debug();
 	}	
+
 }
 
 void parse_args(int argc, int *argv) {
@@ -4660,37 +4650,38 @@ void up_copyArguments(int argc, int *argv) {
 
 int main_emulator(int argc, int *argv) {
 	int counter;
-	int *currMemoryPos;
-	isEmulator =1;
+	int segmentSize;
+	segmentSize = 1024*1024;
 	counter = 0;
-	counterProcesses = 3;
+	counterProcesses = 2;
+	
 	processList = initList();
-    
+    segmentationTable = initList();
+
     initInterpreter();
     parse_args(argc, argv);
 
-    parse_args(argc, argv);
-
-	createSegmentationTable();
-
 	while(counter < counterProcesses){
-		
-		currProcess = createListElement(counter);
+
+		currSegment = createSegmentationTableEntry(counter, segmentSize);
+		appendListElement(currSegment, segmentationTable);
+		currProcess = createProcess(counter);
 		appendListElement(currProcess, processList);
-		
+
+		memory = (int*)*(currSegment+3);
 		registers = (int*)*(currProcess + 4);
-		currMemoryPos = (int*)*(currProcess + 5);
-		memory = (int*)*currMemoryPos;
+		currSegment = (int*)*(currProcess + 5);
+
 		loadBinary();
+
 		*(registers+REG_GP) = binaryLength;
-
 		*(registers+REG_K1) = *(registers+REG_GP);
-	    *(registers+REG_SP) = *(currProcess+6)-4;
-
+	    *(registers+REG_SP) = *(currSegment+4)-4;
+	    
 		binaryLength = 0;
-	    up_copyArguments(argc-3, argv+3);
+		up_copyArguments(argc-3, argv+3);
 		counter = counter + 1;
-	}	
+	}
 
     run();
 
@@ -4707,9 +4698,8 @@ int main(int argc, int *argv) {
 
     initRegister();
     initDecoder();
-    
-    isEmulator = 0;
-    if (argc > 1) {
+   
+     if (argc > 1) {
         firstParameter = (int*) *(argv+1);
 
         if (getCharacter(firstParameter, 0) == '-') {
