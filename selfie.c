@@ -804,6 +804,13 @@ int reg_lo = 0; // lo register for multiplication/division
 // ------------------------ OUR STUFF -----------------------------
 
 void context_switch();
+void save_context();
+void schedule_next_proc();
+void restore_context();
+void occupy_lock();
+void make_blocking();
+void free_lock();
+void sched_block_proc();
 
 int* insert_process(int pc, int* reg, int* seg, int* prev, int* next, int pid);
 int* insert_segment(int* begin, int size, int* prev, int* next);
@@ -3739,7 +3746,6 @@ void syscall_write() {
     buffer = ((int*) *current_seg) + tlb(vaddr);
 
     size = write(fd, buffer, size);
-    println();
 
     *(registers+REG_V0) = size;
 
@@ -3905,28 +3911,35 @@ void emitLock() {
 }
 
 void printLists() {
-		print((int*) "Ready + Run Processes:\n");
-		iter_list(proc_list);
+	print((int*) "Ready + Run Processes:\n");
+	iter_list(proc_list);
 
-		print((int*) "Blocking Processes:\n");
-		iter_list(blocked_queue);
+	print((int*) "Blocking Processes:\n");
+	iter_list(blocked_queue);
 }
 
 void syscall_lock() {
+	if ((int) lock_owner == 0) {
+		occupy_lock();
+	} else {
+		make_blocking();
+	}
+}
+
+void occupy_lock() {
+	print((int*) "\nHey noone's got the lock, lemme take it!\n");
+	lock_owner = current_proc;
+}
+
+void make_blocking () {
 	int* locked_process;
 
-	if ((int) lock_owner == 0) {
-		print((int*) "\nHey noone's got the lock, lemme take it!\n");
-		lock_owner = current_proc;
-	} else {
-		print((int*) "\nAwks, looks like I gotta stop and wait here! :(\n");
-		
-		locked_process = current_proc;
+	print((int*) "\nAwks, looks like I gotta stop and wait here! :(\n");
+        locked_process = current_proc;
 
-		proc_list = remove (locked_process, proc_list);
-		blocked_queue = insert_process (*locked_process, *(locked_process + 1), *(locked_process + 2), 0, blocked_queue, *(locked_process + 5));
-		triggerContextSwitch = 1;	
-	}
+	proc_list = remove (locked_process, proc_list);
+        blocked_queue = insert_process (*locked_process, *(locked_process + 1), *(locked_process + 2), 0, blocked_queue, *(locked_process + 5));
+	triggerContextSwitch = 1;
 }
 
 void emitUnlock() {
@@ -3944,19 +3957,26 @@ void emitUnlock() {
 }
 
 void syscall_unlock() {
+	free_lock();
+	sched_block_proc();
+}
+
+void free_lock() {
+	print((int*) "Unlocking!\n");
+	lock_owner = (int*) 0;
+}
+
+void sched_block_proc() {
 	int* next_unblocked_process;
 
-	lock_owner = (int*) 0;
+        next_unblocked_process = blocked_queue;
 
-	print((int*) "Unlocking!\n");
+        blocked_queue = remove(next_unblocked_process, blocked_queue);
 
-	next_unblocked_process = blocked_queue;
+        if ((int) next_unblocked_process != 0)
+                proc_list = insert_process(*next_unblocked_process, *(next_unblocked_process + 1), *(next_unblocked_process + 2), 0, proc_list, *(next_unblocked_process + 5));
 
-	blocked_queue = remove(next_unblocked_process, blocked_queue);
-
-	if ((int) next_unblocked_process != 0)
-		proc_list = insert_process(*next_unblocked_process, *(next_unblocked_process + 1), *(next_unblocked_process + 2), 0, proc_list, *(next_unblocked_process + 5));
-	triggerContextSwitch = 1;	
+        triggerContextSwitch = 1;
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -4441,20 +4461,32 @@ void run() {
 }
 
 void context_switch() {
+	save_context();
+	schedule_next_proc();
+	restore_context();
+}
+
+void save_context() {
 	*current_proc = pc; // Save old program counter
+}
+
+void schedule_next_proc() {
 	current_proc = (int*) *(current_proc + 4);
 
-	if ((int) current_proc == 0) {
-		current_proc = proc_list;
-	}
+        if ((int) current_proc == 0) {
+                current_proc = proc_list;
+        }
+}
 
-	triggerContextSwitch = 0;
+void restore_context() {
+        triggerContextSwitch = 0;
 
-	registers = (int*) *(current_proc + 1);
-	current_seg = (int*) *(current_proc + 2);
-	pc = *current_proc;
+        registers = (int*) *(current_proc + 1);
+        current_seg = (int*) *(current_proc + 2);
+        pc = *current_proc;
 
-	instr_count = 0;
+        instr_count = 0;
+
 }
 
 // -----------------------------------------------------------------
@@ -4549,7 +4581,7 @@ void emulate(int argc, int *argv) {
     print((int*) "MB of memory");
     println();
 
-    number_of_proc = 10;
+    number_of_proc = 1;
 
     proc_count = 0;
     seg_count = 0;
