@@ -7,12 +7,19 @@ TEST_BINARY		:= myprog
 
 all: test_binary
 
+clena: clean
+clan: clean
+clane: clean
+claen: clean
+calen: clean
+clea: clean
+
 self_host:
 	touch $(EXEC)1.mips
 	$(CC) $(CC_OPT) $(EXEC).c -o $(EXEC)
 	touch $(EXEC)2.mips
 	./$(EXEC) -c $(EXEC).c -o $(EXEC)1.mips -m $(MEM_SIZE) -c $(EXEC).c -o $(EXEC)2.mips
-	diff -s $(EXEC)1.mips $(EXEC)2.mips						       '
+	diff -s $(EXEC)1.mips $(EXEC)2.mips
 
 test_binary:
 	$(CC) $(CC_OPT) $(EXEC).c -o $(EXEC)

@@ -17,7 +17,7 @@ int main() {
 
 	unlock();
 
-	while (counter != 56) {
+	while (counter != 58) {
 		putchar(counter);
 		counter = counter + 1;
 	}
