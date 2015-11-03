@@ -17,6 +17,6 @@ a2:
 	clang -v -w -m32 -D'main(a, b)=main(int argc, char **argv)' selfie.c -o selfie
 	touch out
 	./selfie -c yieldExample.c -o out
-	./selfie -l out -m 32
+	./selfie -l out -a 64
 
 	

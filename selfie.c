@@ -4836,7 +4836,30 @@ int selfie(int argc, int* argv) {
                 println();
 
                 return 0;
-            } else
+            } else if (stringCompare((int*) *argv, (int*) "-a")) {
+				numberOfProcesses = 10;
+        		numberOfInstructions = 40;
+
+				initMemory(atoi((int*) *(argv+1)));
+
+                argc = argc - 1;
+                argv = argv + 1;
+
+                // pass binaryName as first argument replacing size
+                *argv = (int) binaryName;
+
+                if (binaryLength > 0)
+                    emulate(argc, argv);
+                else {
+                    print(selfieName);
+                    print((int*) ": nothing to emulate");
+                    println();
+
+                    exit(-1);
+                }
+
+                return 0;
+			} else
                 return -1;
         }
     }
@@ -4861,7 +4884,7 @@ int main(int argc, int *argv) {
 
     if (selfie(argc, (int*) argv) != 0) {
         print(selfieName);
-        print((int*) ": usage: selfie { -c source | -o binary | -l binary } [ -m size ... | -k size ... ] ");
+        print((int*) ": usage: selfie { -c source | -o binary | -l binary | -a assignment} [ -m size ... | -k size ... ] ");
         println();
     }
 }
