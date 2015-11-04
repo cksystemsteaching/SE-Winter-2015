@@ -14,6 +14,9 @@ claen: clean
 calen: clean
 clea: clean
 
+congrats:
+	echo 'Congrats for typing clean correctly! Have a cookie!'
+
 self_host:
 	touch $(EXEC)1.mips
 	$(CC) $(CC_OPT) $(EXEC).c -o $(EXEC)
