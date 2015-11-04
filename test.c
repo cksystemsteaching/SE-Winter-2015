@@ -1,25 +1,30 @@
 int main() {
-	int counter;
-
-	counter = 48;
-
-	while (counter != 50) {
-		putchar(counter);
-		counter = counter + 1;
+	if (getPID() == 1) {
+		lock();
 	}
 
-	lock();
-
-	while (counter != 55) {
-		putchar(counter);
-		counter = counter + 1;
+	if (getPID() == 0) {
+		lock();
 	}
 
-	unlock();
+	if (getPID() == 1) {
+		putchar('0');
+		putchar('1');
+		putchar('2');
+	}
 
-	while (counter != 58) {
-		putchar(counter);
-		counter = counter + 1;
+	if (getPID() == 0) {
+		putchar('0');
+		putchar('1');
+		putchar('2');
+	}
+
+	if (getPID() == 1) {
+		unlock();
+	}
+
+	if (getPID() == 0) {
+		unlock();
 	}
 
 	exit(0);

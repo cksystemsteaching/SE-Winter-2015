@@ -670,6 +670,9 @@ void syscall_lock();
 void emitUnlock();
 void syscall_unlock();
 
+void emitGetPID();
+void syscall_getpid();
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int SYSCALL_EXIT = 4001;
@@ -681,6 +684,7 @@ int SYSCALL_GETCHAR = 5002;
 int SYSCALL_YIELD = 5003;
 int SYSCALL_LOCK = 5004;
 int SYSCALL_UNLOCK = 5005;
+int SYSCALL_GETPID = 5006;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -824,10 +828,10 @@ int *proc_list;
 int *current_proc;
 int *last_created_proc;
 
-int number_of_proc;
+int number_of_proc = 1;
 int proc_count;
 int instr_count;
-int instr_cycles;
+int instr_cycles = 10;
 int triggerContextSwitch;
 
 int *segment_table;
@@ -3281,6 +3285,7 @@ void compile() {
 	emitYield();
 	emitLock();
 	emitUnlock();
+	emitGetPID();
 
 	// parser
 	gr_cstar();
@@ -3985,8 +3990,29 @@ void emitUnlock() {
 }
 
 void syscall_unlock() {
-	free_lock();
-	sched_block_proc();
+	if ((int) current_proc == (int) lock_owner) {
+		free_lock();
+		sched_block_proc();
+	}
+}
+
+void emitGetPID() {
+        createSymbolTableEntry(GLOBAL_TABLE, (int*) "getPID", binaryLength,
+                        FUNCTION, INT_T, 0);
+
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+        emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_GETPID);
+        emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+        emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_getpid() {
+	*(registers + REG_V0) = *(current_proc + 5);
 }
 
 void occupy_lock() {
@@ -4127,6 +4153,8 @@ void fct_syscall() {
 		syscall_lock();
 	} else if (*(registers + REG_V0) == SYSCALL_UNLOCK) {
 		syscall_unlock();
+	} else if (*(registers + REG_V0) == SYSCALL_GETPID) {
+		syscall_getpid();
 	} else {
 		exception_handler(EXCEPTION_UNKNOWNSYSCALL);
 	}
@@ -4669,12 +4697,8 @@ void emulate(int argc, int *argv) {
 	print((int*) "MB of memory");
 	println();
 
-	number_of_proc = 1;
-
 	proc_count = 0;
 	seg_count = 0;
-
-	instr_cycles = 100;
 
 	seg_size = memorySize / number_of_proc;
 
