@@ -22,6 +22,6 @@ a2:
 a3:
 	clang -v -w -m32 -D'main(a, b)=main(int argc, char **argv)' selfie.c -o selfie
 	touch out
-	./selfie -c lockingDemo.c -o out
+	./selfie -c mutualExclusion.c -o out
 	./selfie -l out -a 64
 	
