@@ -73,3 +73,16 @@ Build this assignment on top of Assignment 2. Make sure that segmentation of mem
 * Bonus: implement basic multi-threading support
  * Idea: threads share one address space, processes don't
  * when duplicating processes, create threads instead, i.e., shared code, heap, globals, but private call stacks, private PC, private registers
+
+
+Assignment 4: Fork and Wait
+---------------------------
+
+From now on, processes will trigger process creation and synchronization.
+
+* Remove the process duplication code from Assignment 1 from selfie
+* Implement the [fork](http://linux.die.net/man/2/fork) and [wait](http://linux.die.net/man/2/wait) system calls
+* Read the man pages carefully to understand the semantics of both calls
+* Modify the exit call such that terminating childprocesses do not quit the emulator
+* Provide a demo process forking at least one child process that performs a different task along with the parent process. Play with interleavings and locks between parent and children
+* Deadline: Nov 12, end of day
