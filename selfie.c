@@ -810,10 +810,11 @@ int ir = 0; // instruction record
 
 int* readyQueue;
 int* segmentTable;
-int exited;
+int notReady;
 int calledYield;
 int numberOfProcesses;
 int numberOfInstructions;
+int numberOfThreads = 0;
 int* lock = (int*) 0;
 int* currentProcess = (int*) 0;
 int* blockingQueue;
@@ -3619,7 +3620,7 @@ void syscall_exit() {
 
     //exit(0);
     syscall_unlock();//in case the exiting process holds a lock
-    exited = 1;
+    notReady = 1;
 }
 
 void emitRead() {
@@ -3854,7 +3855,7 @@ void syscall_lock() {
 	if((int) lock == 0) {
 		lock = currentProcess;
 	} else {
-		exited = 1;
+		notReady = 1;
 		*(currentProcess + 2) = pc - 4; //when dequed from blocking queue process should again try to get lock
 		enqueue(blockingQueue, currentProcess);
 	}
@@ -4210,6 +4211,35 @@ void duplicateProcesses() {
 		enqueue(segmentTable, segmentEntry);
 	
 		processCounter = processCounter - 1;
+	}
+}
+
+void createThreads(int* process) {
+	int nrOfThreads;
+	int* thread;
+	int* threadRegisters;
+	int* processRegisters;
+
+	nrOfThreads = numberOfThreads - 1;
+
+	while (nrOfThreads > 0) {
+		thread = malloc(5 * 4);
+
+		*thread = 0;
+		*(thread + 1) = 0;
+		*(thread + 2) = 0;
+		*(thread + 3) = malloc(32 * 4);
+		*(thread + 4) = *(process + 4);
+
+		copyMemSpace((int*)*(process + 3), (int*)*(thread + 3), 32);
+
+		threadRegisters = *(thread + 3);
+		processRegisters = *(process + 3);
+		*(threadRegisters + REG_SP) = (int*) *(processRegisters + REG_SP) - ((numberOfThreads - nrOfThreads) * 512 * 1024) / 4;
+
+		enqueue(readyQueue, thread);
+
+		nrOfThreads = nrOfThreads - 1;
 	}
 }
 
@@ -4697,7 +4727,7 @@ void run() {
         
         nrOfInstr = nrOfInstr - 1;
         
-        if (exited == 1) {
+        if (notReady == 1) {
         	return;
         } else if (calledYield == 1) {
         	return;
@@ -4709,7 +4739,7 @@ void run() {
 int* restore() {
 	int* process;
 	
-	exited = 0;
+	notReady = 0;
 	calledYield = 0;
 	process = dequeue(readyQueue);
 	pc = *(process + 2);
@@ -4720,7 +4750,7 @@ int* restore() {
 }
 
 void save(int* process) {
-	if (exited == 0) {
+	if (notReady == 0) {
 		*(process + 2) = pc;
 		enqueue(readyQueue, process);
 	} 
@@ -4859,7 +4889,12 @@ void emulate(int argc, int *argv) {
     *(registers+REG_K1) = *(registers+REG_GP);
 
     up_copyArguments(argc, argv);
-    duplicateProcesses();
+
+	duplicateProcesses();
+
+	if (numberOfThreads > 0) {
+		createThreads(*readyQueue); // multithread first process
+	}
     
     //scheduling
     while (*readyQueue != 0) {    
@@ -4962,6 +4997,31 @@ int selfie(int argc, int* argv) {
                 }
 
                 return 0;
+			} else if (stringCompare((int*) *argv, (int*) "-t")) {
+				numberOfProcesses = 1;
+        		numberOfInstructions = 10;
+
+				numberOfThreads = 3;
+
+				initMemory(atoi((int*) *(argv+1)));
+
+                argc = argc - 1;
+                argv = argv + 1;
+
+                // pass binaryName as first argument replacing size
+                *argv = (int) binaryName;
+
+                if (binaryLength > 0)
+                    emulate(argc, argv);
+                else {
+                    print(selfieName);
+                    print((int*) ": nothing to emulate");
+                    println();
+
+                    exit(-1);
+                }
+
+                return 0;
 			} else
                 return -1;
         }
@@ -4987,7 +5047,7 @@ int main(int argc, int *argv) {
 
     if (selfie(argc, (int*) argv) != 0) {
         print(selfieName);
-        print((int*) ": usage: selfie { -c source | -o binary | -l binary | -a assignment} [ -m size ... | -k size ... ] ");
+        print((int*) ": usage: selfie { -c source | -o binary | -l binary | -a assignment | -t multi-threaded} [ -m size ... | -k size ... ] ");
         println();
     }
 }

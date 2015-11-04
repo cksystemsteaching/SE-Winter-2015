@@ -25,3 +25,8 @@ a3:
 	./selfie -c mutualExclusion.c -o out
 	./selfie -l out -a 64
 	
+bonus:
+	clang -v -w -m32 -D'main(a, b)=main(int argc, char **argv)' selfie.c -o selfie
+	touch out
+	./selfie -c multiThreadTest.c -o out
+	./selfie -l out -t 64
