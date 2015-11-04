@@ -97,6 +97,9 @@ void printString(int *s);
 void exit(int code);
 int* malloc(int size);
 
+int* dequeue(int* list);
+void enqueue(int* list, int* queue);
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int CHAR_EOF          = -1; // end of file
@@ -658,8 +661,17 @@ void syscall_open();
 void emitMalloc();
 void syscall_malloc();
 
-void emitYield();//MERGE emitgetchar, syscall_getchar
+void emitYield();
 void syscall_yield();
+
+void emitLock();
+void syscall_lock();
+
+void emitUnlock();
+void syscall_unlock();
+
+void emitGetpid();
+void syscall_getpid();
 
 void emitPutchar();
 
@@ -670,8 +682,10 @@ int SYSCALL_READ    = 4003;
 int SYSCALL_WRITE   = 4004;
 int SYSCALL_OPEN    = 4005;
 int SYSCALL_MALLOC  = 5001;
-int SYSCALL_GETCHAR = 5002;
 int SYSCALL_YIELD   = 5003;
+int SYSCALL_LOCK	= 5004;
+int SYSCALL_UNLOCK	= 5005;
+int SYSCALL_GETPID	= 5006;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -800,6 +814,9 @@ int exited;
 int calledYield;
 int numberOfProcesses;
 int numberOfInstructions;
+int* lock = (int*) 0;
+int* currentProcess = (int*) 0;
+int* blockingQueue;
 
 int reg_hi = 0; // hi register for multiplication/division
 int reg_lo = 0; // lo register for multiplication/division
@@ -821,6 +838,10 @@ void initInterpreter() {
 	readyQueue = malloc(2*4);
     *readyQueue = 0;
     *(readyQueue + 1) = 0;
+    
+    blockingQueue = malloc(2*4);
+    *blockingQueue = 0;
+    *(blockingQueue + 1) = 0;
 
 	segmentTable = malloc(2*4);
 	*segmentTable = 0;
@@ -3177,6 +3198,9 @@ void compile() {
     emitMalloc();
     emitPutchar();
 	emitYield();
+	emitLock();
+	emitUnlock();
+	emitGetpid();
 	
     // parser
     gr_cstar();
@@ -3594,6 +3618,7 @@ void syscall_exit() {
     println();
 
     //exit(0);
+    syscall_unlock();//in case the exiting process holds a lock
     exited = 1;
 }
 
@@ -3809,6 +3834,75 @@ void emitYield() {
 
 void syscall_yield() {
 	calledYield = 1;
+}
+
+void emitLock() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "lock", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_LOCK);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_lock() {
+	if((int) lock == 0) {
+		lock = currentProcess;
+	} else {
+		exited = 1;
+		*(currentProcess + 2) = pc - 4; //when dequed from blocking queue process should again try to get lock
+		enqueue(blockingQueue, currentProcess);
+	}
+}
+
+void emitUnlock() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "unlock", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_UNLOCK);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_unlock() {
+	int* nextProcess;
+	
+	if(lock != currentProcess)//TODO error?
+		return;
+	
+	lock = (int*) 0;
+	nextProcess = dequeue(blockingQueue);
+	
+	if(nextProcess != 0)
+		enqueue(readyQueue, nextProcess);
+}
+
+void emitGetpid() {
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "getpid", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_GETPID);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_getpid() {
+    *(registers+REG_V0) = *(currentProcess + 4);
 }
 
 void emitPutchar() {
@@ -4090,11 +4184,12 @@ void duplicateProcesses() {
 	temp = registers;
 	
 	while (processCounter - 1 > 0) {
-		process = malloc(4 * 4);		
+		process = malloc(5 * 4);		
 		*process = 0;
 		*(process + 1) = 0;
 		*(process + 2) = 0;
 		*(process + 3) = (int) malloc(32 * 4);
+		*(process + 4) = (numberOfProcesses - processCounter) + 1;
 
 		segmentEntry = malloc(4*4);
 		*segmentEntry = 0;
@@ -4182,6 +4277,12 @@ void fct_syscall() {
         syscall_malloc();
     } else if (*(registers+REG_V0) == SYSCALL_YIELD) {
     	syscall_yield();
+    } else if (*(registers+REG_V0) == SYSCALL_LOCK) {
+    	syscall_lock();
+    } else if (*(registers+REG_V0) == SYSCALL_UNLOCK) {
+    	syscall_unlock();
+    } else if (*(registers+REG_V0) == SYSCALL_GETPID) {
+    	syscall_getpid();
     } else {
         exception_handler(EXCEPTION_UNKNOWNSYSCALL);
     }
@@ -4613,6 +4714,7 @@ int* restore() {
 	process = dequeue(readyQueue);
 	pc = *(process + 2);
 	registers = (int*)*(process + 3);
+	currentProcess = process;
 	
 	return process;
 }
@@ -4621,7 +4723,7 @@ void save(int* process) {
 	if (exited == 0) {
 		*(process + 2) = pc;
 		enqueue(readyQueue, process);
-	}
+	} 
 }
 
 // -----------------------------------------------------------------
@@ -4699,11 +4801,12 @@ void initFirstProcess() {
 	int* process;
 	int* segmentEntry;
 
-	process = malloc(4 * 4);
+	process = malloc(5 * 4);
 	*process = 0;
 	*(process + 1) = 0;
 	*(process + 2) = 0;
 	*(process + 3) = (int) registers;
+	*(process + 4) = 0;	
 
 	segmentEntry = malloc(4 * 4);
 	*segmentEntry = 0;
@@ -4837,8 +4940,8 @@ int selfie(int argc, int* argv) {
 
                 return 0;
             } else if (stringCompare((int*) *argv, (int*) "-a")) {
-				numberOfProcesses = 10;
-        		numberOfInstructions = 40;
+				numberOfProcesses = 3;
+        		numberOfInstructions = 1;
 
 				initMemory(atoi((int*) *(argv+1)));
 
