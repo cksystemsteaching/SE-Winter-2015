@@ -13,9 +13,7 @@ clane: clean
 claen: clean
 calen: clean
 clea: clean
-
-congrats:
-	echo 'Congrats for typing clean correctly! Have a cookie!'
+cclean: clean
 
 self_host:
 	touch $(EXEC)1.mips

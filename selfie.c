@@ -828,7 +828,7 @@ int *proc_list;
 int *current_proc;
 int *last_created_proc;
 
-int number_of_proc = 1;
+int number_of_proc = 3;
 int proc_count;
 int instr_count;
 int instr_cycles = 10;
@@ -3969,8 +3969,13 @@ void emitLock() {
 void syscall_lock() {
 	if ((int) lock_owner == 0) {
 		occupy_lock();
-	} else {
+	} else if ((int) lock_owner != current_proc) {
 		make_blocking();
+	} else {
+		print((int*) "No point to locking mate, you got the lock (Process: ");
+		print(itoa(*(current_proc + 5), string_buffer, 10, 0));
+		print((int*) ")");
+		println();
 	}
 }
 
@@ -3993,6 +3998,11 @@ void syscall_unlock() {
 	if ((int) current_proc == (int) lock_owner) {
 		free_lock();
 		sched_block_proc();
+	} else {
+		print((int*) "What are you unlocking? You don't have the lock (Process: ");
+		print(itoa(*(current_proc + 5), string_buffer, 10, 0));
+		print((int*) ")");
+		println();
 	}
 }
 
