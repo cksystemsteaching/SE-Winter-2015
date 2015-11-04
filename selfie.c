@@ -603,7 +603,10 @@ int *memory;
 int  memorySize;
 int *memoryBumpPointer;
 int  usedMemorySize;
+int memoryStartAddress;
 
+int *blockedQueue;
+int *readyQueue;
 
 int *processList;
 int *currProcess;
@@ -611,7 +614,9 @@ int  counterProcesses;
 
 int *segmentationTable;
 int *currSegment;
+int currSegmentSize;
 
+int isEmulating=0;
 
 int *binaryName;
 int  binaryLength;
@@ -620,7 +625,7 @@ int  binaryLength;
 
 void initMemory(int size, int *name) {
     memory     = malloc(size);
-    
+    memoryStartAddress = (int)memory;
     memoryBumpPointer = memory;
     usedMemorySize = 0;
     
@@ -684,6 +689,8 @@ int SYSCALL_OPEN    = 4005;
 int SYSCALL_MALLOC  = 5001;
 int SYSCALL_GETCHAR = 5002;
 int SYSCALL_YIELD   = 6000;
+int SYSCALL_LOCK	= 6001;
+int SYSCALL_UNLOCK	= 6002;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -3251,14 +3258,35 @@ void decodeJFormat() {
 // -----------------------------------------------------------------
 
 int tlb(int vaddr) {
+	int addr;
     if (vaddr % 4 != 0)
         exception_handler(EXCEPTION_ADDRESSERROR);
+	addr = vaddr/4;
+	if(isEmulating){
+		if(memoryStartAddress > ((int)memory + addr)){ // addressed memory is below memory start address
+		print((int*)"first");println();
+  			exception_handler(EXCEPTION_SEGMENTATIONFAULT);
+		}
+		if(memoryStartAddress + memorySize < ((int)memory + addr)){ // addressed memory is greater than memory
+			exception_handler(EXCEPTION_SEGMENTATIONFAULT);
+		}
+		if(*(currSegment+3) != (int)memory){
+	        exception_handler(EXCEPTION_ADDRESSERROR);
+		}
+		if(currSegmentSize < addr){
+	        exception_handler(EXCEPTION_ADDRESSERROR);
+		}
+		if(addr < 0){
+	        exception_handler(EXCEPTION_ADDRESSERROR);
+		}
+	}
 
     // physical memory is word-addressed for lack of byte-sized data type
-    return vaddr / 4;
+    return addr;
 }
 
 int loadMemory(int vaddr) {
+	
     return *(memory + tlb(vaddr));
 }
 
@@ -3804,12 +3832,12 @@ void printProcess(int *element){
 	
 	print((int*)"segPos ");
 	if(segEntry != (int*)0)
-		print(itoa((int)(segEntry+3), string_buffer, 10, 0));
+		print(itoa((int)*(segEntry+3), string_buffer, 10, 0));
 	println();
 
 	print((int*)"segSize ");
 	if(segEntry != (int*)0)
-		print(itoa((int)(segEntry+4), string_buffer, 10, 0));
+		print(itoa((int)*(segEntry+4), string_buffer, 10, 0));
 	println();
 	println();
 
@@ -4086,11 +4114,13 @@ void setProcessState(){
 	registers = (int*)*(currProcess + 4);
 	pc = *(currProcess + 3);
 	memory = (int*)*(currSegment + 3);
+	currSegmentSize = *(currSegment+4);
 
 }
 
 int* createSegmentationTableEntry(int key, int segmentSize){
 	int *newSegmentationTableEntry;
+	currSegmentSize = segmentSize;
 	usedMemorySize = usedMemorySize + segmentSize;
 	if(usedMemorySize > memorySize){
 		exception_handler(EXCEPTION_SEGMENTATIONFAULT);
@@ -4174,8 +4204,6 @@ void fct_syscall() {
         syscall_malloc();
     } else if (*(registers+REG_V0) == SYSCALL_GETCHAR) {
         syscall_getchar();
-    } else if (*(registers+REG_V0) == SYSCALL_YIELD){
-		syscall_yield();    
     } else if (*(registers+REG_V0) == SYSCALL_YIELD) {
         syscall_yield();
     } else {
@@ -4579,8 +4607,6 @@ void execute() {
 
 void run() {
 	int *head;
-	int counter;
-	counter = 0;
 	head = pollListHead(processList);
 	currProcess = removeFirst(processList);
 	setProcessState();
@@ -4651,7 +4677,8 @@ void up_copyArguments(int argc, int *argv) {
 int main_emulator(int argc, int *argv) {
 	int counter;
 	int segmentSize;
-	segmentSize = 1024*1024;
+	isEmulating = 1;
+	segmentSize = 1024*1024*4;
 	counter = 0;
 	counterProcesses = 2;
 	
@@ -4682,7 +4709,6 @@ int main_emulator(int argc, int *argv) {
 		up_copyArguments(argc-3, argv+3);
 		counter = counter + 1;
 	}
-
     run();
 
     exit(0);
