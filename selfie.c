@@ -621,6 +621,9 @@ int isEmulating=0;
 int *binaryName;
 int  binaryLength;
 
+int lock = 0;
+int lockID;
+
 // ------------------------- INITIALIZATION ------------------------
 
 void initMemory(int size, int *name) {
@@ -680,6 +683,12 @@ void emitPutchar();
 void emitYield();
 void syscall_yield();
 
+void emitLock();
+void syscall_lock();
+
+void emitUnlock();
+void syscall_unlock();
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int SYSCALL_EXIT    = 4001;
@@ -728,6 +737,8 @@ int* findElementByKey(int key, int *list);
 void setProcessState();
 int* pollListHead(int *borders);
 int* removeFirst(int *borders);
+void switchProcess(int finished);
+void continueExecuting();
 
 // -----------------------------------------------------------------
 // -------------------------- INTERPRETER --------------------------
@@ -3064,6 +3075,8 @@ int main_compiler() {
     emitGetchar();
     emitPutchar();
     emitYield();
+    emitLock();
+    emitUnlock();
 
     // parser
     gr_cstar();
@@ -3264,20 +3277,19 @@ int tlb(int vaddr) {
 	addr = vaddr/4;
 	if(isEmulating){
 		if(memoryStartAddress > ((int)memory + addr)){ // addressed memory is below memory start address
-		print((int*)"first");println();
-  			exception_handler(EXCEPTION_SEGMENTATIONFAULT);
+  			print((int*)"tlb first: ");exception_handler(EXCEPTION_SEGMENTATIONFAULT);
 		}
 		if(memoryStartAddress + memorySize < ((int)memory + addr)){ // addressed memory is greater than memory
-			exception_handler(EXCEPTION_SEGMENTATIONFAULT);
+			print((int*)"tlb second: ");exception_handler(EXCEPTION_SEGMENTATIONFAULT);
 		}
 		if(*(currSegment+3) != (int)memory){
-	        exception_handler(EXCEPTION_ADDRESSERROR);
+	        print((int*)"tlb third: ");exception_handler(EXCEPTION_ADDRESSERROR);
 		}
 		if(currSegmentSize < addr){
-	        exception_handler(EXCEPTION_ADDRESSERROR);
+	        print((int*)"tlb fourth: ");exception_handler(EXCEPTION_HEAPOVERFLOW);
 		}
 		if(addr < 0){
-	        exception_handler(EXCEPTION_ADDRESSERROR);
+	       print((int*)"tlb fifth: "); exception_handler(EXCEPTION_ADDRESSERROR);
 		}
 	}
 
@@ -3735,11 +3747,53 @@ void emitYield(){
 }
 
 void syscall_yield() {
-	saveProcessState();
-	appendListElement(currProcess, processList);
-	
-	currProcess = removeFirst(processList);
-	setProcessState();
+	if(lock == 0){
+		switchProcess(0);
+	}
+}
+
+void emitUnlock(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "unlock", binaryLength, FUNCTION, VOID_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_UNLOCK);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);	
+
+}
+
+void syscall_unlock(){
+	if(*(currProcess+2) == lockID){
+		lock = 0;
+	}
+}
+
+void emitLock(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "lock", binaryLength, FUNCTION, VOID_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_LOCK);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);	
+}
+
+void syscall_lock(){
+	if(lock == 0){
+		lock = 1;
+		lockID = *(currProcess+2);
+	} else {
+	 // add to blocked list
+	}
 }
 
 
@@ -4136,6 +4190,15 @@ int* createSegmentationTableEntry(int key, int segmentSize){
 	return newSegmentationTableEntry;
 }
 
+void switchProcess(int finished){
+	if(finished == 0){
+		saveProcessState();
+		appendListElement(currProcess, processList);
+	}
+	currProcess = removeFirst(processList);
+	setProcessState();
+
+}
 void testDoubleLinkedList(){
 	int *borders;
 	int *head;
@@ -4206,6 +4269,10 @@ void fct_syscall() {
         syscall_getchar();
     } else if (*(registers+REG_V0) == SYSCALL_YIELD) {
         syscall_yield();
+    } else if (*(registers+REG_V0) == SYSCALL_LOCK) {
+        syscall_lock();
+    } else if (*(registers+REG_V0) == SYSCALL_UNLOCK) {
+        syscall_unlock();
     } else {
         exception_handler(EXCEPTION_UNKNOWNSYSCALL);
     }
@@ -4606,21 +4673,29 @@ void execute() {
 }
 
 void run() {
-	int *head;
-	head = pollListHead(processList);
+	int *listHead;
 	currProcess = removeFirst(processList);
 	setProcessState();
-
  	while (1) {
 	    fetch();
-	    decode();
-	    pre_debug();
-	    execute();
-	    post_debug();
-	}	
+	    
+	    if (*(registers+REG_V0) == SYSCALL_EXIT) { // if SYSCALL_EXIT is next instruction
+       		if(isListEmpty(processList) == 0)	// if process list is not empty
+       			switchProcess(1);	// switch to next process
+       		else
+       			continueExecuting();// if process list is empty execute SYSCALL_EXIT
+       	} else
+       		continueExecuting();
+	}
 
 }
 
+void continueExecuting(){
+	decode();
+	pre_debug();
+	execute();
+	post_debug();
+}
 void parse_args(int argc, int *argv) {
     // assert: ./selfie -m size executable {-m size executable}
 
@@ -4678,7 +4753,7 @@ int main_emulator(int argc, int *argv) {
 	int counter;
 	int segmentSize;
 	isEmulating = 1;
-	segmentSize = 1024*1024*4;
+	segmentSize = 1024*1024;
 	counter = 0;
 	counterProcesses = 2;
 	
