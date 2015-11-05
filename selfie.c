@@ -31,9 +31,9 @@
 // into the emulator. Selfie is meant to be extended in numerous ways.
 //
 // C* is a tiny Turing-complete subset of C that includes dereferencing
-// (the * operator) but excludes data structures, Boolean expressions, and
-// many other features. There are only signed 32-bit integers and pointers,
-// and character constants for constructing word-aligned strings manually.
+// (the * operator) but excludes data structures, bitwise and Boolean
+// operators, and many other features. There are only signed 32-bit
+// integers and pointers as well as character and string constants.
 // This choice turns out to be helpful for students to understand the
 // true role of composite data structures such as arrays and records.
 // Bitwise operations are implemented in libcstar using signed integer
@@ -62,6 +62,8 @@
 // Selfie is the result of many years of teaching systems engineering.
 // The design of the compiler is inspired by the Oberon compiler of
 // Professor Niklaus Wirth from ETH Zurich.
+
+int *selfieName = (int*) 0;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -165,12 +167,15 @@ void initLibrary() {
 // -----------------------------------------------------------------
 
 void initScanner();
+void resetScanner();
 
 void printSymbol(int symbol);
 void printLineNumber(int* message);
 
 void syntaxErrorMessage(int *message);
 void syntaxErrorCharacter(int character);
+
+void getCharacter();
 
 int isCharacterWhitespace();
 int findNextCharacter();
@@ -180,6 +185,7 @@ int isCharacterLetterOrDigitOrUnderscore();
 int isNotDoubleQuoteOrEOF();
 int identifierStringMatch(int stringIndex);
 int identifierOrKeyword();
+
 int getSymbol();
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
@@ -216,9 +222,11 @@ int SYM_STRING = 27; // string
 
 int *SYMBOLS; // array of strings representing symbols
 
+int *character_buffer; // buffer for reading characters
+
 int maxIdentifierLength = 64; // maximum number of characters in an identifier
 int maxIntegerLength = 10; // maximum number of characters in an integer
-int maxStringLength = 64; // maximum number of characters in a string
+int maxStringLength = 128; // maximum number of characters in a string
 
 // ------------------------ GLOBAL VARIABLES -----------------------
 
@@ -237,6 +245,9 @@ int isINTMINConstant = 0;
 
 int character; // most recently read character
 int symbol;    // most recently recognized symbol
+
+int *sourceName = (int*) 0; // name of source file
+int sourceFD = 0;        // file descriptor of source file
 
 // ------------------------- INITIALIZATION ------------------------
 
@@ -272,15 +283,27 @@ void initScanner() {
 	*(SYMBOLS + SYM_CHARACTER) = (int) "character";
 	*(SYMBOLS + SYM_STRING) = (int) "string";
 
-	character = getchar();
+	character_buffer = malloc(1);
+
+	character = CHAR_EOF;
 	symbol = SYM_EOF;
+}
+
+void resetScanner() {
+	lineNumber = 1;
+
+	getCharacter();
+	getSymbol();
 }
 
 // -----------------------------------------------------------------
 // ------------------------- SYMBOL TABLE --------------------------
 // -----------------------------------------------------------------
 
-void createSymbolTableEntry(int which, int *string, int data, int class, int type, int value);
+void resetGlobalSymbolTable();
+
+void createSymbolTableEntry(int which, int *string, int data, int class,
+		int type, int value);
 int* getSymbolTableEntry(int *string, int class, int *symbol_table);
 
 int* getNext(int *entry);
@@ -321,11 +344,15 @@ int LOCAL_TABLE = 2;
 int *global_symbol_table = (int*) 0;
 int *local_symbol_table = (int*) 0;
 
+// ------------------------- INITIALIZATION ------------------------
+
+void resetGlobalSymbolTable() {
+	global_symbol_table = (int*) 0;
+}
+
 // -----------------------------------------------------------------
 // ---------------------------- PARSER -----------------------------
 // -----------------------------------------------------------------
-
-void initParser();
 
 int isNotRbraceOrEOF();
 int isExpression();
@@ -369,10 +396,6 @@ void gr_initialization(int *name, int offset, int type);
 void gr_procedure(int *procedure, int returnType);
 void gr_cstar();
 
-// ------------------------ GLOBAL CONSTANTS -----------------------
-
-int maxBinaryLength;
-
 // ------------------------ GLOBAL VARIABLES -----------------------
 
 int allocatedTemporaries = 0; // number of allocated temporaries
@@ -384,19 +407,18 @@ int returnBranches = 0; // fixup chain for return statements
 
 int *currentProcedureName = (int*) 0; // name of currently parsed procedure
 
-// ------------------------- INITIALIZATION ------------------------
-
-void initParser() {
-	// set maximum code length in bytes for emitting code
-	maxBinaryLength = twoToThePowerOf(17);
-}
-
 // -----------------------------------------------------------------
 // ---------------------- MACHINE CODE LIBRARY ---------------------
 // -----------------------------------------------------------------
 
 void emitLeftShiftBy(int b);
 void emitMainEntry();
+
+// -----------------------------------------------------------------
+// ----------------------------- MAIN ------------------------------
+// -----------------------------------------------------------------
+
+void compile();
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -586,37 +608,11 @@ void initDecoder() {
 }
 
 // -----------------------------------------------------------------
-// ---------------------------- MEMORY -----------------------------
-// -----------------------------------------------------------------
-
-void initMemory(int size, int* name);
-
-int tlb(int vaddr);
-
-int loadMemory(int vaddr);
-void storeMemory(int vaddr, int data);
-
-// ------------------------ GLOBAL VARIABLES -----------------------
-
-int *memory;
-int memorySize;
-
-int *binaryName;
-int binaryLength;
-
-// ------------------------- INITIALIZATION ------------------------
-
-void initMemory(int size, int *name) {
-	memory = malloc(size);
-	memorySize = size;
-
-	binaryName = name;
-	binaryLength = 0;
-}
-
-// -----------------------------------------------------------------
 // ---------------------------- BINARY -----------------------------
 // -----------------------------------------------------------------
+
+int loadBinary(int addr);
+void storeBinary(int addr, int instruction);
 
 void emitInstruction(int instruction);
 void emitRFormat(int opcode, int rs, int rt, int rd, int function);
@@ -627,10 +623,22 @@ void fixup_relative(int fromAddress);
 void fixup_absolute(int fromAddress, int toAddress);
 void fixlink_absolute(int fromAddress, int toAddress);
 
-int copyStringToMemory(int *s, int a);
+int copyStringToBinary(int *s, int a);
 
-void emitBinary();
-void loadBinary();
+void emitGlobalsStrings();
+
+void emit();
+void load();
+
+// ------------------------ GLOBAL CONSTANTS -----------------------
+
+int maxBinaryLength = 131072; // 128KB
+
+// ------------------------ GLOBAL VARIABLES -----------------------
+
+int *binary = (int*) 0;
+int binaryLength = 0;
+int *binaryName = (int*) 0;
 
 // -----------------------------------------------------------------
 // --------------------------- SYSCALLS ----------------------------
@@ -651,13 +659,19 @@ void syscall_open();
 void emitMalloc();
 void syscall_malloc();
 
-void emitGetchar();
-void syscall_getchar();
-
 void emitPutchar();
 
 void emitYield();
 void syscall_yield();
+
+void emitLock();
+void syscall_lock();
+
+void emitUnlock();
+void syscall_unlock();
+
+void emitGetPID();
+void syscall_getpid();
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -668,71 +682,43 @@ int SYSCALL_OPEN = 4005;
 int SYSCALL_MALLOC = 5001;
 int SYSCALL_GETCHAR = 5002;
 int SYSCALL_YIELD = 5003;
-
-// Append entry (including specified process payload) to a specified list
-int* insert_process(int pc, int* reg, int* seg, int* prev, int* next) {
-	int* node;
-
-	node = malloc(4 * 5);
-
-	*node = pc;
-	*(node + 1) = (int) reg;
-	*(node + 2) = (int) seg;
-	*(node + 3) = (int) prev;
-	*(node + 4) = (int) next;
-
-	if ((int) prev != 0) {
-		*(prev + 4) = (int) node;
-	}
-	if ((int) next != 0) {
-		*(next + 3) = (int) node;
-	}
-
-	return node;
-}
-
-// Append entry (including specified segment payload) to a specified list
-int* insert_segment(int* begin, int size, int* prev, int* next) {
-	int* node;
-
-	node = malloc(4 * 4);
-
-	*node = (int) begin;
-	*(node + 1) = size;
-	*(node + 2) = (int) prev;
-	*(node + 3) = (int) next;
-
-	if ((int) prev != 0) {
-		*(prev + 3) = (int) node;
-	}
-	if ((int) next != 0) {
-		*(next + 2) = (int) node;
-	}
-
-	return node;
-}
-
-int* remove(int* node, int* list) {
-	int* next;
-	int* prev;
-	next = (int*) *(node + 4);
-	prev = (int*) *(node + 3);
-	if ((int) prev != 0) {
-		*(prev + 4) = (int) next;
-	} else {
-		list = next;
-	}
-	if ((int) next != 0) {
-		*(next + 3) = (int) prev;
-	}
-	return list;
-}
+int SYSCALL_LOCK = 5004;
+int SYSCALL_UNLOCK = 5005;
+int SYSCALL_GETPID = 5006;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
 // -----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+
+// -----------------------------------------------------------------
+// ---------------------------- MEMORY -----------------------------
+// -----------------------------------------------------------------
+
+void initMemory(int megabytes);
+
+int tlb(int vaddr);
+
+int loadMemory(int vaddr);
+void storeMemory(int vaddr, int data);
+
+// ------------------------ GLOBAL VARIABLES -----------------------
+
+int memorySize;
+int *memory;
+
+// ------------------------- INITIALIZATION ------------------------
+
+void initMemory(int megabytes) {
+	if (megabytes < 0)
+		megabytes = 64;
+	else if (megabytes > 1024)
+		megabytes = 1024;
+
+	memorySize = megabytes * 1024 * 1024;
+	memory = malloc(memorySize);
+}
 
 // -----------------------------------------------------------------
 // ------------------------- INSTRUCTIONS --------------------------
@@ -763,6 +749,7 @@ void op_teq();
 // -----------------------------------------------------------------
 
 void initInterpreter();
+void resetInterpreter();
 
 void printException(int enumber);
 
@@ -775,13 +762,18 @@ void fetch();
 void execute();
 void run();
 
-void parse_args(int argc, int *argv);
+// -----------------------------------------------------------------
+// ----------------------------- MAIN ------------------------------
+// -----------------------------------------------------------------
 
 void up_push(int value);
 int up_malloc(int size);
+int up_copyString(int *s);
 void up_copyArguments(int argc, int *argv);
 
-int main_emulator(int argc, int *argv);
+void copyBinaryToMemory();
+
+void emulate(int argc, int *argv);
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -791,7 +783,6 @@ int debug_read = 0;
 int debug_write = 0;
 int debug_open = 0;
 int debug_malloc = 0;
-int debug_getchar = 0;
 
 int debug_registers = 0;
 int debug_disassemble = 0;
@@ -802,7 +793,6 @@ int EXCEPTION_UNKNOWNINSTRUCTION = 3;
 int EXCEPTION_HEAPOVERFLOW = 4;
 int EXCEPTION_UNKNOWNSYSCALL = 5;
 int EXCEPTION_UNKNOWNFUNCTION = 6;
-int EXCEPTION_SEGFAULT = 7;
 
 int *EXCEPTIONS; // array of strings representing exceptions
 
@@ -819,63 +809,81 @@ int reg_lo = 0; // lo register for multiplication/division
 // ------------------------ OUR STUFF -----------------------------
 
 void context_switch();
+void save_context();
+void schedule_next_proc();
+void restore_context();
+void occupy_lock();
+void make_blocking();
+void free_lock();
+void sched_block_proc();
+int get_pid();
+int* get_next_proc();
+
+int* insert_process(int pc, int* reg, int* seg, int* prev, int* next, int pid);
+int* insert_segment(int* begin, int size, int* prev, int* next);
+int* remove(int* node, int* list);
+void iter_list(int* list);
 
 int *proc_list;
 int *current_proc;
 int *last_created_proc;
 
-int number_of_proc;
+int number_of_proc = 3;
 int proc_count;
-int instr_cycles;
-int exited;
+int instr_count;
+int instr_cycles = 40;
+int triggerContextSwitch;
 
 int *segment_table;
 int *current_seg;
 int *last_created_segment;
 int seg_count;
+int seg_size;
 
-// ------------------------- INITIALIZATION ------------------------
+int* lock_owner;
+int* blocked_queue;
+int block_count = 0;
+// --------------------------- PROCESS -----------------------------
 
 void create_process(int argc, int* argv) {
 
-	int seg_size;
-
 	// Initalize Registers
-	initInterpreter();
+	registers = malloc(32 * 4);
 
-	// Calculate the size of a segment
-  seg_size = memorySize / number_of_proc;
-
-  while (seg_size % 4 != 0)
+	while (seg_size % 4 != 0)
 		seg_size = seg_size - 1;
 
 	*(registers + REG_SP) = seg_size - 4;
 
 	// Create a new segment in the segment_table
-	if(seg_count == 0) {
+	if (seg_count == 0) {
 		segment_table = insert_segment(memory, seg_size, 0, 0);
 		last_created_segment = segment_table;
+	} else {
+		last_created_segment = insert_segment(
+				*last_created_segment + *(last_created_segment + 1), seg_size,
+				last_created_segment, 0);
 	}
-	else {
-		last_created_segment = insert_segment( *last_created_segment + *(last_created_segment+1), seg_size, last_created_segment, 0);
-	}
+
 	seg_count = seg_count + 1;
 
-  // Create process
-	if(proc_count == 0) {
-		proc_list = insert_process(pc, registers, last_created_segment, 0, 0);
+	// Create process
+	if (proc_count == 0) {
+		proc_list = insert_process(pc, registers, last_created_segment, 0, 0,
+				proc_count);
 		last_created_proc = proc_list;
-	}
-	else {
-		last_created_proc = insert_process(pc, registers, last_created_segment, last_created_proc, 0);
+	} else {
+		last_created_proc = insert_process(pc, registers, last_created_segment,
+				last_created_proc, 0, proc_count);
 	}
 	proc_count = proc_count + 1;
 
 	current_proc = last_created_proc;
-	current_seg = (int*) *(current_proc+2);
-	registers = (int*) *(current_proc+1);
-
+	current_seg = (int*) *(current_proc + 2);
+	registers = (int*) *(current_proc + 1);
 }
+
+// ------------------------- INITIALIZATION ------------------------
 
 void initInterpreter() {
 	EXCEPTIONS = malloc(7 * 4);
@@ -886,11 +894,16 @@ void initInterpreter() {
 	*(EXCEPTIONS + EXCEPTION_HEAPOVERFLOW) = (int) "heap overflow";
 	*(EXCEPTIONS + EXCEPTION_UNKNOWNSYSCALL) = (int) "unknown syscall";
 	*(EXCEPTIONS + EXCEPTION_UNKNOWNFUNCTION) = (int) "unknown function";
-	*(EXCEPTIONS + EXCEPTION_SEGFAULT) = (int) "seg fault";
 
 	registers = malloc(32 * 4);
 }
 
+void resetInterpreter() {
+	pc = 0;
+
+	reg_hi = 0;
+	reg_lo = 0;
+}
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     L I B R A R Y     ---------------------
@@ -928,7 +941,7 @@ int rightShift(int n, int b) {
 				+ (INT_MAX / twoToThePowerOf(b) + 1);
 }
 
-int getCharacter(int *s, int i) {
+int loadCharacter(int *s, int i) {
 	// assert: i >= 0
 	int a;
 
@@ -937,13 +950,13 @@ int getCharacter(int *s, int i) {
 	return rightShift(leftShift(*(s + a), 24 - (i % 4) * 8), 24);
 }
 
-int* putCharacter(int *s, int i, int c) {
+int* storeCharacter(int *s, int i, int c) {
 	// assert: i >= 0, all characters are 7-bit
 	int a;
 
 	a = i / 4;
 
-	*(s + a) = (*(s + a) - leftShift(getCharacter(s, i), (i % 4) * 8))
+	*(s + a) = (*(s + a) - leftShift(loadCharacter(s, i), (i % 4) * 8))
 			+ leftShift(c, (i % 4) * 8);
 
 	return s;
@@ -954,7 +967,7 @@ int stringLength(int *s) {
 
 	i = 0;
 
-	while (getCharacter(s, i) != 0)
+	while (loadCharacter(s, i) != 0)
 		i = i + 1;
 
 	return i;
@@ -969,10 +982,10 @@ void stringReverse(int *s) {
 	j = stringLength(s) - 1;
 
 	while (i < j) {
-		tmp = getCharacter(s, i);
+		tmp = loadCharacter(s, i);
 
-		putCharacter(s, i, getCharacter(s, j));
-		putCharacter(s, j, tmp);
+		storeCharacter(s, i, loadCharacter(s, j));
+		storeCharacter(s, j, tmp);
 
 		i = i + 1;
 		j = j - 1;
@@ -985,12 +998,12 @@ int stringCompare(int *s, int *t) {
 	i = 0;
 
 	while (1)
-		if (getCharacter(s, i) == 0)
-			if (getCharacter(t, i) == 0)
+		if (loadCharacter(s, i) == 0)
+			if (loadCharacter(t, i) == 0)
 				return 1;
 			else
 				return 0;
-		else if (getCharacter(s, i) == getCharacter(t, i))
+		else if (loadCharacter(s, i) == loadCharacter(t, i))
 			i = i + 1;
 		else
 			return 0;
@@ -999,15 +1012,34 @@ int stringCompare(int *s, int *t) {
 int atoi(int *s) {
 	int i;
 	int n;
+	int c;
 
 	i = 0;
 
 	n = 0;
 
-	while (getCharacter(s, i) != 0) {
-		n = n * 10 + getCharacter(s, i) - '0';
+	c = loadCharacter(s, i);
+
+	while (c != 0) {
+		c = c - '0';
+
+		if (c < 0)
+			return -1;
+		else if (c > 9)
+			return -1;
+
+		n = n * 10 + c;
 
 		i = i + 1;
+
+		c = loadCharacter(s, i);
+
+		if (n < 0) {
+			if (n != INT_MIN)
+				return -1;
+			else if (c != 0)
+				return -1;
+		}
 	}
 
 	return n;
@@ -1024,7 +1056,7 @@ int* itoa(int n, int *s, int b, int a) {
 	sign = 0;
 
 	if (n == 0) {
-		putCharacter(s, 0, '0');
+		storeCharacter(s, 0, '0');
 
 		i = 1;
 	} else if (n < 0) {
@@ -1033,7 +1065,7 @@ int* itoa(int n, int *s, int b, int a) {
 		if (b == 10) {
 			if (n == INT_MIN) {
 				// rightmost decimal digit of 32-bit INT_MIN
-				putCharacter(s, 0, '8');
+				storeCharacter(s, 0, '8');
 
 				n = -(n / 10);
 				i = i + 1;
@@ -1042,7 +1074,7 @@ int* itoa(int n, int *s, int b, int a) {
 		} else {
 			if (n == INT_MIN) {
 				// rightmost non-decimal digit of INT_MIN
-				putCharacter(s, 0, '0');
+				storeCharacter(s, 0, '0');
 
 				n = (rightShift(INT_MIN, 1) / b) * 2;
 				i = i + 1;
@@ -1053,9 +1085,9 @@ int* itoa(int n, int *s, int b, int a) {
 
 	while (n != 0) {
 		if (n % b > 9)
-			putCharacter(s, i, n % b - 10 + 'A');
+			storeCharacter(s, i, n % b - 10 + 'A');
 		else
-			putCharacter(s, i, n % b + '0');
+			storeCharacter(s, i, n % b + '0');
 
 		n = n / b;
 		i = i + 1;
@@ -1070,24 +1102,29 @@ int* itoa(int n, int *s, int b, int a) {
 
 	if (b != 10) {
 		while (i < a) {
-			putCharacter(s, i, '0'); // align with zeros
+			storeCharacter(s, i, '0'); // align with zeros
 
 			i = i + 1;
 		}
 
-		if (b == 16) {
-			putCharacter(s, i, 'x');
-			putCharacter(s, i + 1, '0');
+		if (b == 8) {
+			storeCharacter(s, i, '0');
+			storeCharacter(s, i + 1, '0');
+
+			i = i + 2;
+		} else if (b == 16) {
+			storeCharacter(s, i, 'x');
+			storeCharacter(s, i + 1, '0');
 
 			i = i + 2;
 		}
 	} else if (sign) {
-		putCharacter(s, i, '-');
+		storeCharacter(s, i, '-');
 
 		i = i + 1;
 	}
 
-	putCharacter(s, i, 0); // null terminated string
+	storeCharacter(s, i, 0); // null terminated string
 
 	stringReverse(s);
 
@@ -1099,8 +1136,8 @@ void print(int *s) {
 
 	i = 0;
 
-	while (getCharacter(s, i) != 0) {
-		putchar(getCharacter(s, i));
+	while (loadCharacter(s, i) != 0) {
+		putchar(loadCharacter(s, i));
 
 		i = i + 1;
 	}
@@ -1157,8 +1194,11 @@ void printSymbol(int symbol) {
 }
 
 void printLineNumber(int* message) {
-	print((int*) "cstarc: ");
+	print(selfieName);
+	print((int*) ": ");
 	print(message);
+	print((int*) " in ");
+	print(sourceName);
 	print((int*) " in line ");
 	print(itoa(lineNumber, string_buffer, 10, 0));
 	print((int*) ": ");
@@ -1184,6 +1224,25 @@ void syntaxErrorCharacter(int expected) {
 	println();
 }
 
+void getCharacter() {
+	int numberOfReadBytes;
+
+	numberOfReadBytes = read(sourceFD, character_buffer, 1);
+
+	if (numberOfReadBytes == 1)
+		character = *character_buffer;
+	else if (numberOfReadBytes == 0)
+		character = CHAR_EOF;
+	else {
+		print(selfieName);
+		print((int*) ": could not read character from input file ");
+		print(sourceName);
+		println();
+
+		exit(-1);
+	}
+}
+
 int isCharacterWhitespace() {
 	if (character == CHAR_SPACE)
 		return 1;
@@ -1204,7 +1263,7 @@ int findNextCharacter() {
 
 	while (1) {
 		if (inComment) {
-			character = getchar();
+			getCharacter();
 
 			if (character == CHAR_LF)
 				inComment = 0;
@@ -1219,14 +1278,16 @@ int findNextCharacter() {
 			else if (character == CHAR_CR)
 				lineNumber = lineNumber + 1;
 
-			character = getchar();
+			getCharacter();
 
 		} else if (character == CHAR_HASH) {
-			character = getchar();
+			getCharacter();
+
 			inComment = 1;
 
 		} else if (character == CHAR_SLASH) {
-			character = getchar();
+			getCharacter();
+
 			if (character == CHAR_SLASH)
 				inComment = 1;
 			else {
@@ -1327,14 +1388,14 @@ int getSymbol() {
 				exit(-1);
 			}
 
-			putCharacter(identifier, i, character);
+			storeCharacter(identifier, i, character);
 
 			i = i + 1;
 
-			character = getchar();
+			getCharacter();
 		}
 
-		putCharacter(identifier, i, 0); // null terminated string
+		storeCharacter(identifier, i, 0); // null terminated string
 
 		symbol = identifierOrKeyword();
 
@@ -1349,14 +1410,14 @@ int getSymbol() {
 				exit(-1);
 			}
 
-			putCharacter(integer, i, character);
+			storeCharacter(integer, i, character);
 
 			i = i + 1;
 
-			character = getchar();
+			getCharacter();
 		}
 
-		putCharacter(integer, i, 0); // null terminated string
+		storeCharacter(integer, i, 0); // null terminated string
 
 		constant = atoi(integer);
 
@@ -1377,7 +1438,7 @@ int getSymbol() {
 		symbol = SYM_INTEGER;
 
 	} else if (character == CHAR_SINGLEQUOTE) {
-		character = getchar();
+		getCharacter();
 
 		constant = 0;
 
@@ -1389,10 +1450,10 @@ int getSymbol() {
 		} else
 			constant = character;
 
-		character = getchar();
+		getCharacter();
 
 		if (character == CHAR_SINGLEQUOTE)
-			character = getchar();
+			getCharacter();
 		else if (character == CHAR_EOF) {
 			syntaxErrorCharacter(CHAR_SINGLEQUOTE);
 
@@ -1403,7 +1464,7 @@ int getSymbol() {
 		symbol = SYM_CHARACTER;
 
 	} else if (character == CHAR_DOUBLEQUOTE) {
-		character = getchar();
+		getCharacter();
 
 		string = malloc(maxStringLength + 1);
 
@@ -1415,96 +1476,113 @@ int getSymbol() {
 				exit(-1);
 			}
 
-			putCharacter(string, i, character);
+			storeCharacter(string, i, character);
 
 			i = i + 1;
 
-			character = getchar();
+			getCharacter();
 		}
 
 		if (character == CHAR_DOUBLEQUOTE)
-			character = getchar();
+			getCharacter();
 		else {
 			syntaxErrorCharacter(CHAR_DOUBLEQUOTE);
 
 			exit(-1);
 		}
 
-		putCharacter(string, i, 0); // null terminated string
+		storeCharacter(string, i, 0); // null terminated string
 
 		symbol = SYM_STRING;
 
 	} else if (character == CHAR_SEMICOLON) {
-		character = getchar();
+		getCharacter();
+
 		symbol = SYM_SEMICOLON;
 
 	} else if (character == CHAR_PLUS) {
-		character = getchar();
+		getCharacter();
+
 		symbol = SYM_PLUS;
 
 	} else if (character == CHAR_DASH) {
-		character = getchar();
+		getCharacter();
+
 		symbol = SYM_MINUS;
 
 	} else if (character == CHAR_ASTERISK) {
-		character = getchar();
+		getCharacter();
+
 		symbol = SYM_ASTERISK;
 
 	} else if (character == CHAR_EQUAL) {
-		character = getchar();
+		getCharacter();
+
 		if (character == CHAR_EQUAL) {
-			character = getchar();
+			getCharacter();
+
 			symbol = SYM_EQUALITY;
 		} else
 			symbol = SYM_ASSIGN;
 
 	} else if (character == CHAR_LPARENTHESIS) {
-		character = getchar();
+		getCharacter();
+
 		symbol = SYM_LPARENTHESIS;
 
 	} else if (character == CHAR_RPARENTHESIS) {
-		character = getchar();
+		getCharacter();
+
 		symbol = SYM_RPARENTHESIS;
 
 	} else if (character == CHAR_LBRACE) {
-		character = getchar();
+		getCharacter();
+
 		symbol = SYM_LBRACE;
 
 	} else if (character == CHAR_RBRACE) {
-		character = getchar();
+		getCharacter();
+
 		symbol = SYM_RBRACE;
 
 	} else if (character == CHAR_COMMA) {
-		character = getchar();
+		getCharacter();
+
 		symbol = SYM_COMMA;
 
 	} else if (character == CHAR_LT) {
-		character = getchar();
+		getCharacter();
+
 		if (character == CHAR_EQUAL) {
-			character = getchar();
+			getCharacter();
+
 			symbol = SYM_LEQ;
 		} else
 			symbol = SYM_LT;
 
 	} else if (character == CHAR_GT) {
-		character = getchar();
+		getCharacter();
+
 		if (character == CHAR_EQUAL) {
-			character = getchar();
+			getCharacter();
+
 			symbol = SYM_GEQ;
 		} else
 			symbol = SYM_GT;
 
 	} else if (character == CHAR_EXCLAMATION) {
-		character = getchar();
+		getCharacter();
+
 		if (character == CHAR_EQUAL)
-			character = getchar();
+			getCharacter();
 		else
 			syntaxErrorCharacter(CHAR_EQUAL);
 
 		symbol = SYM_NOTEQ;
 
 	} else if (character == CHAR_PERCENTAGE) {
-		character = getchar();
+		getCharacter();
+
 		symbol = SYM_MOD;
 
 	} else {
@@ -1524,7 +1602,8 @@ int getSymbol() {
 // ------------------------- SYMBOL TABLE --------------------------
 // -----------------------------------------------------------------
 
-void createSymbolTableEntry(int whichTable, int *string, int data, int class, int type, int value) {
+void createSymbolTableEntry(int whichTable, int *string, int data, int class,
+		int type, int value) {
 	int *newEntry;
 
 	// symbol table entry:
@@ -1561,8 +1640,8 @@ void createSymbolTableEntry(int whichTable, int *string, int data, int class, in
 int* getSymbolTableEntry(int *string, int class, int *symbol_table) {
 	while ((int) symbol_table != 0) {
 		if (stringCompare(string, getString(symbol_table)))
-		if (class == getClass(symbol_table))
-		return symbol_table;
+			if (class == getClass(symbol_table))
+				return symbol_table;
 
 		// keep looking
 		symbol_table = getNext(symbol_table);
@@ -1994,7 +2073,7 @@ int help_call_codegen(int *entry, int *procedure) {
 			setData(entry, binaryLength);
 
 			emitJFormat(OP_JAL, 0);
-		} else if (getOpcode(loadMemory(getData(entry))) == OP_JAL) {
+		} else if (getOpcode(loadBinary(getData(entry))) == OP_JAL) {
 			// CASE 3: function call, no declaration
 			emitJFormat(OP_JAL, getData(entry) / 4);
 
@@ -3010,7 +3089,7 @@ void gr_procedure(int *procedure, int returnType) {
 					binaryLength, FUNCTION, returnType, 0);
 		else {
 			if (getData(entry) != 0) {
-				if (getOpcode(loadMemory(getData(entry))) == OP_JAL)
+				if (getOpcode(loadBinary(getData(entry))) == OP_JAL)
 					fixlink_absolute(getData(entry), functionStart);
 				else {
 					printLineNumber((int*) "error");
@@ -3164,17 +3243,32 @@ void emitMainEntry() {
 // ----------------------------- MAIN ------------------------------
 // -----------------------------------------------------------------
 
-int main_compiler() {
-	initScanner();
-	initParser();
+void compile() {
+	print(selfieName);
+	print((int*) ": this is selfie's cstarc compiling ");
+	print(sourceName);
+	println();
 
-	// memory in bytes and executable file name "out"
-	initMemory(maxBinaryLength, (int*) "out");
+	sourceFD = open(sourceName, 0, 0); // 0 = O_RDONLY
 
-	segment_table = insert_segment(memory,maxBinaryLength,0,0);
-	current_seg = segment_table;
+	if (sourceFD < 0) {
+		print(selfieName);
+		print((int*) ": could not open input file ");
+		print(sourceName);
+		println();
 
-	getSymbol();
+		exit(-1);
+	}
+
+	// reset scanner
+	resetScanner();
+
+	// reset global symbol table
+	resetGlobalSymbolTable();
+
+	// allocate space for storing binary
+	binary = malloc(maxBinaryLength);
+	binaryLength = 0;
 
 	// jump to main
 	emitMainEntry();
@@ -3187,21 +3281,26 @@ int main_compiler() {
 	emitWrite();
 	emitOpen();
 	emitMalloc();
-	emitGetchar();
 	emitPutchar();
 	emitYield();
+	emitLock();
+	emitUnlock();
+	emitGetPID();
 
 	// parser
 	gr_cstar();
 
-	if (getInstrIndex(loadMemory(mainJumpAddress)) != 0)
-		emitBinary();
-	else {
-		print((int*) "cstarc: main function missing");
-		println();
-	}
+	// emit global variables and strings
+	emitGlobalsStrings();
 
-	exit(0);
+	if (getInstrIndex(loadBinary(mainJumpAddress)) == 0) {
+		print(selfieName);
+		print((int*) ": main function missing in ");
+		print(sourceName);
+		println();
+
+		exit(-1);
+	}
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -3383,51 +3482,31 @@ void decodeJFormat() {
 }
 
 // -----------------------------------------------------------------
-// ---------------------------- MEMORY -----------------------------
-// -----------------------------------------------------------------
-
-int tlb(int vaddr) {
-	if (vaddr % 4 != 0)
-		exception_handler(EXCEPTION_ADDRESSERROR);
-
-	// physical memory is word-addressed for lack of byte-sized data type
-	return vaddr / 4;
-}
-
-int loadMemory(int vaddr) {
-
-	int* physical_mem_addr;
-
-	physical_mem_addr = (int*) *current_seg;
-
-	return *( physical_mem_addr + tlb(vaddr));
-}
-
-void storeMemory(int vaddr, int data) {
-
-	int *physical_mem_addr;
-
-	physical_mem_addr = (int*) *current_seg;
-
-	*(physical_mem_addr + tlb(vaddr)) = data;
-}
-
-// -----------------------------------------------------------------
 // ---------------------------- BINARY -----------------------------
 // -----------------------------------------------------------------
+
+int loadBinary(int addr) {
+	return *(binary + addr / 4);
+}
+
+void storeBinary(int addr, int instruction) {
+	*(binary + addr / 4) = instruction;
+}
 
 void emitInstruction(int instruction) {
 	if (binaryLength >= maxBinaryLength) {
 		syntaxErrorMessage((int*) "exceeded maximum binary length");
 		exit(-1);
 	} else {
-		storeMemory(binaryLength, instruction);
+		storeBinary(binaryLength, instruction);
+
 		binaryLength = binaryLength + 4;
 	}
 }
 
 void emitRFormat(int opcode, int rs, int rt, int rd, int function) {
 	emitInstruction(encodeRFormat(opcode, rs, rt, rd, function));
+
 	if (opcode == OP_SPECIAL) {
 		if (function == FCT_JR)
 			emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_NOP); // delay slot
@@ -3461,29 +3540,29 @@ void emitJFormat(int opcode, int instr_index) {
 void fixup_relative(int fromAddress) {
 	int instruction;
 
-	instruction = loadMemory(fromAddress);
+	instruction = loadBinary(fromAddress);
 
-	storeMemory(fromAddress,
+	storeBinary(fromAddress,
 			encodeIFormat(getOpcode(instruction), getRS(instruction),
 					getRT(instruction), (binaryLength - fromAddress - 4) / 4));
 }
 
 void fixup_absolute(int fromAddress, int toAddress) {
-	storeMemory(fromAddress,
-			encodeJFormat(getOpcode(loadMemory(fromAddress)), toAddress / 4));
+	storeBinary(fromAddress,
+			encodeJFormat(getOpcode(loadBinary(fromAddress)), toAddress / 4));
 }
 
 void fixlink_absolute(int fromAddress, int toAddress) {
 	int previousAddress;
 
 	while (fromAddress != 0) {
-		previousAddress = getInstrIndex(loadMemory(fromAddress)) * 4;
+		previousAddress = getInstrIndex(loadBinary(fromAddress)) * 4;
 		fixup_absolute(fromAddress, toAddress);
 		fromAddress = previousAddress;
 	}
 }
 
-int copyStringToMemory(int *s, int a) {
+int copyStringToBinary(int *s, int a) {
 	int l;
 	int w;
 
@@ -3495,7 +3574,7 @@ int copyStringToMemory(int *s, int a) {
 		w = w + 4 - l % 4;
 
 	while (a < w) {
-		storeMemory(a, *s);
+		storeBinary(a, *s);
 
 		s = s + 1;
 		a = a + 4;
@@ -3504,61 +3583,88 @@ int copyStringToMemory(int *s, int a) {
 	return w;
 }
 
-void emitBinary() {
+void emitGlobalsStrings() {
 	int *entry;
-	int fd;
 
 	entry = global_symbol_table;
+
+	// assert: n = binaryLength
 
 	// allocate space for global variables and copy strings
 	while ((int) entry != 0) {
 		if (getClass(entry) == VARIABLE) {
-			storeMemory(binaryLength, getValue(entry));
+			storeBinary(binaryLength, getValue(entry));
 
 			binaryLength = binaryLength + 4;
 		} else if (getClass(entry) == STRING)
-			binaryLength = copyStringToMemory(getString(entry), binaryLength);
+			binaryLength = copyStringToBinary(getString(entry), binaryLength);
 
 		entry = getNext(entry);
 	}
 
-	// assert: file with name binaryName exists prior to execution of compiler
-	fd = open(binaryName, 1); // 1 = O_WRONLY
+	// assert: binaryLength == n + allocatedMemory
+
+	allocatedMemory = 0;
+}
+
+void emit() {
+	int fd;
+
+	// 1537 = 0x0601 = O_CREAT (0x0200) | O_WRONLY (0x0001) | O_TRUNC (0x0400)
+	// 420 = 00644 = S_IRUSR (00400) | S_IWUSR (00200) | S_IRGRP (00040) | S_IROTH (00004)
+	fd = open(binaryName, 1537, 420);
 
 	if (fd < 0) {
-		syntaxErrorMessage((int*) "output file not found");
+		print(selfieName);
+		print((int*) ": could not create output file ");
+		print(binaryName);
+		println();
+
 		exit(-1);
 	}
 
-	// The mipster_syscall 4004 writes the code array into a file.
-	// The syscall uses the "write" system call of the OS and compiler.
-	// The write system call of our Linux uses little endian byte ordering.
-	write(fd, memory, binaryLength);
+	print(selfieName);
+	print((int*) ": writing code into output file ");
+	print(binaryName);
+	println();
+
+	write(fd, binary, binaryLength);
 }
 
-void loadBinary() {
+void load() {
 	int fd;
 	int numberOfReadBytes;
 
-	fd = open(binaryName, 0); // 0 = O_RDONLY
+	fd = open(binaryName, 0, 0); // 0 = O_RDONLY
 
 	if (fd < 0) {
+		print(selfieName);
+		print((int*) ": could not open input file ");
+		print(binaryName);
+		println();
+
 		exit(-1);
 	}
 
+	binary = malloc(maxBinaryLength);
 	binaryLength = 0;
+
 	numberOfReadBytes = 4;
 
-	while (numberOfReadBytes == 4) {
+	print(selfieName);
+	print((int*) ": loading code from input file ");
+	print(binaryName);
+	println();
 
-		numberOfReadBytes = read(fd, (int*) *current_seg + tlb(binaryLength), 4);
+	while (numberOfReadBytes == 4) {
+		numberOfReadBytes = read(fd, binary + binaryLength / 4, 4);
 
 		if (debug_load) {
 			print(binaryName);
 			print((int*) ": ");
 			print(itoa(binaryLength, string_buffer, 16, 8));
 			print((int*) ": ");
-			print(itoa(loadMemory(binaryLength), string_buffer, 16, 8));
+			print(itoa(loadBinary(binaryLength), string_buffer, 16, 8));
 			println();
 		}
 
@@ -3590,7 +3696,6 @@ void syscall_exit() {
 	int exitCode;
 
 	number_of_proc = number_of_proc - 1;
-
 	exitCode = *(registers + REG_A0);
 
 	*(registers + REG_V0) = exitCode;
@@ -3601,7 +3706,9 @@ void syscall_exit() {
 	println();
 
 	proc_list = remove(current_proc, proc_list);
-	exited = 1;
+
+	triggerContextSwitch = 1;
+
 	if ((int) proc_list == 0)
 		exit(0);
 }
@@ -3687,7 +3794,7 @@ void syscall_write() {
 	vaddr = *(registers + REG_A1);
 	fd = *(registers + REG_A0);
 
-	buffer = ((int*) *current_seg) + tlb(vaddr);
+	buffer = (int*) *current_seg + tlb(vaddr);
 
 	size = write(fd, buffer, size);
 
@@ -3710,7 +3817,9 @@ void emitOpen() {
 			INT_T, 0);
 
 	emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
-	emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+
+	emitIFormat(OP_ADDIU, REG_SP, REG_A2, 0); // mode
+	emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
 	emitIFormat(OP_LW, REG_SP, REG_A1, 0); // flags
 	emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
@@ -3725,17 +3834,19 @@ void emitOpen() {
 }
 
 void syscall_open() {
+	int mode;
 	int flags;
 	int vaddr;
 	int *filename;
 	int fd;
 
+	mode = *(registers + REG_A2);
 	flags = *(registers + REG_A1);
 	vaddr = *(registers + REG_A0);
 
 	filename = memory + tlb(vaddr);
 
-	fd = open(filename, flags);
+	fd = open(filename, flags, mode);
 
 	*(registers + REG_V0) = fd;
 
@@ -3744,7 +3855,9 @@ void syscall_open() {
 		print((int*) ": opened file ");
 		printString(filename);
 		print((int*) " with flags ");
-		print(itoa(flags, string_buffer, 10, 0));
+		print(itoa(flags, string_buffer, 16, 0));
+		print((int*) " and mode ");
+		print(itoa(mode, string_buffer, 8, 0));
 		print((int*) " returning file descriptor ");
 		print(itoa(fd, string_buffer, 10, 0));
 		println();
@@ -3784,13 +3897,8 @@ void syscall_malloc() {
 
 	bump = *(registers + REG_K1);
 
-	if (bump + size >= *(registers + REG_SP)) {
-		print(itoa(bump + size , string_buffer, 10, 0));
-		println();
-		print(itoa(*(registers + REG_SP) , string_buffer, 10, 0));
-		println();
+	if (bump + size >= *(registers + REG_SP))
 		exception_handler(EXCEPTION_HEAPOVERFLOW);
-	}
 
 	*(registers + REG_K1) = bump + size;
 	*(registers + REG_V0) = bump;
@@ -3801,36 +3909,6 @@ void syscall_malloc() {
 		print(itoa(size, string_buffer, 10, 0));
 		print((int*) " bytes returning address ");
 		print(itoa(bump, string_buffer, 16, 8));
-		println();
-	}
-}
-
-void emitGetchar() {
-	createSymbolTableEntry(GLOBAL_TABLE, (int*) "getchar", binaryLength,
-			FUNCTION, INT_T, 0);
-
-	emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
-	emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
-	emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
-	emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
-
-	emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_GETCHAR);
-	emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
-
-	emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
-}
-
-void syscall_getchar() {
-	int c;
-
-	c = getchar();
-
-	*(registers + REG_V0) = c;
-
-	if (debug_getchar) {
-		print(binaryName);
-		print((int*) ": getchar ");
-		printCharacter(c);
 		println();
 	}
 }
@@ -3870,7 +3948,159 @@ void emitYield() {
 }
 
 void syscall_yield() {
-	context_switch();
+	triggerContextSwitch = 1;
+}
+
+void emitLock() {
+	createSymbolTableEntry(GLOBAL_TABLE, (int*) "lock", binaryLength, FUNCTION,
+			INT_T, 0);
+
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+	emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_LOCK);
+	emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+	emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_lock() {
+	if ((int) lock_owner == 0) {
+		occupy_lock();
+	} else if ((int) lock_owner != current_proc) {
+		make_blocking();
+	} else {
+		print((int*) "No point to locking mate, you got the lock (Process: ");
+		print(itoa(*(current_proc + 5), string_buffer, 10, 0));
+		print((int*) ")");
+		println();
+	}
+}
+
+void emitUnlock() {
+	createSymbolTableEntry(GLOBAL_TABLE, (int*) "unlock", binaryLength,
+			FUNCTION, INT_T, 0);
+
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+	emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_UNLOCK);
+	emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+	emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_unlock() {
+	if ((int) current_proc == (int) lock_owner) {
+		free_lock();
+		sched_block_proc();
+	} else {
+		print((int*) "What are you unlocking? You don't have the lock (Process: ");
+		print(itoa(*(current_proc + 5), string_buffer, 10, 0));
+		print((int*) ")");
+		println();
+	}
+}
+
+void emitGetPID() {
+        createSymbolTableEntry(GLOBAL_TABLE, (int*) "getPID", binaryLength,
+                        FUNCTION, INT_T, 0);
+
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+        emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_GETPID);
+        emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+        emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_getpid() {
+	*(registers + REG_V0) = *(current_proc + 5);
+}
+
+void occupy_lock() {
+        print((int*) "\nLocking as process ");
+        print(itoa(get_pid(), string_buffer, 10, 0));
+        println();
+
+	lock_owner = current_proc;
+}
+
+void make_blocking() {
+	int* locked_process;
+
+        print((int*) "\nGetting blocked as process ");
+        print(itoa(get_pid(), string_buffer, 10, 0));
+        println();
+
+	locked_process = current_proc;
+
+	proc_list = remove(locked_process, proc_list);
+	blocked_queue = insert_process(*locked_process, *(locked_process + 1),
+			*(locked_process + 2), 0, blocked_queue, *(locked_process + 5));
+
+	triggerContextSwitch = 1;
+}
+
+void free_lock() {
+	print((int*) "\nUnlocking as process ");
+	print(itoa(get_pid(), string_buffer, 10, 0));
+	println();
+
+	lock_owner = (int*) 0;
+}
+
+
+void sched_block_proc() {
+	int* next_unblocked_process;
+
+	next_unblocked_process = get_next_proc();
+
+	blocked_queue = remove(next_unblocked_process, blocked_queue);
+
+	if ((int) next_unblocked_process != 0)
+		proc_list = insert_process(*next_unblocked_process,
+				*(next_unblocked_process + 1), *(next_unblocked_process + 2), 0,
+				proc_list, *(next_unblocked_process + 5));
+
+}
+
+int get_pid() {
+	return *(current_proc + 5);
+}
+
+int* get_next_proc () {
+	int* cursor;
+	int c;
+
+	c = 0;
+	cursor = blocked_queue;
+
+	while ((int) cursor != 0) {
+		if (c == block_count) {
+			block_count = block_count + 4;
+
+			if (block_count >= number_of_proc)
+				block_count = 0;
+
+			return cursor;
+		}
+
+		cursor = (int*)*(cursor + 4);
+		c = c + 1;
+
+		if ((int) cursor == 0)
+			cursor = blocked_queue;
+	}
+
+	return (int*) 0;
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -3878,6 +4108,34 @@ void syscall_yield() {
 // ---------------------     E M U L A T O R   ---------------------
 // -----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+
+// -----------------------------------------------------------------
+// ---------------------------- MEMORY -----------------------------
+// -----------------------------------------------------------------
+
+int tlb(int vaddr) {
+	if (vaddr % 4 != 0)
+		exception_handler(EXCEPTION_ADDRESSERROR);
+
+	// physical memory is word-addressed for lack of byte-sized data type
+	return vaddr / 4;
+}
+
+int loadMemory(int vaddr) {
+	int* physical_mem_addr;
+
+	physical_mem_addr = (int*) *current_seg;
+
+	return *(physical_mem_addr + tlb(vaddr));
+}
+
+void storeMemory(int vaddr, int data) {
+	int *physical_mem_addr;
+
+	physical_mem_addr = (int*) *current_seg;
+
+	*(physical_mem_addr + tlb(vaddr)) = data;
+}
 
 // -----------------------------------------------------------------
 // ------------------------- INSTRUCTIONS --------------------------
@@ -3899,10 +4157,14 @@ void fct_syscall() {
 		syscall_open();
 	} else if (*(registers + REG_V0) == SYSCALL_MALLOC) {
 		syscall_malloc();
-	} else if (*(registers + REG_V0) == SYSCALL_GETCHAR) {
-		syscall_getchar();
 	} else if (*(registers + REG_V0) == SYSCALL_YIELD) {
 		syscall_yield();
+	} else if (*(registers + REG_V0) == SYSCALL_LOCK) {
+		syscall_lock();
+	} else if (*(registers + REG_V0) == SYSCALL_UNLOCK) {
+		syscall_unlock();
+	} else if (*(registers + REG_V0) == SYSCALL_GETPID) {
+		syscall_getpid();
 	} else {
 		exception_handler(EXCEPTION_UNKNOWNSYSCALL);
 	}
@@ -4303,12 +4565,12 @@ void execute() {
 }
 
 void run() {
-	int instr_count;
 	instr_count = 0;
+
 	while (1) {
 		while (instr_count < instr_cycles) {
-			if (exited) {
-
+			if (triggerContextSwitch) {
+				context_switch();
 			} else {
 				fetch();
 				decode();
@@ -4316,42 +4578,46 @@ void run() {
 				execute();
 				post_debug();
 			}
+
 			instr_count = instr_count + 1;
 		}
-		instr_count = 0;
+
 		context_switch();
 	}
 }
+
 void context_switch() {
+	save_context();
+	schedule_next_proc();
+	restore_context();
+}
+
+void save_context() {
 	*current_proc = pc; // Save old program counter
+}
+
+void schedule_next_proc() {
 	current_proc = (int*) *(current_proc + 4);
 
 	if ((int) current_proc == 0) {
 		current_proc = proc_list;
 	}
+}
 
-	exited = 0;
+void restore_context() {
+	triggerContextSwitch = 0;
 
 	registers = (int*) *(current_proc + 1);
 	current_seg = (int*) *(current_proc + 2);
 	pc = *current_proc;
+
+	instr_count = 0;
+
 }
 
-void parse_args(int argc, int *argv) {
-	// assert: ./selfie -m size executable {-m size executable}
-
-	// memory size in bytes and executable file name
-	initMemory(atoi((int*) *(argv + 2)) * 1024 * 1024, (int*) *(argv + 3));
-
-	// initialize stack pointer
-	//*(registers + REG_SP) = memorySize - 4;
-
-	print(binaryName);
-	print((int*) ": memory size ");
-	print(itoa(memorySize / 1024 / 1024, string_buffer, 10, 0));
-	print((int*) "MB");
-	println();
-}
+// -----------------------------------------------------------------
+// ----------------------------- MAIN ------------------------------
+// -----------------------------------------------------------------
 
 void up_push(int value) {
 	int vaddr;
@@ -4361,6 +4627,7 @@ void up_push(int value) {
 
 	// compute address
 	vaddr = *(registers + REG_SP);
+
 	// store value
 	storeMemory(vaddr, value);
 }
@@ -4373,6 +4640,33 @@ int up_malloc(int size) {
 	return *(registers + REG_V0);
 }
 
+int up_copyString(int *s) {
+	int l;
+	int a;
+	int w;
+	int t;
+
+	l = stringLength(s) + 1;
+
+	a = up_malloc(l);
+
+	w = a + l;
+
+	if (l % 4 != 0)
+		w = w + 4 - l % 4;
+
+	t = a;
+
+	while (a < w) {
+		storeMemory(a, *s);
+
+		s = s + 1;
+		a = a + 4;
+	}
+
+	return t;
+}
+
 void up_copyArguments(int argc, int *argv) {
 	int vaddr;
 
@@ -4383,9 +4677,7 @@ void up_copyArguments(int argc, int *argv) {
 	up_push(vaddr);
 
 	while (argc > 0) {
-		storeMemory(vaddr, up_malloc(stringLength((int*) *argv) + 1));
-
-		copyStringToMemory((int*) *argv, loadMemory(vaddr));
+		storeMemory(vaddr, up_copyString((int*) *argv));
 
 		vaddr = vaddr + 4;
 
@@ -4394,66 +4686,235 @@ void up_copyArguments(int argc, int *argv) {
 	}
 }
 
-int main_emulator(int argc, int *argv) {
+void copyBinaryToMemory() {
+	int a;
 
-	number_of_proc = 1;
+	a = 0;
+
+	while (a < binaryLength) {
+		storeMemory(a, loadBinary(a));
+
+		a = a + 4;
+	}
+}
+
+void emulate(int argc, int *argv) {
+	print(selfieName);
+	print((int*) ": this is selfie's mipster executing ");
+	print(binaryName);
+	print((int*) " with ");
+	print(itoa(memorySize / 1024 / 1024, string_buffer, 10, 0));
+	print((int*) "MB of memory");
+	println();
 
 	proc_count = 0;
-	seg_count=0;
+	seg_count = 0;
 
-	instr_cycles = 30000;
-
-	parse_args(argc, argv);
+	seg_size = memorySize / number_of_proc;
 
 	while (proc_count < number_of_proc) {
+		resetInterpreter();
 
 		create_process(argc, argv);
 
-		loadBinary();
+		copyBinaryToMemory();
 
+		*(registers + REG_SP) = seg_size - 4;
 		*(registers + REG_GP) = binaryLength;
 		*(registers + REG_K1) = *(registers + REG_GP);
 
-		up_copyArguments(argc - 3, argv + 3);
-
+		up_copyArguments(argc, argv);
 	}
 
-	//
-
 	run();
+}
 
-	exit(0);
+// -----------------------------------------------------------------
+// ----------------------------- LIST ------------------------------
+// -----------------------------------------------------------------
+
+void iter_list(int* list) {
+	int* cursor;
+
+	print((int*) "\n-------------------\n");
+
+	cursor = list;
+
+	while ((int) cursor != 0) {
+		print(itoa(*cursor, string_buffer, 10, 0));
+		cursor = *(cursor + 4);
+		print((int*) "\n");
+	}
+
+	print((int*) "\n-------------------\n");
+}
+
+// Append entry (including specified process payload) to a specified list
+int* insert_process(int pc, int* reg, int* seg, int* prev, int* next, int pid) {
+	int* node;
+
+	node = malloc(6 * 4);
+
+	*node = pc;
+	*(node + 1) = (int) reg;
+	*(node + 2) = (int) seg;
+	*(node + 3) = (int) prev;
+	*(node + 4) = (int) next;
+	*(node + 5) = pid;
+
+	if ((int) prev != 0) {
+		*(prev + 4) = (int) node;
+	}
+	if ((int) next != 0) {
+		*(next + 3) = (int) node;
+	}
+
+	return node;
+}
+
+// Append entry (including specified segment payload) to a specified list
+int* insert_segment(int* begin, int size, int* prev, int* next) {
+	int* node;
+
+	node = malloc(4 * 4);
+
+	*node = (int) begin;
+	*(node + 1) = size;
+	*(node + 2) = (int) prev;
+	*(node + 3) = (int) next;
+
+	if ((int) prev != 0) {
+		*(prev + 3) = (int) node;
+	}
+	if ((int) next != 0) {
+		*(next + 2) = (int) node;
+	}
+
+	return node;
+}
+
+int* remove(int* node, int* list) {
+	int* next;
+	int* prev;
+
+	if ((int) node == 0)
+		return list;
+
+	next = (int*) *(node + 4);
+	prev = (int*) *(node + 3);
+
+	if ((int) prev != 0) {
+		*(prev + 4) = (int) next;
+	} else {
+		list = next;
+	}
+
+	if ((int) next != 0) {
+		*(next + 3) = (int) prev;
+	}
+	return list;
+}
+
+void printLists() {
+	print((int*) "Ready + Run Processes:\n");
+	iter_list(proc_list);
+
+	print((int*) "Blocking Processes:\n");
+	iter_list(blocked_queue);
 }
 
 // -----------------------------------------------------------------
 // ----------------------------- MAIN ------------------------------
 // -----------------------------------------------------------------
 
-int main(int argc, int *argv) {
-	int *firstParameter;
+int selfie(int argc, int* argv) {
+	if (argc < 2)
+		return -1;
+	else {
+		while (argc >= 2) {
+			if (stringCompare((int*) *argv, (int*) "-c")) {
+				sourceName = (int*) *(argv + 1);
+				binaryName = sourceName;
 
+				argc = argc - 2;
+				argv = argv + 2;
+
+				compile();
+			} else if (stringCompare((int*) *argv, (int*) "-o")) {
+				binaryName = (int*) *(argv + 1);
+
+				argc = argc - 2;
+				argv = argv + 2;
+
+				if (binaryLength > 0)
+					emit();
+				else {
+					print(selfieName);
+					print((int*) ": nothing to emit to output file ");
+					print(binaryName);
+					println();
+				}
+			} else if (stringCompare((int*) *argv, (int*) "-l")) {
+				binaryName = (int*) *(argv + 1);
+
+				argc = argc - 2;
+				argv = argv + 2;
+
+				load();
+			} else if (stringCompare((int*) *argv, (int*) "-m")) {
+				initMemory(atoi((int*) *(argv + 1)));
+
+				argc = argc - 1;
+				argv = argv + 1;
+
+				// pass binaryName as first argument replacing size
+				*argv = (int) binaryName;
+
+				if (binaryLength > 0)
+					emulate(argc, argv);
+				else {
+					print(selfieName);
+					print((int*) ": nothing to emulate");
+					println();
+
+					exit(-1);
+				}
+
+				return 0;
+			} else if (stringCompare((int*) *argv, (int*) "-k")) {
+				print(selfieName);
+				print((int*) ": selfie -k size ... not yet implemented");
+				println();
+
+				return 0;
+			} else
+				return -1;
+		}
+	}
+
+	return 0;
+}
+
+int main(int argc, int *argv) {
 	initLibrary();
+
+	initScanner();
+
 	initRegister();
 	initDecoder();
 
-	if (argc > 1) {
-		firstParameter = (int*) *(argv + 1);
-		if (getCharacter(firstParameter, 0) == '-') {
-			if (getCharacter(firstParameter, 1) == 'c')
-				main_compiler();
-			else if (getCharacter(firstParameter, 1) == 'm') {
-				if (argc > 3)
-					main_emulator(argc, (int*) argv);
-				else
-					exit(-1);
-			} else {
-				exit(-1);
-			}
-		} else {
-			exit(-1);
-		}
-	} else
-		// default: compiler
-		main_compiler();
+	initInterpreter();
+
+	selfieName = (int*) *argv;
+
+	argc = argc - 1;
+	argv = argv + 1;
+
+	if (selfie(argc, (int*) argv) != 0) {
+		print(selfieName);
+		print(
+				(int*) ": usage: selfie { -c source | -o binary | -l binary } [ -m size ... | -k size ... ] ");
+		println();
+	}
 }
 

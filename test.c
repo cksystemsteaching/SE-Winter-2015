@@ -1,12 +1,44 @@
 int main() {
-	int counter;
+	if (getPID() == 1) {
+		lock();
+	}
 
-	counter = 48;
+	if (getPID() == 0) {
+		lock();
+	}
 
-	while (counter != 53) {
-		putchar(counter),
-		counter = counter + 1;
-		sched_yield();
+	if (getPID() == 1) {
+		lock();
+	}
+
+	if (getPID() == 1) {
+		putchar('0');
+		putchar('1');
+		putchar('2');
+	}
+
+	if (getPID() == 0) {
+		putchar('0');
+		putchar('1');
+		putchar('2');
+	}
+
+	if (getPID() == 2) {
+		putchar('0');
+		putchar('1');
+		putchar('2');
+	}
+
+	if (getPID() == 1) {
+		unlock();
+	}
+
+	if (getPID() == 0) {
+		unlock();
+	}
+
+	if (getPID() == 1) {
+		unlock();
 	}
 
 	exit(0);

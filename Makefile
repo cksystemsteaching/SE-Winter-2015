@@ -7,43 +7,34 @@ TEST_BINARY		:= myprog
 
 all: test_binary
 
-self_host:
-	$(CC) $(CC_OPT) -o $(EXEC) $(EXEC).c
-	touch out
-	./$(EXEC) -c < $(EXEC).c
-	mv out $(EXEC).mips1
-	touch out
-	./$(EXEC) -m $(MEM_SIZE) $(EXEC).mips1 < selfie.c
-	mv out $(EXEC).mips2
+clena: clean
+clan: clean
+clane: clean
+claen: clean
+calen: clean
+clea: clean
+cclean: clean
 
-	echo '                                                 '
-	echo '*** ---------- *** ---------- *** ----------- ***'
-	diff -s $(EXEC).mips1 $(EXEC).mips2
-	echo '*** ---------- *** ---------- *** ----------- ***'
-	echo '						       '
+self_host:
+	touch $(EXEC)1.mips
+	$(CC) $(CC_OPT) $(EXEC).c -o $(EXEC)
+	touch $(EXEC)2.mips
+	./$(EXEC) -c $(EXEC).c -o $(EXEC)1.mips -m $(MEM_SIZE) -c $(EXEC).c -o $(EXEC)2.mips
+	diff -s $(EXEC)1.mips $(EXEC)2.mips
 
 test_binary:
-	$(CC) $(CC_OPT) -o $(EXEC) $(EXEC).c
-	touch out
-	./$(EXEC) < $(EXEC).c
-	mv out $(EXEC).mips1
-	touch out
-	./$(EXEC) < $(TEST_INPUT)
-	mv out $(TEST_BINARY)
-	./$(EXEC) -m $(MEM_SIZE) $(TEST_BINARY)
+	$(CC) $(CC_OPT) $(EXEC).c -o $(EXEC)
+	touch $(TEST_BINARY)
+	./$(EXEC) -c $(TEST_INPUT) -o $(TEST_BINARY)
+	./$(EXEC) -l $(TEST_BINARY) -m $(MEM_SIZE)
 
 compile:
-	$(CC) $(CC_OPT) -o $(EXEC) selfie.c
+	$(CC) $(CC_OPT) $(EXEC).c -o $(EXEC)
 
 self_execute:
-	$(CC) $(CC_OPT) -o $(EXEC) selfie.c
-	touch out
-	./$(EXEC) -c < $(INPUT)
-	mv out $(EXEC).mips1
-	touch out
-	./$(EXEC) -m 64 $(EXEC).mips1 -m $(MEM_SIZE) $(EXEC).mips1 < $(INPUT)
-	mv out $(EXEC).mips2
-	diff -s $(EXEC).mips1 $(EXEC).mips2
+	$(CC) $(CC_OPT) $(EXEC).c -o $(EXEC)
+	./$(EXEC) -c $(EXEC).c -o $(EXEC)1.mips -m 64 -l $(EXEC)1.mips -m $(MEM_SIZE) -c $(EXEC).c -o $(EXEC)2.mips
+	diff -s $(EXEC)1.mips $(EXEC)2.mips
 
 clean:
 	rm -f *.mips*
