@@ -3425,6 +3425,12 @@ void decodeJFormat() {
 // -----------------------------------------------------------------
 
 int loadBinary(int addr) {
+
+	print((int*)"binary: ");
+	print(itoa((int)binary, string_buffer, 10, 0));println();
+	print((int*)"addr: ");
+	print(itoa(addr, string_buffer, 10, 0));println();
+
     return *(binary + addr / 4);
 }
 int tlb(int vaddr) {
@@ -3908,8 +3914,6 @@ void emitYield(){
 }
 
 void syscall_yield() {
-//print((int*)"lock = ");
-//print(itoa(lock, string_buffer, 10 , 0));println();
 	switchProcess(0);
 }
 
@@ -3949,26 +3953,14 @@ void emitLock(){
 }
 
 void syscall_lock(){
-//	print((int*)"currProcess:");
-//	print(itoa(*(currProcess+2), string_buffer, 10, 0));println();
-//	print((int*)"blockedQueue:");println();
-//	printList(blockedQueue,0);
-//	print((int*)"readyQueue:");println();
-//	printList(readyQueue,0);
-//	print((int*)"lock: ");
-//	print(itoa(lock, string_buffer, 10, 0));println();
-//	print((int*)"lockID: ");
-//	print(itoa(lockID, string_buffer, 10, 0));println();
 	if(lock == 0){
 		lock = 1;
 		lockID = *(currProcess+2);
 	} else if(lock == 1){
 		if(lockID != *(currProcess+2)){
-//			appendListElement(currProcess, blockedQueue);
 			switchProcess(0);
 		} 
 	}
-//	printList(blockedQueue, 0);
 }
 
 
@@ -4934,7 +4926,7 @@ void run() {
  	
  	while (1) {
 	    fetch();
-	    if (*(registers+REG_V0) == SYSCALL_EXIT) { // if SYSCALL_EXIT is next instruction, lock = 0, otherwise unlock was not called
+	    if (*(registers+REG_V0) == SYSCALL_EXIT) { 
 			switchProcess(1);
        	} else
        		continueExecuting();
@@ -5072,7 +5064,6 @@ void emulate(int argc, int *argv) {
 		*(registers+REG_K1) = *(registers+REG_GP);
 	    *(registers+REG_SP) = *(currSegment+4)-4;
 	    
-		binaryLength = 0;
 		up_copyArguments(argc-3, argv+3);
 		counter = counter + 1;
    		up_copyArguments(argc, argv);
