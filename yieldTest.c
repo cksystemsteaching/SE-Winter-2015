@@ -1,5 +1,6 @@
 int main(){
 
+<<<<<<< HEAD
 lock();
 	putchar('a');
 	yield();
