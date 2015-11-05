@@ -831,7 +831,7 @@ int *last_created_proc;
 int number_of_proc = 3;
 int proc_count;
 int instr_count;
-int instr_cycles = 105;
+int instr_cycles = 100;
 int triggerContextSwitch;
 
 int *segment_table;

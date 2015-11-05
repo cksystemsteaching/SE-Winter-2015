@@ -5,7 +5,7 @@ MEM_SIZE		:= 32
 TEST_INPUT		:= test.c
 TEST_BINARY		:= myprog
 
-all: test_binary
+all: test_different_time_slices
 
 clena: clean
 clan: clean
@@ -21,6 +21,9 @@ self_host:
 	touch $(EXEC)2.mips
 	./$(EXEC) -c $(EXEC).c -o $(EXEC)1.mips -m $(MEM_SIZE) -c $(EXEC).c -o $(EXEC)2.mips
 	diff -s $(EXEC)1.mips $(EXEC)2.mips
+
+test_different_time_slices:
+	./modifyTimeslice.sh 2 10 100
 
 test_binary:
 	$(CC) $(CC_OPT) $(EXEC).c -o $(EXEC)
