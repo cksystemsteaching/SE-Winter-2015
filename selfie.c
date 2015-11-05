@@ -608,6 +608,32 @@ void initDecoder() {
 
 // -----------------------------------------------------------------
 
+int *memory;
+int  memorySize;
+int *memoryBumpPointer;
+int  usedMemorySize;
+int memoryStartAddress;
+
+int *blockedQueue; // blocked processes, wait for unlock
+int *readyQueue; // ready processes
+
+int *currProcess;
+int  counterProcesses;
+
+int *segmentationTable;
+int *currSegment;
+int currSegmentPos;
+int currSegmentSize;
+
+int isEmulating=0;
+
+int *binaryName;
+int  binaryLength;
+
+int lock = 0;
+int lockID;
+
+// -----------------------------------------------------------------
 // ---------------------------- BINARY -----------------------------
 // -----------------------------------------------------------------
 
@@ -664,6 +690,12 @@ void emitPutchar();
 void emitYield();
 void syscall_yield();
 
+void emitLock();
+void syscall_lock();
+
+void emitUnlock();
+void syscall_unlock();
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int SYSCALL_EXIT    = 4001;
@@ -673,6 +705,8 @@ int SYSCALL_OPEN    = 4005;
 int SYSCALL_MALLOC  = 5001;
 int SYSCALL_GETCHAR = 5002;
 int SYSCALL_YIELD   = 6000;
+int SYSCALL_LOCK	= 6001;
+int SYSCALL_UNLOCK	= 6002;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -721,8 +755,11 @@ void initMemory(int megabytes) {
     memorySize = megabytes * 1024 * 1024;
     memory     = malloc(memorySize);
     
+    memoryStartAddress = (int)memory;
     memoryBumpPointer = memory;
+    currSegmentPos = (int)memory;
     usedMemorySize = 0;
+    currSegmentSize = memorySize;
 
 }
 
@@ -752,10 +789,14 @@ void op_teq();
 
 void appendListElement(int *newElement, int *list);
 void saveProcessState();
+void printListElement(int *element);
+void printList(int *list, int type);
 int* findElementByKey(int key, int *list);
 void setProcessState();
 int* pollListHead(int *borders);
 int* removeFirst(int *borders);
+void switchProcess(int finished);
+void continueExecuting();
 
 // -----------------------------------------------------------------
 // -------------------------- INTERPRETER --------------------------
@@ -3185,6 +3226,8 @@ void compile() {
     emitMalloc();
     emitPutchar();
     emitYield();
+    emitLock();
+    emitUnlock();
 
     // parser
     gr_cstar();
@@ -3383,6 +3426,38 @@ void decodeJFormat() {
 
 int loadBinary(int addr) {
     return *(binary + addr / 4);
+}
+int tlb(int vaddr) {
+	int addr;
+    if (vaddr % 4 != 0)
+        exception_handler(EXCEPTION_ADDRESSERROR);
+	addr = vaddr/4;
+	if(isEmulating){
+		if(memoryStartAddress > ((int)memory + addr)){ // addressed memory is below memory start address
+  			print((int*)"tlb first: ");exception_handler(EXCEPTION_SEGMENTATIONFAULT);
+		}
+		if(memoryStartAddress + memorySize < ((int)memory + addr)){ // addressed memory is greater than memory
+			print((int*)"tlb second: ");exception_handler(EXCEPTION_SEGMENTATIONFAULT);
+		}
+		
+		if(currSegmentPos != (int)memory){
+	        print((int*)"tlb third: ");exception_handler(EXCEPTION_ADDRESSERROR);
+		}
+		if(currSegmentSize < addr){
+	        print((int*)"tlb fourth: ");exception_handler(EXCEPTION_HEAPOVERFLOW);
+		}
+		if(addr < 0){
+	       print((int*)"tlb fifth: "); exception_handler(EXCEPTION_ADDRESSERROR);
+		}
+	}
+
+    // physical memory is word-addressed for lack of byte-sized data type
+    return addr;
+}
+
+int loadMemory(int vaddr) {
+	
+    return *(memory + tlb(vaddr));
 }
 
 void storeBinary(int addr, int instruction) {
@@ -3678,27 +3753,27 @@ void syscall_write() {
     int vaddr;
     int fd;
     int *buffer;
+	size  = *(registers+REG_A2);
+	vaddr = *(registers+REG_A1);
+	fd    = *(registers+REG_A0);
 
-    size  = *(registers+REG_A2);
-    vaddr = *(registers+REG_A1);
-    fd    = *(registers+REG_A0);
+	buffer = memory + tlb(vaddr);
 
-    buffer = memory + tlb(vaddr);
+	size = write(fd, buffer, size);
 
-    size = write(fd, buffer, size);
+	*(registers+REG_V0) = size;
 
-    *(registers+REG_V0) = size;
-
-    if (debug_write) {
-        print(binaryName);
-        print((int*) ": wrote ");
-        print(itoa(size, string_buffer, 10, 0));
-        print((int*) " bytes from buffer at address ");
-        print(itoa((int) buffer, string_buffer, 16, 8));
-        print((int*) " into file with descriptor ");
-        print(itoa(fd, string_buffer, 10, 0));
-        println();
-    }
+	if (debug_write) {
+		print(binaryName);
+		print((int*) ": wrote ");
+		print(itoa(size, string_buffer, 10, 0));
+		print((int*) " bytes from buffer at address ");
+		print(itoa((int) buffer, string_buffer, 16, 8));
+		print((int*) " into file with descriptor ");
+		print(itoa(fd, string_buffer, 10, 0));
+		println();
+	}
+	
 }
 
 void emitOpen() {
@@ -3833,11 +3908,67 @@ void emitYield(){
 }
 
 void syscall_yield() {
-	saveProcessState();
-	appendListElement(currProcess, processList);
-	
-	currProcess = removeFirst(processList);
-	setProcessState();
+//print((int*)"lock = ");
+//print(itoa(lock, string_buffer, 10 , 0));println();
+	switchProcess(0);
+}
+
+void emitUnlock(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "unlock", binaryLength, FUNCTION, VOID_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_UNLOCK);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);	
+
+}
+
+void syscall_unlock(){
+	if(*(currProcess+2) == lockID){
+		lock = 0;
+	}
+}
+
+void emitLock(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "lock", binaryLength, FUNCTION, VOID_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_LOCK);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);	
+}
+
+void syscall_lock(){
+//	print((int*)"currProcess:");
+//	print(itoa(*(currProcess+2), string_buffer, 10, 0));println();
+//	print((int*)"blockedQueue:");println();
+//	printList(blockedQueue,0);
+//	print((int*)"readyQueue:");println();
+//	printList(readyQueue,0);
+//	print((int*)"lock: ");
+//	print(itoa(lock, string_buffer, 10, 0));println();
+//	print((int*)"lockID: ");
+//	print(itoa(lockID, string_buffer, 10, 0));println();
+	if(lock == 0){
+		lock = 1;
+		lockID = *(currProcess+2);
+	} else if(lock == 1){
+		if(lockID != *(currProcess+2)){
+//			appendListElement(currProcess, blockedQueue);
+			switchProcess(0);
+		} 
+	}
+//	printList(blockedQueue, 0);
 }
 
 
@@ -3864,7 +3995,7 @@ void syscall_yield() {
 // 6 +-----+ 
 
 // print segmentation table entry
-void printSegmentationTableEntry(int *element){
+void printSegmentationTableEntryVerbose(int *element){
 	int *prev;
 	int *next;
 	prev = (int*)*element;
@@ -3898,6 +4029,16 @@ void printSegmentationTableEntry(int *element){
 	println();
 
 }
+// print segmentation table entry
+void printSegmentationTableEntry(int *element){
+	print((int*)"key ");
+	if(element != (int*)0)
+		print(itoa(*(element+2), string_buffer, 10, 0));
+	print((int*)", segSize ");
+	if(element != (int*)0)
+		print(itoa(*(element+4), string_buffer, 10, 0));
+	println();
+}
 
 void printProcess(int *element){
 	int *prev;
@@ -3930,24 +4071,23 @@ void printProcess(int *element){
 	
 	print((int*)"segPos ");
 	if(segEntry != (int*)0)
-		print(itoa((int)(segEntry+3), string_buffer, 10, 0));
+		print(itoa((int)*(segEntry+3), string_buffer, 10, 0));
 	println();
 
 	print((int*)"segSize ");
 	if(segEntry != (int*)0)
-		print(itoa((int)(segEntry+4), string_buffer, 10, 0));
+		print(itoa((int)*(segEntry+4), string_buffer, 10, 0));
 	println();
 	println();
 
 }
 // print list element 
-void printListElement(int *element){
+void printListElementVerbose(int *element){
 	int *prev;
 	int *next;
 	prev = (int*)*element;
 	next = (int*)*(element+1);
 
-	println();
 	print((int*)"pre ");
 	if(prev != (int*)0)
 		print(itoa(*(prev+2), string_buffer, 10, 0));
@@ -3968,6 +4108,12 @@ void printListElement(int *element){
 		print(itoa(*(element+3), string_buffer, 10, 0));
 	println();
 	
+}
+void printListElement(int *element){
+	print((int*)"key ");
+	if(element != (int*)0)
+		print(itoa(*(element+2), string_buffer, 10, 0));
+	println();
 }
 
 //initialize head and tail
@@ -4073,6 +4219,38 @@ void insertListElementAtBeginning(int *newElement, int *list){
 // print the list
 // if type == 0: print processes
 // if type == 1: print segmentation table 
+void printListVerbose(int *list, int type){
+	int *pToHead;
+	int *pToTail;
+	int *curr;
+	pToHead = pollListHead(list);
+	pToTail = pollListTail(list);
+
+	print((int*)"print list start");
+	println();
+	if(isListEmpty(list)==0){	// if list not empty
+		curr = (int*)*pToHead;
+		while((int)curr != 0){
+			if(type == 0)
+				printListElementVerbose(curr);
+			else if(type == 1)
+				printSegmentationTableEntryVerbose(curr);
+			else if(type ==2)
+				printProcess(curr);
+			curr = (int*)*(curr+1);
+		}
+	} else {
+		println();
+	}
+
+	println();
+	print((int*)"print list end");
+
+}
+// print the list
+// if type == 0: print listelement
+// if type == 1: print segmentation table 
+// if type == 2: print whole process (listelement+segmentation table entry)
 void printList(int *list, int type){
 	int *pToHead;
 	int *pToTail;
@@ -4080,7 +4258,6 @@ void printList(int *list, int type){
 	pToHead = pollListHead(list);
 	pToTail = pollListTail(list);
 
-	println();
 	print((int*)"print list start");
 	println();
 	if(isListEmpty(list)==0){	// if list not empty
@@ -4094,13 +4271,9 @@ void printList(int *list, int type){
 				printProcess(curr);
 			curr = (int*)*(curr+1);
 		}
-	} else {
-		println();
-	}
+	} 
 
-	println();
 	print((int*)"print list end");
-	println();
 	println();
 
 }
@@ -4212,11 +4385,13 @@ void setProcessState(){
 	registers = (int*)*(currProcess + 4);
 	pc = *(currProcess + 3);
 	memory = (int*)*(currSegment + 3);
-
+	currSegmentPos = (int)memory;
+	currSegmentSize = *(currSegment+4);
 }
 
 int* createSegmentationTableEntry(int key, int segmentSize){
 	int *newSegmentationTableEntry;
+	currSegmentSize = segmentSize;
 	usedMemorySize = usedMemorySize + segmentSize;
 	if(usedMemorySize > memorySize){
 		exception_handler(EXCEPTION_SEGMENTATIONFAULT);
@@ -4232,6 +4407,46 @@ int* createSegmentationTableEntry(int key, int segmentSize){
 	return newSegmentationTableEntry;
 }
 
+void switchProcess(int finished){//finished = 1, not finished = 0
+	if(finished == 1){
+		lock = 0;
+		if(isListEmpty(blockedQueue)==0){
+			currProcess = removeFirst(blockedQueue);
+			lock = 1;
+			lockID = *(currProcess+2);
+			setProcessState();
+		} else if (isListEmpty(readyQueue) == 0){
+			currProcess = removeFirst(readyQueue);
+			setProcessState();
+		} else {
+			continueExecuting();
+		}
+	} else if (finished == 0){
+		saveProcessState();
+		if(lock==1){
+			if(lockID != *(currProcess+2)){
+				appendListElement(currProcess, blockedQueue);
+			} else 
+				appendListElement(currProcess, readyQueue);
+		} else
+			appendListElement(currProcess, readyQueue);
+
+		if(lock == 0){
+			if(isListEmpty(blockedQueue)==0) {
+				currProcess = removeFirst(blockedQueue);
+				lock = 1;
+				lockID = *(currProcess+2);
+				setProcessState();
+			} else {
+				currProcess = removeFirst(readyQueue);
+				setProcessState();
+			}
+		} else if (lock == 1) {
+			currProcess = removeFirst(readyQueue);
+			setProcessState();
+		}
+	}
+}
 void testDoubleLinkedList(){
 	int *borders;
 	int *head;
@@ -4282,17 +4497,6 @@ void testDoubleLinkedList(){
 // ---------------------------- MEMORY -----------------------------
 // -----------------------------------------------------------------
 
-int tlb(int vaddr) {
-    if (vaddr % 4 != 0)
-        exception_handler(EXCEPTION_ADDRESSERROR);
-
-    // physical memory is word-addressed for lack of byte-sized data type
-    return vaddr / 4;
-}
-
-int loadMemory(int vaddr) {
-    return *(memory + tlb(vaddr));
-}
 
 void storeMemory(int vaddr, int data) {
     *(memory + tlb(vaddr)) = data;
@@ -4318,10 +4522,12 @@ void fct_syscall() {
         syscall_open();
     } else if (*(registers+REG_V0) == SYSCALL_MALLOC) {
         syscall_malloc();
-    } else if (*(registers+REG_V0) == SYSCALL_YIELD){
-		syscall_yield();    
     } else if (*(registers+REG_V0) == SYSCALL_YIELD) {
         syscall_yield();
+    } else if (*(registers+REG_V0) == SYSCALL_LOCK) {
+        syscall_lock();
+    } else if (*(registers+REG_V0) == SYSCALL_UNLOCK) {
+        syscall_unlock();
     } else {
         exception_handler(EXCEPTION_UNKNOWNSYSCALL);
     }
@@ -4722,26 +4928,41 @@ void execute() {
 }
 
 void run() {
-	int *head;
-	int counter;
-	counter = 0;
-	head = pollListHead(processList);
-	currProcess = removeFirst(processList);
+	int *listHead;
+	currProcess = removeFirst(readyQueue);
 	setProcessState();
-
+ 	
  	while (1) {
 	    fetch();
-	    decode();
-	    pre_debug();
-	    execute();
-	    post_debug();
-	}	
+	    if (*(registers+REG_V0) == SYSCALL_EXIT) { // if SYSCALL_EXIT is next instruction, lock = 0, otherwise unlock was not called
+			switchProcess(1);
+       	} else
+       		continueExecuting();
+	}
 
 }
 
 // -----------------------------------------------------------------
 // ----------------------------- MAIN ------------------------------
 // -----------------------------------------------------------------
+void continueExecuting(){
+	decode();
+	pre_debug();
+	execute();
+	post_debug();
+}
+void parse_args(int argc, int *argv) {
+    // assert: ./selfie -m size executable {-m size executable}
+
+    // memory size in bytes and executable file name
+    initMemory(atoi((int*) *(argv+1)));
+
+    print(binaryName);
+    print((int*) ": memory size ");
+    print(itoa(memorySize / 1024 / 1024, string_buffer, 10, 0));
+    print((int*) "MB");
+    println();
+}
 
 void up_push(int value) {
     int vaddr;
@@ -4823,33 +5044,27 @@ void copyBinaryToMemory() {
 void emulate(int argc, int *argv) {
 	int counter;
 	int segmentSize;
+	int vaddr;
+	isEmulating = 1;
 	segmentSize = 1024*1024;
 	counter = 0;
 	counterProcesses = 2;
 	
-	processList = initList();
+	readyQueue = initList();
     segmentationTable = initList();
 
-    print(selfieName);
-    print((int*) ": this is selfie's mipster executing ");
-    print(binaryName);
-    print((int*) " with ");
-    print(itoa(memorySize / 1024 / 1024, string_buffer, 10, 0));
-    print((int*) "MB of memory");
-    println();
-
-    resetInterpreter();
-
+	blockedQueue = initList();
+    initInterpreter();
+    parse_args(argc, argv);
+	
 	while(counter < counterProcesses){
 
 		currSegment = createSegmentationTableEntry(counter, segmentSize);
 		appendListElement(currSegment, segmentationTable);
 		currProcess = createProcess(counter);
-		appendListElement(currProcess, processList);
+		appendListElement(currProcess, readyQueue);
 
-		memory = (int*)*(currSegment+3);
-		registers = (int*)*(currProcess + 4);
-		currSegment = (int*)*(currProcess + 5);
+		setProcessState();
 
 	    copyBinaryToMemory();
 
