@@ -9,7 +9,7 @@ int main(){
 }
 
 int printAlphabet(int counter){
-	if(counter < 10){
+	if(counter < 4){
 	lock();
 		putchar('a'+counter);
 		yield();

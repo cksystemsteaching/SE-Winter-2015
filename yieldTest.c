@@ -1,18 +1,22 @@
 int main(){
-	int counterArgs;
-	int alphabet;
-	int counter;
-	counterArgs = 26;
-	alphabet = 'a';
-	counter = 0;
-	while(counter < counterArgs){
-		putchar(alphabet+counter);
-		putchar(10);
-		yield();
-		counter = counter+1;
-	}
 
+lock();
+	putchar('a');
+	yield();
+	putchar('b');
+unlock();
+	yield();
+lock();
+	putchar('c');
+	yield();
+	putchar('d');
+unlock();
+	yield();
+lock();
+	putchar('e');
+	yield();
+	putchar('f');
+unlock();
 
 	exit(0);
 }
-
