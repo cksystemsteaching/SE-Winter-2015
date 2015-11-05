@@ -2,12 +2,12 @@ CFLAGS=-g
 LDFLAGS=
 CC=/usr/bin/gcc
 
-default: a2
+default: a3
 
-a2: selfie
-	touch out
+a3: selfie
+	@touch out
 	./selfie -c < test.c
-	mv out test
+	@mv out test
 	./selfie -m 128 test
 
 selfie: selfie.c

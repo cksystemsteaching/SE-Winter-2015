@@ -627,6 +627,7 @@ void initMemory(int size, int *name) {
 // -----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 
+int currentInstCount;
 int *registers; // general purpose registers
 int pc = 0; // program counter
 int debug_load = 0;
@@ -637,23 +638,29 @@ int debug_open    = 0;
 int debug_malloc  = 0;
 int debug_getchar = 0;
 int debug_getpid  = 0;
-int debug_yield   = 1;
-
-int debug_sm      = 1;
+int debug_gettid  = 0;
+int debug_yield   = 0;
+int debug_lock    = 0; 
+int debug_unlock  = 0;
+int debug_exit    = 1; 
+int debug_sm      = 0;
 int debug_pr      = 0;
-
+int debug_createThread= 0;
 int debug_registers   = 0;
 int debug_disassemble = 0;
 
 
 
-int pid          = 0;                   // last process identifier
-int sr           = 0;                   // segment register
+int pid = 0;                   // last process identifier
+int sr = 0;                    // segment register
+int lock = 0;                  
+int lockthread = 0;            // a lock is identified as (pid, tid)
 
 int segment_size;
 int segmentBumpPointer = 0;
 
 int *readyQ;
+int *blockedQ;
 
 
 // List Operations (generic)
@@ -664,15 +671,17 @@ int* os_appendQueue(int* list, int* data); // append element to a queue
 
 // process specific queue functions:
 int* os_searchPqueue(int* list, int key);  //  search process queue for given pid
-void os_printQueue(int* list);
+void os_printQueue(int* list, int qnr);
 
 // process functions
-int* os_createProcess();     // create new process element
+int* os_createProcess();                   // create new process element
 int  os_getProcessID(int* process);        // get pid for a given process
 int  os_getProcessPc(int* process);        // get program counter of process object
 int* os_getProcessRegister(int* process);  // get pointer to registers of a process
-int os_getProcessSegment(int* process);    // get pointer to memory of a given process
-
+int  os_getProcessSegment(int* process);   // get pointer to memory of a given process
+int  os_getProcessTID(int* process);        // get Thread identifer 
+int  os_getProcessThreadNumber(int* process); 
+int  os_getProcessSegmentRegister(int* process); 
 
 // functions for process scheduling:
 void os_restoreContext();                  //  restore context (reg,mem,pc) of a given process
@@ -784,38 +793,51 @@ int* os_searchPqueue(int* list, int key) {
     return (int*)0;
 }
 
-void os_printQueue(int* list) {
+void os_printQueue(int* list, int qnr) {
     int* q;
     int* tail;
-    q = os_getHead(readyQ);
-    tail = os_getTail(readyQ);
+    q = os_getHead(list);
+    tail = os_getTail(list);
 
     if ((int)q == 0)
         return;
 
-    print((int*) "[PR] Current Queue: ");
+    if (qnr == 1) {
+        print((int*) "[PR] Ready Queue: ");
+    } else if (qnr == 2) {
+        print((int*) "[PR] Blocked Queue: ");
+    } 
     while (q != tail) {
         print(itoa(os_getProcessID(q), string_buffer, 10, 0));
+        putchar('[');
+        print(itoa(os_getProcessTID(q), string_buffer, 10, 0));
+        putchar(']');
         putchar(',');
         q = (int*)*q;
     }
     print(itoa(os_getProcessID(q), string_buffer, 10, 0));
+        putchar('[');
+        print(itoa(os_getProcessTID(q), string_buffer, 10, 0));
+        putchar(']');
+
     println();
 }
 
 // process:  create a new process object:
 // return :  return pointer to the new prrocess
-// +------------------+
-// |0 next pointer    |
-// |1 prev pointer    |
-// |2 process id      |
-// |3 program counter |
-// |4 register ptr    |
-// |5 memory ptr      |
-// +------------------+
+// +-------------------+
+// |0 next pointer     |
+// |1 prev pointer     |
+// |2 process id       |
+// |3 program counter  |
+// |4 register ptr     |
+// |5 segment register |
+// |6 thread id        |      // if it's a process, then thread id == 0.  
+// |7 thread number    |      // store number of 'client' threads
+// +-------------------+
 int* os_createProcess() {
     int *new;
-    new = malloc(5*4);
+    new = malloc(8*4);
 
     pid = pid + 1;   // use 0 for the operating system
 
@@ -825,11 +847,13 @@ int* os_createProcess() {
     *(new + 3) = 0;                  // PC
     *(new + 4) = (int)malloc(32*4);  // registers
     *(new + 5) = sr;                 // segment register
+    *(new + 6) = 0;                  // thread identifier
+    *(new + 7) = 0;                  // parent process/thread
 
     *(registers + REG_ZR) = 0;
 
     if (debug_pr) {
-        print((int*) "[PR] create process ");
+        print((int*) "[PR] create process/thread ");
     	itoa(pid, string_buffer, 10, 2);
         print(string_buffer);
         putchar(CHAR_LF);
@@ -843,6 +867,45 @@ int* os_createProcess() {
 
 }
 
+int os_getProcessThreadNumber(int* process) { 
+  return *(process + 7);
+}
+
+int* os_createThread(int* parent) {
+    int* thread;
+    int* parentRegs;
+    int* threadRegs; 
+    int seg; 
+    thread = os_createProcess(); 
+
+    parentRegs = (int*)*(parent + 4); 
+    threadRegs = (int*)*(thread + 4);
+
+    *(thread + 2) = os_getProcessID(parent);             // threads have the same PID
+    *(thread + 3) = 0; 
+    *(thread + 6) = os_getProcessThreadNumber(parent) + 1;  
+    *(thread + 5) = os_getProcessSegmentRegister(parent); 
+
+    *(parent + 7) = *(parent + 7) + 1;                  // update thread counter
+
+    seg = os_kmalloc(); 
+
+    *(threadRegs + 0) = 0;
+    *(threadRegs+REG_GP) = *(parentRegs+REG_GP);
+    *(threadRegs+REG_K1) = *(parentRegs+REG_K1);
+    *(threadRegs+REG_SP) = seg + segment_size - 4 - os_getProcessSegmentRegister(parent);
+
+    return thread;
+}
+
+int os_getProcessSegmentRegister(int* process) {
+    return *(process + 5);
+}
+
+
+int os_getProcessTID(int* process) {
+    return *(process + 6);
+}
 
 int os_getProcessID(int* process) {
     return *(process + 2);
@@ -865,6 +928,14 @@ void os_restoreContext() {
     int *process;
 
     process = os_getHead(readyQ);
+
+    if ((int)process == 0) {
+        process = os_getHead(blockedQ);
+        if ((int) process == 0) { 
+             exit(0);
+        }
+        os_appendQueue(readyQ, process);
+    }
     pc = os_getProcessPc(process);
     registers = os_getProcessRegister(process);
     sr = os_getProcessSegment(process);
@@ -880,9 +951,12 @@ void os_saveContext() {
 
 void os_printSwitch(int *process) {
     if (debug_pr) {
-        os_printQueue(readyQ);
-        print((int*) "[PR] switch to PID");
+        os_printQueue(readyQ, 1);
+        print((int*) "[PR] switch to PID ");
         itoa(os_getProcessID(process), string_buffer, 10, 2);
+        print(string_buffer);
+        print((int*) ", with thread id: ");
+        itoa(os_getProcessTID(process), string_buffer, 10, 2);
         print(string_buffer);
         putchar(CHAR_LF);
     }
@@ -968,6 +1042,18 @@ void syscall_getpid();
 void emitYield();
 void syscall_yield();
 
+void emitLock();
+void syscall_lock();
+
+void emitUnlock();
+void syscall_unlock();
+
+void emitCreateThread();
+void syscall_CreateThread();
+
+void emitGettid();
+void syscall_gettid();
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int SYSCALL_EXIT    = 4001;
@@ -978,7 +1064,10 @@ int SYSCALL_GETPID  = 4020;
 int SYSCALL_YIELD   = 4162;
 int SYSCALL_MALLOC  = 5001;
 int SYSCALL_GETCHAR = 5002;
-
+int SYSCALL_LOCK    = 6000; 
+int SYSCALL_UNLOCK  = 6001; 
+int SYSCALL_CREATETHREAD = 6002; 
+int SYSCALL_GETTID  = 6003; 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -1525,7 +1614,7 @@ int getSymbol() {
         while (isCharacterDigit()) {
             if (i >= maxIntegerLength) {
                 syntaxErrorMessage((int*) "integer out of bound");
-                exit(-2);
+                exit(-1);
             }
 
             putCharacter(integer, i, character);
@@ -1545,11 +1634,11 @@ int getSymbol() {
                     isINTMINConstant = 1;
                 else {
                     syntaxErrorMessage((int*) "integer out of bound");
-                    exit(-3);
+                    exit(-1);
                 }
             } else {
                 syntaxErrorMessage((int*) "integer out of bound");
-                exit(-4);
+                exit(-1);
             }
         }
 
@@ -1563,7 +1652,7 @@ int getSymbol() {
         if (character == CHAR_EOF) {
             syntaxErrorMessage((int*) "reached end of file looking for a character constant");
 
-            exit(-5);
+            exit(-1);
         } else
             constant = character;
 
@@ -1574,7 +1663,7 @@ int getSymbol() {
         else if (character == CHAR_EOF) {
             syntaxErrorCharacter(CHAR_SINGLEQUOTE);
 
-            exit(-6);
+            exit(-1);
         } else
             syntaxErrorCharacter(CHAR_SINGLEQUOTE);
 
@@ -1590,7 +1679,7 @@ int getSymbol() {
         while (isNotDoubleQuoteOrEOF()) {
             if (i >= maxStringLength) {
                 syntaxErrorMessage((int*) "string too long");
-                exit(-7);
+                exit(-1);
             }
 
             putCharacter(string, i, character);
@@ -1605,7 +1694,7 @@ int getSymbol() {
         else {
             syntaxErrorCharacter(CHAR_DOUBLEQUOTE);
 
-            exit(-8);
+            exit(-1);
         }
 
         putCharacter(string, i, 0); // null terminated string
@@ -1692,7 +1781,7 @@ int getSymbol() {
 
         println();
 
-        exit(-9);
+        exit(-1);
     }
 
     return symbol;
@@ -1941,7 +2030,7 @@ void talloc() {
     else {
         syntaxErrorMessage((int*) "out of registers");
 
-        exit(-10);
+        exit(-1);
     }
 }
 
@@ -1951,7 +2040,7 @@ int currentTemporary() {
     else {
         syntaxErrorMessage((int*) "illegal register access");
 
-        exit(-11);
+        exit(-1);
     }
 }
 
@@ -1961,7 +2050,7 @@ int previousTemporary() {
     else {
         syntaxErrorMessage((int*) "illegal register access");
 
-        exit(-12);
+        exit(-1);
     }
 }
 
@@ -1971,7 +2060,7 @@ int nextTemporary() {
     else {
         syntaxErrorMessage((int*) "out of registers");
 
-        exit(-13);
+        exit(-1);
     }
 }
 
@@ -1981,7 +2070,7 @@ void tfree(int numberOfTemporaries) {
     if (allocatedTemporaries < 0) {
         syntaxErrorMessage((int*) "illegal register deallocation");
 
-        exit(-14);
+        exit(-1);
     }
 }
 
@@ -2068,7 +2157,7 @@ int* getVariable(int *variable) {
             print((int*) " undeclared");
             println();
 
-            exit(-15);
+            exit(-1);
         }
     }
 
@@ -2300,7 +2389,7 @@ int gr_factor() {
         syntaxErrorUnexpected();
 
         if (symbol == SYM_EOF)
-            exit(-16);
+            exit(-1);
         else
             getSymbol();
     }
@@ -2683,7 +2772,7 @@ void gr_while() {
                     else {
                         syntaxErrorSymbol(SYM_RBRACE);
 
-                        exit(-17);
+                        exit(-1);
                     }
                 }
                 // only one statement without {}
@@ -2744,7 +2833,7 @@ void gr_if() {
                     else {
                         syntaxErrorSymbol(SYM_RBRACE);
 
-                        exit(-18);
+                        exit(-1);
                     }
                 }
                 // only one statement without {}
@@ -2774,7 +2863,7 @@ void gr_if() {
                         else {
                             syntaxErrorSymbol(SYM_RBRACE);
 
-                            exit(-19);
+                            exit(-1);
                         }
 
                     // only one statement without {}
@@ -2844,7 +2933,7 @@ void gr_statement() {
         syntaxErrorUnexpected();
 
         if (symbol == SYM_EOF)
-            exit(-20);
+            exit(-1);
         else
             getSymbol();
     }
@@ -3206,7 +3295,7 @@ void gr_procedure(int *procedure, int returnType) {
         else {
             syntaxErrorSymbol(SYM_RBRACE);
 
-            exit(-21);
+            exit(-1);
         }
 
         fixlink_absolute(returnBranches, binaryLength);
@@ -3232,7 +3321,7 @@ void gr_cstar() {
             syntaxErrorUnexpected();
 
             if (symbol == SYM_EOF)
-                exit(-22);
+                exit(-1);
             else
                 getSymbol();
         }
@@ -3332,8 +3421,11 @@ int main_compiler() {
     emitGetchar();
     emitPutchar();
     emitGetpid();
+    emitGettid();
     emitYield();
-
+    emitLock();
+    emitUnlock();
+    emitCreateThread();
     // parser
     gr_cstar();
 
@@ -3531,10 +3623,8 @@ int tlb(int vaddr) {
         exception_handler(EXCEPTION_ADDRESSERROR);
 
     if (isEmulator) {
-        if (vaddr > sr + segment_size)
-            exception_handler(EXCEPTION_SEGMENTATIONFAULT);
-        if (vaddr < 0)
-            exception_handler(EXCEPTION_SEGMENTATIONFAULT);
+        // XXX Currently, no Segmentation Fault will occur because 
+        //     of threads.  
         return (sr + vaddr) / 4;
     }
     // physical memory is word-addressed for lack of byte-sized data type
@@ -3556,7 +3646,7 @@ void storeMemory(int vaddr, int data) {
 void emitInstruction(int instruction) {
     if (binaryLength >= maxBinaryLength) {
         syntaxErrorMessage((int*) "exceeded maximum binary length");
-        exit(-23);
+        exit(-1);
     } else {
         storeMemory(binaryLength, instruction);
 
@@ -3668,7 +3758,7 @@ void emitBinary() {
 
     if (fd < 0) {
         syntaxErrorMessage((int*) "output file not found");
-        exit(-24);
+        exit(-1);
     }
 
     // The mipster_syscall 4004 writes the code array into a file.
@@ -3684,7 +3774,7 @@ void loadBinary() {
     fd = open(binaryName, 0); // 0 = O_RDONLY
 
     if (fd < 0)
-        exit(-25);
+        exit(-1);
 
     numberOfReadBytes = 4;
 
@@ -3732,17 +3822,20 @@ void syscall_exit() {
 
     exitCode = *(registers+REG_A0);
 
-    print((int*)"[OS] PID");
-    print(itoa(os_getProcessID(process), string_buffer, 10, 0));
-    print((int*)" Terminated with ");
+    if (debug_exit) {
+        print((int*)"[OS] PID");
+        print(itoa(os_getProcessID(process), string_buffer, 10, 0));
+        print((int*)" Terminated with ");
+        print(itoa(exitCode, string_buffer, 10, 0));
+        putchar(CHAR_LF);
+    }
 
     *(registers+REG_V0) = exitCode;
 
-    print(itoa(exitCode, string_buffer, 10, 0));
-    putchar(CHAR_LF);
 
-    //os_process_remove(pro);
     os_removeQueue(readyQ, process);
+    os_contextSwitch(0);
+    currentInstCount = 0; 
 }
 
 
@@ -4043,6 +4136,177 @@ void syscall_yield() {
 
 }
 
+
+void emitLock() {
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "lock", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    // load the correct syscall number and invoke syscall
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_LOCK);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    // jump back to caller, return value is in REG_V0
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_lock() {
+    int *process;
+
+    process = os_getHead(readyQ);
+
+    if (lock == 0) {
+         lock = os_getProcessID(process); 
+         lockthread = os_getProcessTID(process); 
+         *(registers+REG_V0) = 1; 
+    } else {
+         *(registers+REG_V0) = 0; 
+         os_saveContext();
+         os_removeQueue(readyQ, process);
+         os_appendQueue(blockedQ, process);
+         os_restoreContext();
+         os_printSwitch(os_getHead(readyQ));
+         currentInstCount = 0; 
+    }
+
+    if (debug_pr) {
+        os_printQueue(blockedQ, 2);
+    }
+
+    if (debug_lock) {
+        print(binaryName);
+        print((int*) ": lock set to PID: ");
+        print(itoa(lock, string_buffer, 10, 0));
+        println();
+    }
+}
+
+
+void emitUnlock() {
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "unlock", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    // load the correct syscall number and invoke syscall
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_UNLOCK);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    // jump back to caller, return value is in REG_V0
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_unlock() {
+    int *process;
+    int *firstBlocked;
+
+    process = os_getHead(readyQ);
+
+    if (lock == os_getProcessID(process)) {
+         if (lockthread == os_getProcessTID(process)) {
+         lock = 0;
+         lockthread = 0;
+         *(registers+REG_V0) = 1; 
+         firstBlocked = os_getHead(blockedQ); 
+         if ((int) firstBlocked != 0) {
+             os_removeQueue(blockedQ, firstBlocked);
+             os_appendQueue(readyQ, firstBlocked);
+             lock = os_getProcessID(firstBlocked);
+              } 
+         }  else 
+             *(registers+REG_V0) = 0;
+    } else {
+         *(registers+REG_V0) = 0; 
+          // exception.. kill process? 
+    }
+
+    if (debug_pr) {
+        print((int*) ": blocked queue after unlock: ");
+        os_printQueue(blockedQ, 2);
+    }
+
+
+    if (debug_unlock) {
+        print(binaryName);
+        print((int*) ": succesfully reset lock? : ");
+        print(itoa(*(registers + REG_V0), string_buffer, 10, 0));
+        println();
+    }
+}
+
+
+void emitCreateThread() {
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "createThread", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    // load the correct syscall number and invoke syscall
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_CREATETHREAD);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    // jump back to caller, return value is in REG_V0
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_createThread() {
+    int *process;
+    int *newThread; 
+
+    process   = os_getHead(readyQ);
+    newThread = os_createThread(process);
+
+    os_appendQueue(readyQ, newThread);
+    
+    if (debug_createThread) {
+      print((int*) "[PR] create new thread PID: ");
+      print(itoa(os_getProcessID(process), string_buffer, 10, 0));
+      print((int*) ": Thread ID: ");
+      print(itoa(os_getProcessTID(newThread), string_buffer, 10, 0));
+      println();
+      os_printQueue(readyQ, 1);
+    }
+}
+
+void syscall_gettid() {
+    int *process;
+
+    process = os_getHead(readyQ);
+    *(registers+REG_V0) = os_getProcessTID(process);
+
+    if (debug_gettid) {
+        print(binaryName);
+        print((int*) ": gettid ");
+        print(itoa(*(registers+REG_V0), string_buffer, 10, 0));
+        print((int*) " from running process");
+        println();
+    }
+}
+
+void emitGettid() {
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "gettid", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_GETTID);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+
+
+
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -4082,6 +4346,18 @@ void fct_syscall() {
     } else if (*(registers+REG_V0) == SYSCALL_YIELD) {
         pc = pc + 4;
         syscall_yield();
+    } else if (*(registers+REG_V0) == SYSCALL_LOCK) {
+        pc = pc + 4;
+        syscall_lock();
+    } else if (*(registers+REG_V0) == SYSCALL_UNLOCK) {
+        pc = pc + 4;
+        syscall_unlock();
+    } else if (*(registers+REG_V0) == SYSCALL_CREATETHREAD) {
+        pc = pc + 4;
+        syscall_createThread();
+    } else if (*(registers+REG_V0) == SYSCALL_GETTID) {
+        pc = pc + 4;
+        syscall_gettid();
     } else {
         exception_handler(EXCEPTION_UNKNOWNSYSCALL);
     }
@@ -4479,14 +4755,30 @@ void execute() {
     }
 }
 
+int os_queuesNotEmpty() {
+   int *process; 
+   if ((int)os_getHead(readyQ) == 0) {
+       if ((int)os_getHead(blockedQ) == 0) {
+            return 0; 
+       } else {
+            process = os_getHead(blockedQ);
+            os_removeQueue(blockedQ, process);
+            os_appendQueue(readyQ, process);
+            currentInstCount = 0; 
+            return 1; 
+       }
+   } else {
+       return 1; 
+   }
+}
+
 void run() {
     int currentPID;
-    int currentInstCount;
     int instrPerContextSwitch;
     int* headProcess;
 
     currentInstCount = 0;
-    instrPerContextSwitch = 50;
+    instrPerContextSwitch = 1;
     headProcess = os_getHead(readyQ);
 
     os_printSwitch(headProcess);
@@ -4494,27 +4786,29 @@ void run() {
 
     currentPID = os_getProcessID(headProcess);
 
-    while (1) {
-        headProcess = os_getHead(readyQ);
-        if ((int)headProcess == 0) {
-            exit(0);
-	} else if (currentPID != os_getProcessID(headProcess)) {
-            currentPID = os_contextSwitch(0);
+    while (os_queuesNotEmpty()) {
+        // dynamic program counter for this assignment, as discussed in lecture. 
+        if (instrPerContextSwitch > 50) {
+            instrPerContextSwitch = 20; 
+        } else {
+            instrPerContextSwitch = instrPerContextSwitch + 1; 
+        } 
+        
+
+        if (currentInstCount == instrPerContextSwitch) {
+            currentPID = os_contextSwitch(1);
             currentInstCount = 0;
-	} else {
-            if (currentInstCount == instrPerContextSwitch) {
-                currentPID = os_contextSwitch(1);
-                currentInstCount = 0;
-            } else {
+        } else {
                 fetch();
                 decode();
                 pre_debug();
                 execute();
                 post_debug();
                 currentInstCount = currentInstCount + 1;
-            }
-        }
+        } 
     }
+
+    exit(0);  // Emulator terminates when no process is in any queue. 
 }
 
 void initRegisterPointers(int* process) {
@@ -4594,7 +4888,8 @@ int main_emulator(int argc, int *argv) {
     segment_size      = 8 * 1024 * 1024;
     numberOfProcesses = 4;
 
-    readyQ = os_createQueue();
+    readyQ   = os_createQueue();
+    blockedQ = os_createQueue();
     parse_args(argc, argv);
 
     while (numberOfProcesses > 0) {
@@ -4646,13 +4941,13 @@ int main(int argc, int *argv) {
                 if (argc > 3)
                     main_emulator(argc, (int*) argv);
                 else
-                    exit(-26);
+                    exit(-1);
             }
             else {
-                exit(-27);
+                exit(-1);
             }
         } else {
-            exit(-28);
+            exit(-1);
         }
     } else
         // default: compiler
