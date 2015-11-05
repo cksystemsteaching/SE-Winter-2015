@@ -23,7 +23,9 @@ a3:
 	clang -v -w -m32 -D'main(a, b)=main(int argc, char **argv)' selfie.c -o selfie
 	touch out
 	./selfie -c mutualExclusion.c -o out
-	./selfie -l out -a 64
+	./selfie -l out -a 64 3 1
+	./selfie -l out -a 64 3 100
+	./selfie -l out -a 64 3 1000
 	
 bonus:
 	clang -v -w -m32 -D'main(a, b)=main(int argc, char **argv)' selfie.c -o selfie

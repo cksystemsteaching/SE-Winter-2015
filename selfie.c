@@ -4975,13 +4975,13 @@ int selfie(int argc, int* argv) {
 
                 return 0;
             } else if (stringCompare((int*) *argv, (int*) "-a")) {
-				numberOfProcesses = 3;
-        		numberOfInstructions = 1;
-
 				initMemory(atoi((int*) *(argv+1)));
 
-                argc = argc - 1;
-                argv = argv + 1;
+				numberOfProcesses = atoi((int*) *(argv+2));
+        		numberOfInstructions = atoi((int*) *(argv+3));
+
+                argc = argc - 3;
+                argv = argv + 3;
 
                 // pass binaryName as first argument replacing size
                 *argv = (int) binaryName;
