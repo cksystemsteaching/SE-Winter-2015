@@ -607,31 +607,70 @@ void initDecoder() {
 }
 
 // -----------------------------------------------------------------
+// ---------------------    Operating System   ---------------------
+// -----------------------------------------------------------------
 
-int *memory;
-int  memorySize;
-int *memoryBumpPointer;
-int  usedMemorySize;
-int memoryStartAddress;
+// ---------------------    global variables   ---------------------
 
-int *blockedQueue; // blocked processes, wait for unlock
-int *readyQueue; // ready processes
+int *memoryBumpPointer; // points to the address where the next segment can begin
+int  usedMemorySize;	// size which is already in use for existing segmentation table entries
+int  memoryStartAddress;// address where memory is allocated
 
-int *currProcess;
-int  counterProcesses;
+int *blockedQueue;		// blocked processes, wait for unlock
+int *readyQueue;		// ready processes
 
-int *segmentationTable;
-int *currSegment;
-int currSegmentPos;
-int currSegmentSize;
+int *currProcess;		// currently operating process 
+int  counterProcesses;	// total number of existing processes 
 
-int isEmulating=0;
+int *segmentationTable;	// pointer to segmentation table
+int *currSegment;		// 
 
-int *binaryName;
-int  binaryLength;
+int isEmulating=0;		// needed for range checks
 
-int lock = 0;
-int lockID;
+int lock = 0;			// if 1 lock is hold by a process
+int lockID;				// id of process holding the lock
+
+
+// ---------------------    methods   ---------------------
+
+// print methods
+void printList(int *list, int type, int verbose);
+
+void printSegmentationTableEntryVerbose(int *element);
+void printSegmentationTableEntry(int *element);
+void printSegmentationTable(int *list);
+void printSegmentationTableVerbose(int *list);
+
+void printProcessVerbose(int *element);
+void printProcess(int *element);
+void printProcessList(int *list);
+void printProcessListVerbose(int *list);
+
+// list operations
+void appendListElement(int *element, int *list);
+void insertListElementAtBeginning(int *element, int *list);
+int* initList();
+int* removeFirst(int *list);
+int* findElementByKey(int key, int *list);
+int* pollListHead(int *list);
+int* pollListTail(int *list);
+void sortList(int *list);
+
+// process operations
+int* createProcess(int key);
+void saveProcessState();
+void setProcessState();
+void switchProcess(int finished);
+
+// segmentation table entry operations
+int* createSegmentationTableEntry(int key, int segmentSize);
+int* getSegmentatinTableEntry(int key, int *list);
+
+
+void continueExecuting();
+
+
+
 
 // -----------------------------------------------------------------
 // ---------------------------- BINARY -----------------------------
@@ -729,17 +768,6 @@ void storeMemory(int vaddr, int data);
 
 int *memory;
 int  memorySize;
-int *memoryBumpPointer;
-int  usedMemorySize;
-
-
-int *processList;
-int *currProcess;
-int  counterProcesses;
-
-int *segmentationTable;
-int *currSegment;
-
 
 int *binaryName;
 int  binaryLength;
@@ -757,9 +785,7 @@ void initMemory(int megabytes) {
     
     memoryStartAddress = (int)memory;
     memoryBumpPointer = memory;
-    currSegmentPos = (int)memory;
     usedMemorySize = 0;
-    currSegmentSize = memorySize;
 
 }
 
@@ -786,17 +812,6 @@ void op_lw();
 void fct_slt();
 void op_sw();
 void op_teq();
-
-void appendListElement(int *newElement, int *list);
-void saveProcessState();
-void printListElement(int *element);
-void printList(int *list, int type);
-int* findElementByKey(int key, int *list);
-void setProcessState();
-int* pollListHead(int *borders);
-int* removeFirst(int *borders);
-void switchProcess(int finished);
-void continueExecuting();
 
 // -----------------------------------------------------------------
 // -------------------------- INTERPRETER --------------------------
@@ -3440,14 +3455,11 @@ int tlb(int vaddr) {
 		if(memoryStartAddress + memorySize < ((int)memory + addr)){ // addressed memory is greater than memory
 			print((int*)"tlb second: ");exception_handler(EXCEPTION_SEGMENTATIONFAULT);
 		}
-		if(currSegmentPos != (int)memory){
-	        print((int*)"tlb third: ");exception_handler(EXCEPTION_ADDRESSERROR);
-		}
-		if(currSegmentSize < addr){
-	        print((int*)"tlb fourth: ");exception_handler(EXCEPTION_HEAPOVERFLOW);
+		if(*(currSegment+4) < addr){
+	        print((int*)"tlb third: ");exception_handler(EXCEPTION_HEAPOVERFLOW);
 		}
 		if(addr < 0){
-	       print((int*)"tlb fifth: "); exception_handler(EXCEPTION_ADDRESSERROR);
+	       print((int*)"tlb fourth: "); exception_handler(EXCEPTION_ADDRESSERROR);
 		}
 	}
 
@@ -3987,15 +3999,9 @@ void printSegmentationTableEntryVerbose(int *element){
 	prev = (int*)*element;
 	next = (int*)*(element+1);
 
-	println();
 	print((int*)"pre ");
 	if(prev != (int*)0)
 		print(itoa(*(prev+2), string_buffer, 10, 0));
-	println();
-
-	print((int*)"next ");
-	if(next != (int*)0)
-		print(itoa(*(next+2), string_buffer, 10, 0));
 	println();
 
 	print((int*)"key ");
@@ -4003,6 +4009,30 @@ void printSegmentationTableEntryVerbose(int *element){
 		print(itoa(*(element+2), string_buffer, 10, 0));
 	println();
 
+	print((int*)"next ");
+	if(next != (int*)0)
+		print(itoa(*(next+2), string_buffer, 10, 0));
+	println();
+
+	print((int*)"segPos ");
+	if(element != (int*)0)
+		print(itoa((int)(element+3), string_buffer, 10, 0));
+	println();
+
+	print((int*)"segSize ");
+	if(element != (int*)0)
+		print(itoa(*(element+4), string_buffer, 10, 0));
+	println();
+
+}
+
+void printSegmentationTableEntry(int *element){
+
+	print((int*)"seg key ");
+	if(element != (int*)0)
+		print(itoa(*(element+2), string_buffer, 10, 0));
+	println();
+	
 	print((int*)"segPos ");
 	if(element != (int*)0)
 		print(itoa(*(element+3), string_buffer, 10, 0));
@@ -4012,21 +4042,20 @@ void printSegmentationTableEntryVerbose(int *element){
 	if(element != (int*)0)
 		print(itoa(*(element+4), string_buffer, 10, 0));
 	println();
-	println();
-
-}
-// print segmentation table entry
-void printSegmentationTableEntry(int *element){
-	print((int*)"key ");
-	if(element != (int*)0)
-		print(itoa(*(element+2), string_buffer, 10, 0));
-	print((int*)", segSize ");
-	if(element != (int*)0)
-		print(itoa(*(element+4), string_buffer, 10, 0));
-	println();
 }
 
 void printProcess(int *element){
+	print((int*)"key ");
+	if(element != (int*)0)
+		print(itoa(*(element+2), string_buffer, 10, 0));
+	println();
+		print((int*)"pc ");
+	if(element != (int*)0)
+		print(itoa(*(element+3), string_buffer, 10, 0));
+	println();
+}
+
+void printProcessVerbose(int *element){
 	int *prev;
 	int *next;
 	int *segEntry;
@@ -4034,10 +4063,14 @@ void printProcess(int *element){
 	next = (int*)*(element+1);
 	segEntry = (int*)*(element+5);
 
-	println();
 	print((int*)"pre ");
 	if(prev != (int*)0)
 		print(itoa(*(prev+2), string_buffer, 10, 0));
+	println();
+
+	print((int*)"key ");
+	if(element != (int*)0)
+		print(itoa(*(element+2), string_buffer, 10, 0));
 	println();
 
 	print((int*)"next ");
@@ -4045,65 +4078,67 @@ void printProcess(int *element){
 		print(itoa(*(next+2), string_buffer, 10, 0));
 	println();
 
-	print((int*)"key ");
-	if(element != (int*)0)
-		print(itoa(*(element+2), string_buffer, 10, 0));
-	println();
-
 	print((int*)"pc ");
 	if(element != (int*)0)
 		print(itoa(*(element+3), string_buffer, 10, 0));
 	println();
-	
-	print((int*)"segPos ");
-	if(segEntry != (int*)0)
-		print(itoa((int)*(segEntry+3), string_buffer, 10, 0));
-	println();
-
-	print((int*)"segSize ");
-	if(segEntry != (int*)0)
-		print(itoa((int)*(segEntry+4), string_buffer, 10, 0));
-	println();
-	println();
+	printSegmentationTableEntry(segEntry);
 
 }
-// print list element 
-void printListElementVerbose(int *element){
-	int *prev;
-	int *next;
-	prev = (int*)*element;
-	next = (int*)*(element+1);
 
-	print((int*)"pre ");
-	if(prev != (int*)0)
-		print(itoa(*(prev+2), string_buffer, 10, 0));
-	println();
-
-	print((int*)"next ");
-	if(next != (int*)0)
-		print(itoa(*(next+2), string_buffer, 10, 0));
-	println();
-
-	print((int*)"key ");
-	if(element != (int*)0)
-		print(itoa(*(element+2), string_buffer, 10, 0));
-	println();
-
-	print((int*)"pc ");
-	if(element != (int*)0)
-		print(itoa(*(element+3), string_buffer, 10, 0));
-	println();
-	
+void printProcessList(int *list){
+	printList(list, 0, 0);
 }
-void printListElement(int *element){
-	print((int*)"key ");
-	if(element != (int*)0)
-		print(itoa(*(element+2), string_buffer, 10, 0));
+void printProcessListVerbose(int *list){
+	printList(list, 0, 1);
+}
+void printSegmentationTable(int *list){
+	printList(list, 1, 0);
+}
+void printSegmentationTableVerbose(int *list){
+	printList(list, 1, 1);
+}
+
+// print the list
+// if type == 0: print list of processes
+// if type == 1: print list of segmentation table entries
+void printList(int *list, int type, int verbose){
+	int *pToHead;
+	int *pToTail;
+	int *curr;
+
+	pToHead = pollListHead(list);
+	pToTail = pollListTail(list);
+
+	println();
+	print((int*)"print list start");
+	println();
+	println();
+
+	if(isListEmpty(list)==0){	// if list not empty
+		curr = (int*)*pToHead;
+		while((int)curr != 0){
+			if(verbose == 0){
+				if(type == 0)
+					printProcess(curr);
+				else if(type == 1)
+					printSegmentationTableEntry(curr);
+			} else if (verbose == 1){
+				if(type == 0)
+					printProcessVerbose(curr);
+				else if(type == 1)
+					printSegmentationTableEntryVerbose(curr);
+			}
+			curr = (int*)*(curr+1);
+			println();
+		}
+	} else println();
+	print((int*)"print list end");
 	println();
 }
 
 //initialize head and tail
-//@return: initialized borders
+//@return: initialized list
 int* initList(){
 	int *list;
 	int *head;
@@ -4120,14 +4155,21 @@ int* initList(){
 	return list;
 }
 
+// @return: entry in segmentation table for "key"
 int* getSegmentationTableEntry(int key, int *list){
 	int *entry;
-	entry = findElementByKey(key, list);
-	return entry;
+	
+	entry = findElementByKey(10, list);
+	if((int)entry != 0)
+		return entry;
+	else {
+		entry = createSegmentationTableEntry(key, 8192);
+		appendListElement(entry, segmentationTable);
+		return entry;
+	}
 }
 
 // create list element
-// key starts at 0 and increases per process
 // @return: new list element
 int* createProcess(int key){
 	int *newElement;
@@ -4143,7 +4185,6 @@ int* createProcess(int key){
 	
 	return newElement;
 }
-
 
 // @return: pointer to first element of list
 int* pollListHead(int *list){
@@ -4164,7 +4205,6 @@ int isListEmpty(int *list){
 		return 1;
 	return 0;
 }
-
 
 // add element at the end of the list
 void appendListElement(int *newElement, int *list){
@@ -4199,68 +4239,6 @@ void insertListElementAtBeginning(int *newElement, int *list){
 		*head = (int)newElement;
 	}
 	*pToHead = (int)newElement;
-
-}
-
-// print the list
-// if type == 0: print processes
-// if type == 1: print segmentation table 
-void printListVerbose(int *list, int type){
-	int *pToHead;
-	int *pToTail;
-	int *curr;
-	pToHead = pollListHead(list);
-	pToTail = pollListTail(list);
-
-	print((int*)"print list start");
-	println();
-	if(isListEmpty(list)==0){	// if list not empty
-		curr = (int*)*pToHead;
-		while((int)curr != 0){
-			if(type == 0)
-				printListElementVerbose(curr);
-			else if(type == 1)
-				printSegmentationTableEntryVerbose(curr);
-			else if(type ==2)
-				printProcess(curr);
-			curr = (int*)*(curr+1);
-		}
-	} else {
-		println();
-	}
-
-	println();
-	print((int*)"print list end");
-
-}
-// print the list
-// if type == 0: print listelement
-// if type == 1: print segmentation table 
-// if type == 2: print whole process (listelement+segmentation table entry)
-void printList(int *list, int type){
-	int *pToHead;
-	int *pToTail;
-	int *curr;
-	pToHead = pollListHead(list);
-	pToTail = pollListTail(list);
-
-	print((int*)"print list start");
-	println();
-	if(isListEmpty(list)==0){	// if list not empty
-		curr = (int*)*pToHead;
-		while((int)curr != 0){
-			if(type == 0)
-				printListElement(curr);
-			else if(type == 1)
-				printSegmentationTableEntry(curr);
-			else if(type ==2)
-				printProcess(curr);
-			curr = (int*)*(curr+1);
-		}
-	} 
-
-	print((int*)"print list end");
-	println();
 
 }
 
@@ -4300,7 +4278,7 @@ int* removeFirst(int *list){
 
 // does only sort the key attributes at the moment
 //TODO reset pointer
-void sortList(int *borders){
+void sortList(int *list){
 	int *pToHead;
 	int *pToTail;
 	int *curr;
@@ -4309,8 +4287,8 @@ void sortList(int *borders){
 	int changes;
 	int tmp;
 
-	pToHead = pollListHead(borders);
-	pToTail = pollListTail(borders);
+	pToHead = pollListHead(list);
+	pToTail = pollListTail(list);
 	
 	unsorted = 1;
 	changes = 0;
@@ -4371,13 +4349,11 @@ void setProcessState(){
 	registers = (int*)*(currProcess + 4);
 	pc = *(currProcess + 3);
 	memory = (int*)*(currSegment + 3);
-	currSegmentPos = (int)memory;
-	currSegmentSize = *(currSegment+4);
 }
 
+// create an entry in the segmentation table
 int* createSegmentationTableEntry(int key, int segmentSize){
 	int *newSegmentationTableEntry;
-	currSegmentSize = segmentSize;
 	usedMemorySize = usedMemorySize + segmentSize;
 	if(usedMemorySize > memorySize){
 		exception_handler(EXCEPTION_SEGMENTATIONFAULT);
@@ -4393,7 +4369,8 @@ int* createSegmentationTableEntry(int key, int segmentSize){
 	return newSegmentationTableEntry;
 }
 
-void switchProcess(int finished){//finished = 1, not finished = 0
+
+void switchProcess(int finished){ //finished = 1, not finished = 0
 	if(finished == 1){
 		lock = 0;
 		if(isListEmpty(blockedQueue)==0){
@@ -4433,43 +4410,45 @@ void switchProcess(int finished){//finished = 1, not finished = 0
 		}
 	}
 }
+
 void testDoubleLinkedList(){
-	int *borders;
+	int *list;
 	int *head;
 	int *newElement;
 	int *find;
-	print((int*)"testDoubleLinkedList");
-	borders = initList();
+	print((int*)"testDoubleLinkedList");println();
+	list = initList();
 	segmentationTable = initList();
+	
 
 	newElement = createProcess(65);
-	appendListElement(newElement, borders);
+	appendListElement(newElement, list);
 
 	// expected output: 0,65,0 	
-	printList(borders, 0);
+	printProcessList(list);
 
 	newElement = createProcess(66);
-	appendListElement(newElement, borders);
+	appendListElement(newElement, list);
 
 	// expected output: 0,65,66		65,66,0
-	printList(borders, 0);
+	printProcessList(list);
 
-	newElement = pollListHead(borders);
-	removeFirst(borders);
+	newElement = pollListHead(list);
+	removeFirst(list);
 
 	// expected output: 0,66,0 	
-	printList(borders, 0);
+	printProcessList(list);
 	
-	removeFirst(borders);
+	removeFirst(list);
 
 	// expected output:  	
-	printList(borders, 0);
+	printProcessList(list);
 	
-	printListElement((int*)*newElement);
-	appendListElement((int*)*newElement, borders);
+	printProcess((int*)*newElement);
+	appendListElement((int*)*newElement, list);
 
 	// expected output: 0,66,0 	
-	printList(borders, 0);
+	printProcessList(list);
 	
 }
 
@@ -5046,6 +5025,8 @@ void emulate(int argc, int *argv) {
 		currProcess = createProcess(counter);
 		appendListElement(currProcess, readyQueue);
 
+//		currSegment = (int*)*(currProcess+5);
+
 		setProcessState();
 
 	    copyBinaryToMemory();
@@ -5058,7 +5039,7 @@ void emulate(int argc, int *argv) {
 		counter = counter + 1;
    		up_copyArguments(argc, argv);
 	}
-    run();
+	run();
 }
 
 // -----------------------------------------------------------------
