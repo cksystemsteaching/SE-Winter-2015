@@ -655,6 +655,7 @@ int* findElementByKey(int key, int *list);
 int* pollListHead(int *list);
 int* pollListTail(int *list);
 void sortList(int *list);
+void swap(int *curr, int *next, int *list);
 
 // process operations
 int* createProcess(int key);
@@ -4082,6 +4083,7 @@ void printProcessVerbose(int *element){
 	if(element != (int*)0)
 		print(itoa(*(element+3), string_buffer, 10, 0));
 	println();
+
 	printSegmentationTableEntry(segEntry);
 
 }
@@ -4182,7 +4184,6 @@ int* createProcess(int key){
 	*(newElement+4) = (int)malloc(32*4);	// registers
 	segEntry = getSegmentationTableEntry(key, segmentationTable);
 	*(newElement+5) = (int)segEntry;	// pointer to entry in segmentation table
-	
 	return newElement;
 }
 
@@ -4274,6 +4275,103 @@ int* removeFirst(int *list){
 		*pToHead = (int)next;
 	}
 	return curr;
+}
+
+void sortList1(int *list){
+	int *pToHead;
+	int *pToTail;
+	int *curr;
+	int *next;
+	int unsorted;
+	int changes;
+	int *tmp;
+	unsorted = 1;
+	pToHead = pollListHead(list);
+	pToTail = pollListTail(list);
+	
+	if(isListEmpty(list));	// list is empty, nothing to do 
+	else if(*pToHead == *pToTail);	// list contains only one element, nothing to do
+	else {	//otherwise
+		
+		while(unsorted){
+			changes = 0;
+			next = (int*)*pToHead;
+			while(next != (int*)*pToTail){
+				curr = next;
+				next = (int*)*(curr+1);
+				if(*(curr+2) > *(next+2)){
+					swap(curr, next, list);
+					changes = 1;
+					//pToHead = pollListHead(list);
+					//pToTail = pollListTail(list);
+					//next = (int*)*pToTail;
+				}
+			}
+			if(changes == 0){
+				unsorted = 0;
+			}
+		}
+	}
+}
+
+void swap(int *curr, int *next, int *list){
+	int *prev;
+	int *nextButOne;
+	int *pToHead;
+	int *pToTail;
+	pToHead = pollListHead(list);
+	pToTail = pollListTail(list);
+	prev = (int*)0;
+	if(*curr != 0)
+		prev = (int*)*curr;
+	nextButOne = (int*)0;
+	if(*(next+1) != 0)
+		nextButOne = (int*)*(next+1);
+
+	*next = (int)prev;
+	*(next+1) = (int)curr;
+
+	if((int)nextButOne != 0)
+		*nextButOne = (int)curr;
+	else *pToTail = (int)curr;
+	if((int)prev != 0)
+		*(prev+1) = (int)next;
+	else *pToHead = (int)next;
+
+	*curr = (int)next;
+	*(curr+1) = (int)nextButOne;
+}
+
+void testSwap(){
+	int *list;
+	int *proc;
+	int *head;
+	int *tail;
+	list = initList();
+
+	proc = createProcess(68);
+	appendListElement(proc, list);
+	
+	proc = createProcess(67);
+	appendListElement(proc, list);
+
+	proc = createProcess(65);
+	appendListElement(proc, list);
+	
+	proc = createProcess(66);
+	appendListElement(proc, list);
+
+	proc = createProcess(64);
+	appendListElement(proc, list);
+	
+	proc = createProcess(63);
+	appendListElement(proc, list);
+	
+//	printProcessListVerbose(list);
+	
+
+	sortList1(list);
+	printProcessListVerbose(list);
 }
 
 // does only sort the key attributes at the moment
@@ -5049,7 +5147,7 @@ void emulate(int argc, int *argv) {
 int selfie(int argc, int* argv) {
     if (argc < 2)
         return -1;
-    else {
+	else {
         while (argc >= 2) {
             if (stringCompare((int*) *argv, (int*) "-c")) {
                 sourceName = (int*) *(argv+1);
