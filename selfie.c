@@ -868,7 +868,7 @@ int *current_proc; // run list
 int *last_created_proc;
 
 int proc_limit = 10;
-int npid = 1;
+int npid = 0;
 int number_of_proc = 1;
 int proc_count;
 int instr_count;
@@ -4261,9 +4261,10 @@ void syscall_fork() {
 	int* next_seg;
 	int next_seg_id;
 
+	print((int*) "\n-------------------------\n");
 	print((int*) "forkin yo\n");
 
-	reg_current = *(current_proc + 2);
+	reg_current = *(current_proc + 1);
 	next_seg = *(last_created_segment + 2);
 	next_seg_id = *(next_seg + 4);
 
@@ -4293,13 +4294,12 @@ void syscall_fork() {
 	segment_copy(*(current_proc + 2), new_proc_seg);
 
 	// ... copy pc too
-	new_proc_pc = *current_proc + 8;
+	new_proc_pc = *current_proc + 4;
 
 	// Insert new process node into ready queue (pid corresponds to segment, pid is the only difference here!)
-	// Position 3: Find last allocated_proc! ??
 	print((int*) "Inserting process\n");
 	proc_list = insert_process(new_proc_pc, new_proc_reg, new_proc_seg,
-			(int*) 0, last_created_proc, npid);
+			0, last_created_proc, npid);
 
 	last_created_proc = proc_list;
 
@@ -4309,8 +4309,7 @@ void syscall_fork() {
 	*(new_proc_reg + REG_V0) = 0;
 	*(reg_current + REG_V0) = npid;
 
-	// If anything went wrong, return -1 to parent process
-	// ???
+	print((int*) "\n-------------------------\n");
 }
 
 void segment_copy(int* old_seg, int* new_seg) {
@@ -4367,7 +4366,12 @@ void syscall_wait() {
 	int pid_wait;
 	int* process_wait;
 
-	print((int*) "waiting on you\n");
+	print((int*) "\n-----------------------\n");
+	print((int*) "wait! I'm process: ");
+	print(itoa(get_pid(), string_buffer, 10, 0, 0));
+	print((int*) " and I've been told to wait for process: ");
+	print(itoa(*(registers + REG_A0), string_buffer, 10, 0, 0));
+	println();
 
 	// Take a look at the ready queue (+ blocked queue!), is process with PID <argument> in it?
 	pid_wait = *(registers + REG_A0);
@@ -4376,6 +4380,7 @@ void syscall_wait() {
 
 	if ((int) process_wait == 0) {
 		process_wait = get_proc_by_pid(blocked_queue, pid_wait, 4, 5);
+		print((int*) "There is no such process among the ready/run ones... maybe blocking?\n");
 	}
 
 	if ((int) process_wait != 0) {
@@ -4384,20 +4389,28 @@ void syscall_wait() {
 				*(current_proc + 2), 0, waiting_queue,
 				*(current_proc + 5), pid_wait);
 
+		print((int*) "I'm going to the waiting queue and will remove myself from the ready processes!\n");
+
 		// ... and don't forget to take yourself out of the run/ready queue for the mean time
 		proc_list = remove(current_proc, proc_list);
 
 		// switch context
 		triggerContextSwitch = 1;
 	} else {
+		print((int*) "Not there either, maybe a zombie waiting to be woken up?\n");
 		// If there is no process pid <argument> (because it terminated already, consult the zombie queue to find out)... continue in the run/ready queue
 		process_wait = get_proc_by_pid(zombie_queue, pid_wait, 4, 5);
 
 		// ... and maybe take it out of the zombie queue if there is anything
 		if ((int) process_wait != 0) {
+			print((int*) "Yup, that's it!\n");
 			zombie_queue = remove(process_wait, zombie_queue);
+		} else {
+			print((int*) "Nope! No zombie!\n");
 		}
 	}
+
+	print((int*) "-----------------------\n");
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~

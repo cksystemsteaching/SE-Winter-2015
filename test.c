@@ -11,7 +11,7 @@ int main() {
 		putchar('a');
 		putchar('a');
 		putchar(' ');
-		exit(0);
+		exit(2);
 	} else if (pid > 0) {
 		putchar('b');
 		putchar('b');
@@ -19,8 +19,8 @@ int main() {
 		putchar('b');
 		putchar(' ');
 		wait(pid);
-		exit(0);
+		exit(3);
 	} else {
-		// ?
+		exit(1);
 	}
 }
