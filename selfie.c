@@ -4284,16 +4284,16 @@ void syscall_fork() {
 
 	last_created_segment = new_proc_seg;
 
+        // ... same for registers
+        print((int*) "Copying registers...\n");
+        reg_copy(*(current_proc + 1), new_proc_reg);
+
 	// Copy segment of current process into new segment
 	print((int*) "Copying segments...\n");
 	segment_copy(*(current_proc + 2), new_proc_seg);
 
-	// ... same for registers
-	print((int*) "Copying registers...\n");
-	reg_copy(*(current_proc + 1), new_proc_reg);
-
 	// ... copy pc too
-	new_proc_pc = *current_proc + 4;
+	new_proc_pc = *current_proc + 8;
 
 	// Insert new process node into ready queue (pid corresponds to segment, pid is the only difference here!)
 	// Position 3: Find last allocated_proc! ??
@@ -4319,6 +4319,9 @@ void segment_copy(int* old_seg, int* new_seg) {
 
 	border = *(new_seg + 2);
 	cursor = *new_seg;
+
+	old_seg = *old_seg;
+	new_seg = *new_seg;
 
 	while ((int) cursor != *border) {
 		if ((int) old_seg != 0) {
@@ -4368,6 +4371,7 @@ void syscall_wait() {
 
 	// Take a look at the ready queue (+ blocked queue!), is process with PID <argument> in it?
 	pid_wait = *(registers + REG_A0);
+
 	process_wait = get_proc_by_pid(proc_list, pid_wait, 4, 5);
 
 	if ((int) process_wait == 0) {
