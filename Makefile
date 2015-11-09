@@ -8,7 +8,7 @@ RTS3			:= 100
 TEST_INPUT		:= test.c
 TEST_BINARY		:= myprog
 
-all: test_different_time_slices
+all: test_binary
 
 clena: clean
 clan: clean

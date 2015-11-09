@@ -676,6 +676,12 @@ void syscall_unlock();
 void emitGetPID();
 void syscall_getpid();
 
+void emitFork();
+void syscall_fork();
+
+void emitWait();
+void syscall_wait();
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int SYSCALL_EXIT = 4001;
@@ -687,6 +693,8 @@ int SYSCALL_YIELD = 5003;
 int SYSCALL_LOCK = 5004;
 int SYSCALL_UNLOCK = 5005;
 int SYSCALL_GETPID = 5006;
+int SYSCALL_FORK = 5007;
+int SYSCALL_WAIT = 5008;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -836,22 +844,35 @@ void occupy_lock();
 void make_blocking();
 void free_lock();
 void sched_block_proc();
-int get_pid();
 int* get_next_proc();
 
 int* insert_process(int pc, int* reg, int* seg, int* prev, int* next, int pid);
-int* insert_segment(int* begin, int size, int* prev, int* next);
+int* insert_process_wait(int pc, int* reg, int* seg, int* prev, int* next,
+		int pid, int wait_for_pid);
+int* get_proc_by_pid(int* list, int pid, int next_offset, int pid_offset);
+void segment_copy(int* old_seg, int* new_seg);
+void reg_copy(int* old_reg, int* new_reg);
+int* insert_segment(int* begin, int size, int* prev, int* next, int seg_id);
 int* remove(int* node, int* list);
 void iter_list(int* list);
 
-int *proc_list;
-int *current_proc;
+int getPC(int* proc);
+int getRegisters(int* proc);
+int getSegment(int* proc);
+int get_pid();
+int get_pid_proc(int* proc);
+int get_pid_wait(int* proc);
+
+int *proc_list; // ready+run list
+int *current_proc; // run list
 int *last_created_proc;
 
-int number_of_proc = 3;
+int proc_limit = 10;
+int npid = 1;
+int number_of_proc = 1;
 int proc_count;
 int instr_count;
-int instr_cycles = 5000;
+int instr_cycles = 15;
 int triggerContextSwitch;
 
 int *segment_table;
@@ -861,8 +882,12 @@ int seg_count;
 int seg_size;
 
 int* lock_owner;
-int* blocked_queue;
+int* blocked_queue; // blocking list
 int block_count = 0;
+
+int* waiting_queue = (int*) 0; // waiting list
+int* zombie_queue = (int*) 0; // zombie list
+
 // --------------------------- PROCESS -----------------------------
 
 void create_process(int argc, int* argv) {
@@ -877,12 +902,8 @@ void create_process(int argc, int* argv) {
 
 	// Create a new segment in the segment_table
 	if (seg_count == 0) {
-		segment_table = insert_segment(memory, seg_size, 0, 0);
+		segment_table = insert_segment(memory, seg_size, 0, 0, seg_count);
 		last_created_segment = segment_table;
-	} else {
-		last_created_segment = insert_segment(
-				*last_created_segment + *(last_created_segment + 1), seg_size,
-				last_created_segment, 0);
 	}
 
 	seg_count = seg_count + 1;
@@ -892,15 +913,25 @@ void create_process(int argc, int* argv) {
 		proc_list = insert_process(pc, registers, last_created_segment, 0, 0,
 				proc_count);
 		last_created_proc = proc_list;
-	} else {
-		last_created_proc = insert_process(pc, registers, last_created_segment,
-				last_created_proc, 0, proc_count);
 	}
+
 	proc_count = proc_count + 1;
 
 	current_proc = last_created_proc;
 	current_seg = (int*) *(current_proc + 2);
 	registers = (int*) *(current_proc + 1);
+}
+
+void pop_seg_tbl(int argc, int* argv) {
+	// Create a new segment in the segment_table
+	if (seg_count == 0) {
+		segment_table = insert_segment(memory, seg_size, 0, 0, seg_count);
+	} else {
+		segment_table = insert_segment(*segment_table + seg_size, seg_size,
+						0, segment_table, seg_count);
+	}
+
+	seg_count = seg_count + 1;
 }
 
 // ------------------------- INITIALIZATION ------------------------
@@ -3360,6 +3391,8 @@ void compile() {
 	emitLock();
 	emitUnlock();
 	emitGetPID();
+	emitFork();
+	emitWait();
 
 	// parser
 	gr_cstar();
@@ -3776,6 +3809,7 @@ void emitExit() {
 
 void syscall_exit() {
 	int exitCode;
+	int* waitingProcess;
 
 	number_of_proc = number_of_proc - 1;
 	exitCode = *(registers + REG_A0);
@@ -3786,6 +3820,23 @@ void syscall_exit() {
 	print((int*) ": exiting with error code ");
 	print(itoa(exitCode, string_buffer, 10, 0, 0));
 	println();
+
+	// If you are a child process of someone, exit as normal but
+	// take your parent out of the waiting queue into the ready queue, thanks
+	if (get_pid() != 1) {
+		waitingProcess = get_proc_by_pid(waiting_queue, get_pid(), 4, 6);
+
+		if ((int) waitingProcess != 0) {
+			blocked_queue = remove(waitingProcess, blocked_queue);
+			proc_list = insert_process(*waitingProcess, *(waitingProcess + 1),
+					*(waitingProcess + 2), 0, proc_list, *(waitingProcess + 5));
+		} else {
+			// If you are a child exiting here and there's no parent waiting for you
+			// (you look at the waiting queue to find out), enter zombie land.
+			zombie_queue = insert_process(*current_proc, *(current_proc + 1),
+					*(current_proc + 2), 0, zombie_queue, *(current_proc + 5));
+		}
+	}
 
 	halt = 1;
 
@@ -4018,7 +4069,7 @@ void emitPutchar() {
 
 void emitYield() {
 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "sched_yield", binaryLength,
-			FUNCTION, INT_T, 0);
+			FUNCTION, VOID_T, 0);
 
 	emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
 	emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
@@ -4037,7 +4088,7 @@ void syscall_yield() {
 
 void emitLock() {
 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "lock", binaryLength, FUNCTION,
-			INT_T, 0);
+			VOID_T, 0);
 
 	emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
 	emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
@@ -4065,7 +4116,7 @@ void syscall_lock() {
 
 void emitUnlock() {
 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "unlock", binaryLength,
-			FUNCTION, INT_T, 0);
+			FUNCTION, VOID_T, 0);
 
 	emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
 	emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
@@ -4187,6 +4238,164 @@ int* get_next_proc() {
 	return (int*) 0;
 }
 
+void emitFork() {
+	createSymbolTableEntry(GLOBAL_TABLE, (int*) "fork", binaryLength, FUNCTION,
+			INT_T, 0);
+
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+	emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_FORK);
+	emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+	emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_fork() {
+	int* new_proc_seg;
+	int* new_proc_reg;
+	int new_proc_pc;
+	int* reg_current;
+	int* next_seg;
+	int next_seg_id;
+
+	print((int*) "forkin yo\n");
+
+	reg_current = *(current_proc + 2);
+	next_seg = *(last_created_segment + 2);
+	next_seg_id = *(next_seg + 4);
+
+	number_of_proc = number_of_proc + 1;
+	npid = npid + 1;
+
+	print((int*) "We now have ");
+	print(itoa(number_of_proc, string_buffer, 10, 0, 0));
+	print((int*) " processes and the last created NPID is: ");
+	print(itoa(npid, string_buffer, 10, 0, 0));
+	print((int*) "\nThe forked process receives segment: ");
+	print(itoa((int) next_seg_id, string_buffer, 10, 0, 0));
+	println();
+
+	// Allocate space for new memory and new registers for new process
+	new_proc_seg = next_seg;
+	new_proc_reg = malloc(32*4);
+
+	last_created_segment = new_proc_seg;
+
+	// Copy segment of current process into new segment
+	print((int*) "Copying segments...\n");
+	segment_copy(*(current_proc + 2), new_proc_seg);
+
+	// ... same for registers
+	print((int*) "Copying registers...\n");
+	reg_copy(*(current_proc + 1), new_proc_reg);
+
+	// ... copy pc too
+	new_proc_pc = *current_proc + 4;
+
+	// Insert new process node into ready queue (pid corresponds to segment, pid is the only difference here!)
+	// Position 3: Find last allocated_proc! ??
+	print((int*) "Inserting process\n");
+	proc_list = insert_process(new_proc_pc, new_proc_reg, new_proc_seg,
+			(int*) 0, last_created_proc, npid);
+
+	last_created_proc = proc_list;
+
+	// Return 0 to child process, pid of child process to parent process
+	print((int*) "Returning PIDs...\n");
+
+	*(new_proc_reg + REG_V0) = 0;
+	*(reg_current + REG_V0) = npid;
+
+	// If anything went wrong, return -1 to parent process
+	// ???
+}
+
+void segment_copy(int* old_seg, int* new_seg) {
+	int* border;
+	int* cursor;
+
+	border = *(new_seg + 2);
+	cursor = *new_seg;
+
+	while ((int) cursor != *border) {
+		if ((int) old_seg != 0) {
+			*cursor = *old_seg;
+		}
+
+		old_seg = old_seg + 1;
+		cursor = cursor + 1;
+	}
+}
+
+void reg_copy(int* old_reg, int* new_reg) {
+	int counter;
+
+	counter = 0;
+
+	while (counter < 32) {
+		*(new_reg + counter) = *(old_reg + counter);
+		counter = counter + 1;
+	}
+}
+
+void emitWait() {
+	createSymbolTableEntry(GLOBAL_TABLE, (int*) "wait", binaryLength, FUNCTION,
+			VOID_T, 0);
+
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+
+	emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+
+	emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+	emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_WAIT);
+	emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+	emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+
+}
+
+void syscall_wait() {
+	int pid_wait;
+	int* process_wait;
+
+	print((int*) "waiting on you\n");
+
+	// Take a look at the ready queue (+ blocked queue!), is process with PID <argument> in it?
+	pid_wait = *(registers + REG_A0);
+	process_wait = get_proc_by_pid(proc_list, pid_wait, 4, 5);
+
+	if ((int) process_wait == 0) {
+		process_wait = get_proc_by_pid(blocked_queue, pid_wait, 4, 5);
+	}
+
+	if ((int) process_wait != 0) {
+		// If so, insert yourself into the waiting queue (with that process pid <argument> as condition)
+		waiting_queue = insert_process_wait(*current_proc, *(current_proc + 1),
+				*(current_proc + 2), 0, waiting_queue,
+				*(current_proc + 5), pid_wait);
+
+		// ... and don't forget to take yourself out of the run/ready queue for the mean time
+		proc_list = remove(current_proc, proc_list);
+
+		// switch context
+		triggerContextSwitch = 1;
+	} else {
+		// If there is no process pid <argument> (because it terminated already, consult the zombie queue to find out)... continue in the run/ready queue
+		process_wait = get_proc_by_pid(zombie_queue, pid_wait, 4, 5);
+
+		// ... and maybe take it out of the zombie queue if there is anything
+		if ((int) process_wait != 0) {
+			zombie_queue = remove(process_wait, zombie_queue);
+		}
+	}
+}
+
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -4249,6 +4458,10 @@ void fct_syscall() {
 		syscall_unlock();
 	} else if (*(registers + REG_V0) == SYSCALL_GETPID) {
 		syscall_getpid();
+	} else if (*(registers + REG_V0) == SYSCALL_FORK) {
+		syscall_fork();
+	} else if (*(registers + REG_V0) == SYSCALL_WAIT) {
+		syscall_wait();
 	} else {
 		exception_handler(EXCEPTION_UNKNOWNSYSCALL);
 	}
@@ -4892,9 +5105,9 @@ void emulate(int argc, int *argv) {
 	proc_count = 0;
 	seg_count = 0;
 
-	seg_size = memorySize / number_of_proc;
+	seg_size = memorySize / proc_limit;
 
-	while (proc_count < number_of_proc) {
+	while (proc_count < 1) {
 		resetInterpreter();
 
 		create_process(argc, argv);
@@ -4906,6 +5119,10 @@ void emulate(int argc, int *argv) {
 		*(registers + REG_K1) = *(registers + REG_GP);
 
 		up_copyArguments(argc, argv);
+	}
+
+	while (seg_count < proc_limit) {
+		pop_seg_tbl(argv, argv);
 	}
 
 	run();
@@ -4968,16 +5185,57 @@ int* insert_process(int pc, int* reg, int* seg, int* prev, int* next, int pid) {
 	return node;
 }
 
-// Append entry (including specified segment payload) to a specified list
-int* insert_segment(int* begin, int size, int* prev, int* next) {
+int* insert_process_wait(int pc, int* reg, int* seg, int* prev, int* next,
+		int pid, int wait_for_pid) {
 	int* node;
 
-	node = malloc(4 * 4);
+	node = malloc(7 * 4);
+
+	*node = pc;
+	*(node + 1) = (int) reg;
+	*(node + 2) = (int) seg;
+	*(node + 3) = (int) prev;
+	*(node + 4) = (int) next;
+	*(node + 5) = pid;
+	*(node + 6) = wait_for_pid;
+
+	if ((int) prev != 0) {
+		*(prev + 4) = (int) node;
+	}
+	if ((int) next != 0) {
+		*(next + 3) = (int) node;
+	}
+
+	return node;
+}
+
+int* get_proc_by_pid(int* list, int pid, int next_offset, int pid_offset) {
+	int* cursor;
+
+	cursor = list;
+
+	while ((int) cursor != 0) {
+		if (*(cursor + pid_offset) == pid) {
+			return cursor;
+		}
+
+		cursor = *(cursor + next_offset);
+	}
+
+	return (int*) 0;
+}
+
+// Append entry (including specified segment payload) to a specified list
+int* insert_segment(int* begin, int size, int* prev, int* next, int seg_id) {
+	int* node;
+
+	node = malloc(4 * 5);
 
 	*node = (int) begin;
 	*(node + 1) = size;
 	*(node + 2) = (int) prev;
 	*(node + 3) = (int) next;
+	*(node + 4) = seg_id;
 
 	if ((int) prev != 0) {
 		*(prev + 3) = (int) node;

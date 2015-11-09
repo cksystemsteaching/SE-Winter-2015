@@ -1,45 +1,18 @@
 int main() {
-	if (getPID() == 1) {
-		lock();
-	}
+	int pid;
+	int a;
 
-	if (getPID() == 0) {
-		lock();
-	}
+	pid = fork();
 
-	if (getPID() == 1) {
-		lock();
+	if (pid == 0) {
+		a = 42;
+		putchar('a');
+		exit(0);
+	} else if (pid > 0) {
+		putchar('b');
+		wait(pid);
+		exit(0);
+	} else {
+		// ?
 	}
-
-	if (getPID() == 1) {
-		putchar('0');
-		putchar('1');
-		putchar('2');
-	}
-
-	if (getPID() == 0) {
-		putchar('0');
-		putchar('1');
-		putchar('2');
-	}
-
-	if (getPID() == 2) {
-		putchar('0');
-		putchar('1');
-		putchar('2');
-	}
-
-	if (getPID() == 1) {
-		unlock();
-	}
-
-	if (getPID() == 0) {
-		unlock();
-	}
-
-	if (getPID() == 1) {
-		unlock();
-	}
-
-	exit(0);
 }
