@@ -644,6 +644,15 @@ void loadBinary();
 void emitYield();
 void syscall_yield();
 
+void emitLock();
+void syscall_lock();
+
+void emitUnlock();
+void syscall_unlock();
+
+void emitGetpid();
+void syscall_getpid();
+
 void emitExit();
 void syscall_exit();
 
@@ -673,6 +682,9 @@ int SYSCALL_OPEN = 4005;
 int SYSCALL_MALLOC = 5001;
 int SYSCALL_GETCHAR = 5002;
 int SYSCALL_YIELD = 5003;
+int SYSCALL_LOCK = 5004;
+int SYSCALL_UNLOCK = 5005;
+int SYSCALL_GETPID = 5006;
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -699,6 +711,10 @@ int* os_lockQ;
 int os_segSize;
 int os_segStart = 0;
 int os_bumpPointer;
+int os_lock = 0;
+int os_blockedCtr = 0;
+int os_readyCtr = 0;
+int os_lockProcess = 0;
 
 //PID's of new Processes
 int os_pId;
@@ -707,6 +723,8 @@ int* os_createLList(int size);
 int* os_addNodeToLList(int size, int* list);
 void os_removeNode(int* node);
 void os_moveNode(int* node, int* toList);
+void os_move2lockQ(int* node);
+void os_move2readyQ(int* node);
 int* os_getNextNode(int* node);
 int* os_getPrevNode(int* node);
 int os_getListEntry(int pos, int* node);
@@ -776,7 +794,8 @@ int debug_malloc = 0;
 int debug_getchar = 0;
 int debug_yield = 0;
 
-int debug_contextSwitch = 0;
+int debug_contextSwitch = 1;
+int debug_lock = 1;
 
 int debug_registers = 0;
 int debug_disassemble = 0;
@@ -3222,6 +3241,9 @@ int main_compiler()
     emitGetchar();
     emitPutchar();
     emitYield();
+    emitLock();
+    emitUnlock();
+    emitGetpid();
     // parser
     gr_cstar();
 
@@ -3648,6 +3670,92 @@ void syscall_yield()
     }
 }
 
+void emitLock()
+{
+    createSymbolTableEntry(GLOBAL_TABLE, (int*)"lock", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_LOCK);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_lock()
+{
+    if (os_lock == 1){
+       	if (debug_lock){
+            print((int*)"Blocking [PID] ");
+		    print(itoa(os_pId,string_buffer,10,0));
+            print((int*)", [Blocked] ");
+            print(itoa(os_blockedCtr + 1, string_buffer, 10,0));
+            print((int*)", [ready] ");
+            print(itoa(os_readyCtr - 1, string_buffer, 10,0));
+           println();
+        }
+        os_lockProcess = 1;
+        os_contextSwitch();
+    }
+    os_lock = 1;
+    if (debug_lock) {
+		print("SYSCALL LOCK");
+		println();
+    }
+}
+
+void emitUnlock()
+{
+    createSymbolTableEntry(GLOBAL_TABLE, (int*)"unlock", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_UNLOCK);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_unlock()
+{
+    if (os_blockedCtr == 1){
+        os_lock = 0;
+    }
+    os_move2readyQ(os_lockQ);
+    if (debug_lock) {
+		print("SYSCALL UNLOCK");
+		println();
+    }
+}
+
+void emitGetpid()
+{
+    createSymbolTableEntry(GLOBAL_TABLE, (int*)"getpid", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_GETPID);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_getpid()
+{
+	print((int*)"[PID] ");
+    print(itoa(os_pId, string_buffer, 10, 0));
+	println();
+}
+
 void emitExit()
 {
     createSymbolTableEntry(GLOBAL_TABLE, (int*)"exit", binaryLength, FUNCTION, INT_T, 0);
@@ -3973,6 +4081,15 @@ void fct_syscall()
     }
     else if (*(registers + REG_V0) == SYSCALL_YIELD) {
 	syscall_yield();
+    }
+    else if (*(registers + REG_V0) == SYSCALL_LOCK) {
+	syscall_lock();
+    }
+    else if (*(registers + REG_V0) == SYSCALL_UNLOCK) {
+	syscall_unlock();
+    }
+    else if (*(registers + REG_V0) == SYSCALL_GETPID) {
+	syscall_getpid();
     }
     else {
 	exception_handler(EXCEPTION_UNKNOWNSYSCALL);
@@ -4659,6 +4776,45 @@ void os_moveNode(int* node, int* toList)
     *(node + 1) = (int)pr;
 }
 
+void os_move2readyQ(int* node)
+{
+    int* pr;
+    os_readyCtr = os_readyCtr + 1;
+    os_blockedCtr = os_blockedCtr - 1;
+    os_removeNode(node);
+    os_lockQ = os_getNextNode(os_lockQ);
+    if (os_readyQ == 0) {
+	os_readyQ = node;
+    *(os_readyQ + 1) = (int)os_readyQ;
+	return;
+    }
+    pr = os_getPrevNode(os_readyQ);
+    *(os_readyQ + 1) = (int)node;
+    *pr = (int)node;
+    *node = (int)os_readyQ;
+    *(node + 1) = (int)pr;
+}
+
+void os_move2lockQ(int* node)
+{
+    int* pr;
+    os_blockedCtr = os_blockedCtr + 1;
+    os_readyCtr = os_readyCtr - 1;
+    os_removeNode(node);
+    os_readyQ = os_getNextNode(os_readyQ);
+    if (os_lockQ == 0) {
+	os_lockQ = node;
+    *(os_lockQ + 1) = (int)os_lockQ;
+
+	return;
+    }
+    pr = os_getPrevNode(os_lockQ);
+    *(os_lockQ + 1) = (int)node;
+    *pr = (int)node;
+    *node = (int)os_lockQ;
+    *(node + 1) = (int)pr;
+}
+
 int* os_getNextNode(int* node)
 {
     return (int*)*node;
@@ -4688,8 +4844,14 @@ void os_contextSwitch()
 {
     os_setListEntry(1, pc, os_readyQ);
     os_setListEntry(2, (int)registers, os_readyQ);
-    os_readyQ = os_getNextNode(os_readyQ);
- 	if(debug_contextSwitch){
+    //check if we yield because of lock syscall 
+    if(os_lockProcess){
+        os_move2lockQ(os_readyQ);
+        os_lockProcess = 0;
+    } else {
+        os_readyQ = os_getNextNode(os_readyQ);
+    }
+    if(debug_contextSwitch){
 		println();
 		print((int*)"Switch From [PID] ");
 		print(itoa(os_pId,string_buffer,10,0));
@@ -4717,41 +4879,43 @@ int os_kmalloc(int size)
 void os_prepare()
 {
     //Prepare Scheduler
-    os_readyQ = 0;
-    os_runQ = 0;
-    os_lockQ = 0;
+        os_readyQ = 0;
+        os_runQ = 0;
+        os_lockQ = 0;
 
-    coop = 1;
-    instances = 3;
-    switchAfterMInstructions = 1;
-    switchIn = switchAfterMInstructions;
-    //Our Memory segments are 15MB in size
-    os_segSize = 15 * 1024 * 1024;
-    os_bumpPointer = 0;
-}
-//----------------------------------------------------//
-//					+----------------+
-//					|	   next	 	 |
-//					+----------------+
-//					|	   prev	 	 |
-//					+----------------+
-//					|	   pc		 |
-//					+----------------+
-//					|	   reg	 	 |
-//					+----------------+
-//					|	   memSeg	 |
-//					+----------------+
-//					|	   pid	     |
-//					+----------------+
-//-----------------------------------------------------//
-//We Assume that createProcess only get called
-//on emulator start, so we set the pc and reg
-//in this function new for our convenience
-void os_createProcess()
-{
-    int* newP;
-    int* dRegister;
-    int seg = os_kmalloc(os_segSize);
+        coop = 0;
+        instances = 4;
+        switchAfterMInstructions = 8;
+        switchIn = switchAfterMInstructions;
+        //Our Memory segments are 15MB in size
+        os_segSize = 15 * 1024 * 1024;
+        os_bumpPointer = 0;
+    }
+    //----------------------------------------------------//
+    //					+----------------+
+    //					|	   next	 	 |
+    //					+----------------+
+    //					|	   prev	 	 |
+    //					+----------------+
+    //					|	   pc		 |
+    //					+----------------+
+    //					|	   reg	 	 |
+    //					+----------------+
+    //					|	   memSeg	 |
+    //					+----------------+
+    //					|	   pid	     |
+    //					+----------------+
+    //-----------------------------------------------------//
+    //We Assume that createProcess only get called
+    //on emulator start, so we set the pc and reg
+    //in this function new for our convenience
+    void os_createProcess()
+    {
+        int* newP;
+        int* dRegister;
+        int seg;
+        seg = os_kmalloc(os_segSize);
+        os_readyCtr = os_readyCtr + 1;
     if (os_readyQ == 0) {
 	newP = os_createLList(4);
 	os_readyQ = newP;
