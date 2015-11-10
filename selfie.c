@@ -872,7 +872,7 @@ int npid = 0;
 int number_of_proc = 1;
 int proc_count;
 int instr_count;
-int instr_cycles = 15;
+int instr_cycles = 1;
 int triggerContextSwitch;
 
 int *segment_table;
@@ -3821,18 +3821,29 @@ void syscall_exit() {
 	print(itoa(exitCode, string_buffer, 10, 0, 0));
 	println();
 
+	print((int*) "Current PID: ");
+  print(itoa(get_pid(), string_buffer, 10, 0, 0));
+	println();
+
 	// If you are a child process of someone, exit as normal but
 	// take your parent out of the waiting queue into the ready queue, thanks
-	if (get_pid() != 1) {
+	if (get_pid() != 0) { // Parent Process ID is always 0
+		print((int*) "I am the child of someone\n");
 		waitingProcess = get_proc_by_pid(waiting_queue, get_pid(), 4, 6);
 
 		if ((int) waitingProcess != 0) {
-			blocked_queue = remove(waitingProcess, blocked_queue);
+			print((int*) "There is a process waiting for me! Its PID is: ");
+			print(itoa(*(waitingProcess + 5), string_buffer, 10, 0, 0));
+			println();
+
+			print((int*) "Take that waiting process out of the WL and insert it into ready queue\n");
+			waiting_queue = remove(waitingProcess, waiting_queue);
 			proc_list = insert_process(*waitingProcess, *(waitingProcess + 1),
 					*(waitingProcess + 2), 0, proc_list, *(waitingProcess + 5));
 		} else {
 			// If you are a child exiting here and there's no parent waiting for you
 			// (you look at the waiting queue to find out), enter zombie land.
+			print((int*) "Oy, there is no process waiting for me! Does that... does that mean I'm a zombie?? ;___;\n");
 			zombie_queue = insert_process(*current_proc, *(current_proc + 1),
 					*(current_proc + 2), 0, zombie_queue, *(current_proc + 5));
 		}
@@ -4285,16 +4296,16 @@ void syscall_fork() {
 
 	last_created_segment = new_proc_seg;
 
-        // ... same for registers
-        print((int*) "Copying registers...\n");
-        reg_copy(*(current_proc + 1), new_proc_reg);
+  // ... same for registers
+  print((int*) "Copying registers...\n");
+  reg_copy(*(current_proc + 1), new_proc_reg);
 
 	// Copy segment of current process into new segment
 	print((int*) "Copying segments...\n");
 	segment_copy(*(current_proc + 2), new_proc_seg);
 
 	// ... copy pc too
-	new_proc_pc = *current_proc + 4;
+	new_proc_pc = *(reg_current + REG_RA);
 
 	// Insert new process node into ready queue (pid corresponds to segment, pid is the only difference here!)
 	print((int*) "Inserting process\n");
@@ -4365,6 +4376,9 @@ void emitWait() {
 void syscall_wait() {
 	int pid_wait;
 	int* process_wait;
+	int* process_reg;
+
+	process_reg = *(current_proc + 1);
 
 	print((int*) "\n-----------------------\n");
 	print((int*) "wait! I'm process: ");
@@ -4385,7 +4399,7 @@ void syscall_wait() {
 
 	if ((int) process_wait != 0) {
 		// If so, insert yourself into the waiting queue (with that process pid <argument> as condition)
-		waiting_queue = insert_process_wait(*current_proc, *(current_proc + 1),
+		waiting_queue = insert_process_wait(*(process_reg + REG_RA), *(current_proc + 1),
 				*(current_proc + 2), 0, waiting_queue,
 				*(current_proc + 5), pid_wait);
 
@@ -5388,4 +5402,3 @@ int main(int argc, int *argv) {
 		println();
 	}
 }
-
