@@ -834,6 +834,7 @@ int *loadsPerAddress = (int*) 0;
 
 int stores = 0;
 int *storesPerAddress = (int*) 0;
+
 // ------------------------ OUR STUFF -----------------------------
 
 void context_switch();
@@ -887,6 +888,21 @@ int block_count = 0;
 
 int* waiting_queue = (int*) 0; // waiting list
 int* zombie_queue = (int*) 0; // zombie list
+
+// ------------------------ OUR Constants -----------------------------
+int PROC_OFF_PC = 0;
+int PROC_OFF_REG = 1;
+int PROC_OFF_SEG = 2;
+int PROC_OFF_PREV = 3;
+int PROC_OFF_NEXT = 4;
+int PROC_OFF_PID = 5;
+int PROC_OFF_WAIT_FOR_PID = 6;
+
+int SEG_OFF_BEGIN = 0;
+int SEG_OFF_SIZE = 1;
+int SEG_OFF_PREV = 2;
+int SEG_OFF_NEXT = 3;
+int SEG_OFF_SEGID = 4;
 
 // --------------------------- PROCESS -----------------------------
 
@@ -5164,8 +5180,7 @@ void emulate(int argc, int *argv) {
 	println();
 
 	print(selfieName);
-	print(
-			(int*) ": profile: total,max(ratio%)@addr(line#),2max(ratio%)@addr(line#),3max(ratio%)@addr(line#)");
+	print((int*) ": profile: total,max(ratio%)@addr(line#),2max(ratio%)@addr(line#),3max(ratio%)@addr(line#)");
 	println();
 	printProfile((int*) ": calls: ", calls, callsPerAddress);
 	printProfile((int*) ": loops: ", loops, loopsPerAddress);
@@ -5199,18 +5214,18 @@ int* insert_process(int pc, int* reg, int* seg, int* prev, int* next, int pid) {
 
 	node = malloc(6 * 4);
 
-	*node = pc;
-	*(node + 1) = (int) reg;
-	*(node + 2) = (int) seg;
-	*(node + 3) = (int) prev;
-	*(node + 4) = (int) next;
-	*(node + 5) = pid;
+	*(node + PROC_OFF_PC) = pc;
+	*(node + PROC_OFF_REG) = (int) reg;
+	*(node + PROC_OFF_SEG) = (int) seg;
+	*(node + PROC_OFF_PREV) = (int) prev;
+	*(node + PROC_OFF_NEXT) = (int) next;
+	*(node + PROC_OFF_PID) = pid;
 
 	if ((int) prev != 0) {
-		*(prev + 4) = (int) node;
+		*(prev + PROC_OFF_NEXT) = (int) node;
 	}
 	if ((int) next != 0) {
-		*(next + 3) = (int) node;
+		*(next + PROC_OFF_PREV) = (int) node;
 	}
 
 	return node;
@@ -5222,19 +5237,19 @@ int* insert_process_wait(int pc, int* reg, int* seg, int* prev, int* next,
 
 	node = malloc(7 * 4);
 
-	*node = pc;
-	*(node + 1) = (int) reg;
-	*(node + 2) = (int) seg;
-	*(node + 3) = (int) prev;
-	*(node + 4) = (int) next;
-	*(node + 5) = pid;
-	*(node + 6) = wait_for_pid;
+	*(node + PROC_OFF_PC) = pc;
+	*(node + PROC_OFF_REG) = (int) reg;
+	*(node + PROC_OFF_SEG) = (int) seg;
+	*(node + PROC_OFF_PREV) = (int) prev;
+	*(node + PROC_OFF_NEXT) = (int) next;
+	*(node + PROC_OFF_PID) = pid;
+	*(node + PROC_OFF_WAIT_FOR_PID) = wait_for_pid;
 
 	if ((int) prev != 0) {
-		*(prev + 4) = (int) node;
+		*(prev + PROC_OFF_NEXT) = (int) node;
 	}
 	if ((int) next != 0) {
-		*(next + 3) = (int) node;
+		*(next + PROC_OFF_PREV) = (int) node;
 	}
 
 	return node;
@@ -5262,17 +5277,17 @@ int* insert_segment(int* begin, int size, int* prev, int* next, int seg_id) {
 
 	node = malloc(4 * 5);
 
-	*node = (int) begin;
-	*(node + 1) = size;
-	*(node + 2) = (int) prev;
-	*(node + 3) = (int) next;
-	*(node + 4) = seg_id;
+	*(node + SEG_OFF_BEGIN) = (int) begin;
+	*(node + SEG_OFF_SIZE) = size;
+	*(node + SEG_OFF_PREV) = (int) prev;
+	*(node + SEG_OFF_NEXT) = (int) next;
+	*(node + SEG_OFF_SEGID) = seg_id;
 
 	if ((int) prev != 0) {
-		*(prev + 3) = (int) node;
+		*(prev + SEG_OFF_NEXT) = (int) node;
 	}
 	if ((int) next != 0) {
-		*(next + 2) = (int) node;
+		*(next + SEG_OFF_PREV) = (int) node;
 	}
 
 	return node;
@@ -5285,17 +5300,17 @@ int* remove(int* node, int* list) {
 	if ((int) node == 0)
 		return list;
 
-	next = (int*) *(node + 4);
-	prev = (int*) *(node + 3);
+	next = (int*) *(node + PROC_OFF_NEXT);
+	prev = (int*) *(node + PROC_OFF_PREV);
 
 	if ((int) prev != 0) {
-		*(prev + 4) = (int) next;
+		*(prev + PROC_OFF_NEXT) = (int) next;
 	} else {
 		list = next;
 	}
 
 	if ((int) next != 0) {
-		*(next + 3) = (int) prev;
+		*(next + PROC_OFF_PREV) = (int) prev;
 	}
 	return list;
 }
