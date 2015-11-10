@@ -873,7 +873,7 @@ int npid = 0;
 int number_of_proc = 1;
 int proc_count;
 int instr_count;
-int instr_cycles = 1;
+int instr_cycles = 15;
 int triggerContextSwitch;
 
 int *segment_table;
@@ -903,6 +903,8 @@ int SEG_OFF_SIZE = 1;
 int SEG_OFF_PREV = 2;
 int SEG_OFF_NEXT = 3;
 int SEG_OFF_SEGID = 4;
+
+int INIT_0_PID = 0;
 
 // --------------------------- PROCESS -----------------------------
 
@@ -3843,7 +3845,7 @@ void syscall_exit() {
 
 	// If you are a child process of someone, exit as normal but
 	// take your parent out of the waiting queue into the ready queue, thanks
-	if (get_pid() != 0) { // Parent Process ID is always 0
+	if (get_pid() != INIT_0_PID) {
 		print((int*) "I am the child of someone\n");
 		waitingProcess = get_proc_by_pid(waiting_queue, get_pid(), 4, 6);
 
@@ -4291,9 +4293,9 @@ void syscall_fork() {
 	print((int*) "\n-------------------------\n");
 	print((int*) "forkin yo\n");
 
-	reg_current = *(current_proc + 1);
-	next_seg = *(last_created_segment + 2);
-	next_seg_id = *(next_seg + 4);
+	reg_current = *(current_proc + PROC_OFF_REG);
+	next_seg = *(last_created_segment + SEG_OFF_PREV);
+	next_seg_id = *(next_seg + SEG_OFF_SEGID);
 
 	number_of_proc = number_of_proc + 1;
 	npid = npid + 1;
