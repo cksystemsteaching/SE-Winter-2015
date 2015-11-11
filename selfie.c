@@ -860,7 +860,7 @@ void emulate(int argc, int* argv);
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
-int debug_load = 1;
+int debug_load = 0;
 
 int debug_read = 1;
 int debug_write = 1;
@@ -5445,6 +5445,7 @@ void emulate(int argc, int* argv)
 
     resetInterpreter();
     
+    
     os_prepare();
     
     os_createProcess();
@@ -5457,6 +5458,10 @@ void emulate(int argc, int* argv)
 
     up_copyArguments(argc, argv);
 
+    pc = os_getListEntry(1, os_readyQ);
+    registers = (int*)os_getListEntry(2, os_readyQ);
+    os_pId = os_getListEntry(4, os_readyQ);
+    
     run();
 
     print(selfieName);
@@ -5852,7 +5857,7 @@ void os_createProcess()
         os_pId = os_pId + 1;
     }
     dRegister = malloc(32 * 4);
-    os_setListEntry(1, 0, newP);
+    os_setListEntry(1, 4, newP);
     os_setListEntry(2, (int)dRegister, newP);
     os_setListEntry(3, seg, newP);
     os_setListEntry(4, os_pId, newP);
