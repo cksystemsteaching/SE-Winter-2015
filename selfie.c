@@ -905,7 +905,6 @@ int SEG_OFF_NEXT = 3;
 int SEG_OFF_SEGID = 4;
 
 int INIT_0_PID = 0;
-
 // --------------------------- PROCESS -----------------------------
 
 void create_process(int argc, int* argv) {
@@ -936,8 +935,8 @@ void create_process(int argc, int* argv) {
 	proc_count = proc_count + 1;
 
 	current_proc = last_created_proc;
-	current_seg = (int*) *(current_proc + 2);
-	registers = (int*) *(current_proc + 1);
+	current_seg = (int*) getSegment(current_proc);
+	registers = (int*) getRegisters(current_proc);
 }
 
 void pop_seg_tbl(int argc, int* argv) {
@@ -945,8 +944,8 @@ void pop_seg_tbl(int argc, int* argv) {
 	if (seg_count == 0) {
 		segment_table = insert_segment(memory, seg_size, 0, 0, seg_count);
 	} else {
-		segment_table = insert_segment(*segment_table + seg_size, seg_size,
-						0, segment_table, seg_count);
+		segment_table = insert_segment(*segment_table + seg_size, seg_size, 0,
+				segment_table, seg_count);
 	}
 
 	seg_count = seg_count + 1;
@@ -3839,31 +3838,31 @@ void syscall_exit() {
 	print(itoa(exitCode, string_buffer, 10, 0, 0));
 	println();
 
-	print((int*) "Current PID: ");
-  print(itoa(get_pid(), string_buffer, 10, 0, 0));
+	print((int*) "Exiting as - current PID: ");
+	print(itoa(get_pid(), string_buffer, 10, 0, 0));
 	println();
 
 	// If you are a child process of someone, exit as normal but
 	// take your parent out of the waiting queue into the ready queue, thanks
 	if (get_pid() != INIT_0_PID) {
 		print((int*) "I am the child of someone\n");
-		waitingProcess = get_proc_by_pid(waiting_queue, get_pid(), 4, 6);
+		waitingProcess = get_proc_by_pid(waiting_queue, get_pid(), PROC_OFF_NEXT, PROC_OFF_WAIT_FOR_PID);
 
 		if ((int) waitingProcess != 0) {
 			print((int*) "There is a process waiting for me! Its PID is: ");
-			print(itoa(*(waitingProcess + 5), string_buffer, 10, 0, 0));
+			print(itoa(getPIDProc(waitingProcess), string_buffer, 10, 0, 0));
 			println();
 
 			print((int*) "Take that waiting process out of the WL and insert it into ready queue\n");
 			waiting_queue = remove(waitingProcess, waiting_queue);
-			proc_list = insert_process(*waitingProcess, *(waitingProcess + 1),
-					*(waitingProcess + 2), 0, proc_list, *(waitingProcess + 5));
+			proc_list = insert_process(getPC(waitingProcess), getRegisters(waitingProcess),
+					getSegment(waitingProcess), 0, proc_list, getPIDProc(waitingProcess));
 		} else {
 			// If you are a child exiting here and there's no parent waiting for you
 			// (you look at the waiting queue to find out), enter zombie land.
 			print((int*) "Oy, there is no process waiting for me! Does that... does that mean I'm a zombie?? ;___;\n");
-			zombie_queue = insert_process(*current_proc, *(current_proc + 1),
-					*(current_proc + 2), 0, zombie_queue, *(current_proc + 5));
+			zombie_queue = insert_process(getPC(current_proc), getRegisters(current_proc),
+					getSegment(current_proc), 0, zombie_queue, getPIDProc(current_proc));
 		}
 	}
 
@@ -4237,7 +4236,27 @@ void sched_block_proc() {
 }
 
 int get_pid() {
-	return *(current_proc + 5);
+	return *(current_proc + PROC_OFF_PID);
+}
+
+int getPC(int* proc) {
+	return *(proc + PROC_OFF_PC);
+}
+
+int getRegisters(int* proc) {
+	return *(proc + PROC_OFF_REG);
+}
+
+int getSegment(int* proc) {
+	return *(proc + PROC_OFF_SEG);
+}
+
+int getPIDProc(int* proc) {
+	return *(proc + PROC_OFF_PID);
+}
+
+int getPIDProcWait(int* proc) {
+	return *(proc + PROC_OFF_WAIT_FOR_PID);
 }
 
 int* get_next_proc() {
@@ -4293,7 +4312,7 @@ void syscall_fork() {
 	print((int*) "\n-------------------------\n");
 	print((int*) "forkin yo\n");
 
-	reg_current = *(current_proc + PROC_OFF_REG);
+	reg_current = getRegisters(current_proc);
 	next_seg = *(last_created_segment + SEG_OFF_PREV);
 	next_seg_id = *(next_seg + SEG_OFF_SEGID);
 
@@ -4310,25 +4329,25 @@ void syscall_fork() {
 
 	// Allocate space for new memory and new registers for new process
 	new_proc_seg = next_seg;
-	new_proc_reg = malloc(32*4);
+	new_proc_reg = malloc(32 * 4);
 
 	last_created_segment = new_proc_seg;
 
-  // ... same for registers
-  print((int*) "Copying registers...\n");
-  reg_copy(*(current_proc + 1), new_proc_reg);
+	// ... same for registers
+	print((int*) "Copying registers...\n");
+	reg_copy(getRegisters(current_proc), new_proc_reg);
 
 	// Copy segment of current process into new segment
 	print((int*) "Copying segments...\n");
-	segment_copy(*(current_proc + 2), new_proc_seg);
+	segment_copy(getSegment(current_proc), new_proc_seg);
 
 	// ... copy pc too
 	new_proc_pc = *(reg_current + REG_RA);
 
 	// Insert new process node into ready queue (pid corresponds to segment, pid is the only difference here!)
 	print((int*) "Inserting process\n");
-	proc_list = insert_process(new_proc_pc, new_proc_reg, new_proc_seg,
-			0, last_created_proc, npid);
+	proc_list = insert_process(new_proc_pc, new_proc_reg, new_proc_seg, 0,
+			last_created_proc, npid);
 
 	last_created_proc = proc_list;
 
@@ -4345,13 +4364,13 @@ void segment_copy(int* old_seg, int* new_seg) {
 	int* border;
 	int* cursor;
 
-	border = *(new_seg + 2);
-	cursor = *new_seg;
+	border = *(new_seg + SEG_OFF_PREV);
+	cursor = *(new_seg + SEG_OFF_BEGIN);
 
 	old_seg = *old_seg;
 	new_seg = *new_seg;
 
-	while ((int) cursor != *border) {
+	while ((int) cursor != *(border + SEG_OFF_BEGIN)) {
 		if ((int) old_seg != 0) {
 			*cursor = *old_seg;
 		}
@@ -4396,7 +4415,7 @@ void syscall_wait() {
 	int* process_wait;
 	int* process_reg;
 
-	process_reg = *(current_proc + 1);
+	process_reg = getRegisters(current_proc);
 
 	print((int*) "\n-----------------------\n");
 	print((int*) "wait! I'm process: ");
@@ -4408,18 +4427,18 @@ void syscall_wait() {
 	// Take a look at the ready queue (+ blocked queue!), is process with PID <argument> in it?
 	pid_wait = *(registers + REG_A0);
 
-	process_wait = get_proc_by_pid(proc_list, pid_wait, 4, 5);
+	process_wait = get_proc_by_pid(proc_list, pid_wait, PROC_OFF_NEXT, PROC_OFF_PID);
 
 	if ((int) process_wait == 0) {
-		process_wait = get_proc_by_pid(blocked_queue, pid_wait, 4, 5);
+		process_wait = get_proc_by_pid(blocked_queue, pid_wait, PROC_OFF_NEXT, PROC_OFF_PID);
 		print((int*) "There is no such process among the ready/run ones... maybe blocking?\n");
 	}
 
 	if ((int) process_wait != 0) {
 		// If so, insert yourself into the waiting queue (with that process pid <argument> as condition)
-		waiting_queue = insert_process_wait(*(process_reg + REG_RA), *(current_proc + 1),
-				*(current_proc + 2), 0, waiting_queue,
-				*(current_proc + 5), pid_wait);
+		waiting_queue = insert_process_wait(*(process_reg + REG_RA),
+				getRegisters(current_proc), getSegment(current_proc), 0, waiting_queue,
+				getPIDProc(current_proc), pid_wait);
 
 		print((int*) "I'm going to the waiting queue and will remove myself from the ready processes!\n");
 
@@ -4431,7 +4450,7 @@ void syscall_wait() {
 	} else {
 		print((int*) "Not there either, maybe a zombie waiting to be woken up?\n");
 		// If there is no process pid <argument> (because it terminated already, consult the zombie queue to find out)... continue in the run/ready queue
-		process_wait = get_proc_by_pid(zombie_queue, pid_wait, 4, 5);
+		process_wait = get_proc_by_pid(zombie_queue, pid_wait, PROC_OFF_NEXT, PROC_OFF_PID);
 
 		// ... and maybe take it out of the zombie queue if there is anything
 		if ((int) process_wait != 0) {
@@ -5182,7 +5201,8 @@ void emulate(int argc, int *argv) {
 	println();
 
 	print(selfieName);
-	print((int*) ": profile: total,max(ratio%)@addr(line#),2max(ratio%)@addr(line#),3max(ratio%)@addr(line#)");
+	print(
+			(int*) ": profile: total,max(ratio%)@addr(line#),2max(ratio%)@addr(line#),3max(ratio%)@addr(line#)");
 	println();
 	printProfile((int*) ": calls: ", calls, callsPerAddress);
 	printProfile((int*) ": loops: ", loops, loopsPerAddress);
