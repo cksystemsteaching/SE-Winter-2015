@@ -100,6 +100,9 @@ int* malloc(int size);
 int* dequeue(int* list);
 void enqueue(int* list, int* queue);
 
+void remove(int* list, int key, int position);
+int* search(int* list, int key, int position);
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int CHAR_EOF          = -1; // end of file
@@ -828,6 +831,7 @@ int numberOfThreads = 0;
 int* lock = (int*) 0;
 int* currentProcess = (int*) 0;
 int* blockingQueue;
+int* zombieQueue;
 
 int reg_hi = 0; // hi register for multiplication/division
 int reg_lo = 0; // lo register for multiplication/division
@@ -853,6 +857,10 @@ void initInterpreter() {
     blockingQueue = malloc(2*4);
     *blockingQueue = 0;
     *(blockingQueue + 1) = 0;
+    
+    zombieQueue = malloc(2*4);
+    *zombieQueue = 0;
+    *(zombieQueue + 1) = 0;
 
 	segmentTable = malloc(2*4);
 	*segmentTable = 0;
@@ -3976,7 +3984,28 @@ void emitWait() {
 }
 
 void syscall_wait() {
-   
+	int pid;
+	int* childEntry;
+	
+	pid = *(registers+REG_A0);
+	
+	childEntry = search(*(currentProcess + 5), pid, 2);
+	
+	if (childEntry == (int*) 0) {
+		return;
+	}
+	
+	childEntry = search(zombieQueue, pid, 4);
+	
+	if (childEntry != (int*) 0) {
+		remove(zombieQueue, pid, 4);
+		return;
+	}
+	
+	*(currentProcess + 6) = pid;
+	notReady = 1;
+	enqueue(blockingQueue, currentProcess);
+	
 }
 
 void emitPutchar() {
@@ -4010,49 +4039,42 @@ void emitPutchar() {
 // |______________|
 
 // removes first (i.e. last inserted) entry with matching data, returns new head
-void remove(int* list, int key) {
-    int* cursor;
-    int* head;
-    int* previous;
-    int* next;
-    
-    if (*list == 0)
-    	return;
-    
-    head = (int*) *list;
-    cursor = (int*) *head;
+void remove(int* list, int key, int position) {
+	int* node;
+	int* previous;
+	int* next;
 	
-    if (*(head + 2) == key) {
-    	*list = (int) cursor;	
-    	if (*list == 0)// in case list only contains one element
-    	   	*(list + 1) = 0;
-    	return;
-    }
-       
-    while ((int) cursor != 0) {
-        if (*(cursor + 2) == key) {
-        	previous = (int*) *(cursor + 1);
-        	if (*cursor == 0) {
-        		//cursor.previous.next = 0;
-        		*previous = 0;
-        		*(list + 1) = (int) previous;
-        	} else {
-        		//cursor.previous.next = cursor.next;
-        		*previous = *cursor;
-        		//cursor.next.previous = cursor.previous;
-        		next = (int*) *cursor;
-        		*(next + 1) = *(cursor + 1);
-        	}
-        }
-        cursor = (int*) *cursor;
-    }
+	node = search(list, key, position);
+	
+	if (node == (int*) 0) {
+		return;
+	}
+	
+	previous = *(node + 1);
+	next = *node;
+	
+	if (previous != (int*) 0) {
+		*previous = next;
+	} else {
+		*list = next;
+	}
+	
+	if (next != (int*) 0) {
+		*(next + 1) = previous;
+	} else {
+		*(list + 1) = next;
+	}
 }
 
 // searches for element with specified data at specified position, returns pointer to found element or 0 if not found
 int* search(int* list, int key, int position) {
     int* cursor;
-    cursor = (int*) *list;
     
+    if (list == (int*) 0)
+    	return 0;
+    	
+    cursor = (int*) *list;
+
     while ((int)cursor != 0) {
         if (*(cursor + position) == key) {
             return cursor;
