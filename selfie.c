@@ -673,6 +673,12 @@ void syscall_unlock();
 void emitGetpid();
 void syscall_getpid();
 
+void emitFork();
+void syscall_fork();
+
+void emitWait();
+void syscall_wait();
+
 void emitPutchar();
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
@@ -686,6 +692,8 @@ int SYSCALL_YIELD   = 5003;
 int SYSCALL_LOCK	= 5004;
 int SYSCALL_UNLOCK	= 5005;
 int SYSCALL_GETPID	= 5006;
+int SYSCALL_FORK	= 5007;
+int SYSCALL_WAIT	= 5008;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -767,6 +775,8 @@ void fetch();
 void execute();
 void run();
 
+int* copyCurrentProcess();
+
 // -----------------------------------------------------------------
 // ----------------------------- MAIN ------------------------------
 // -----------------------------------------------------------------
@@ -812,7 +822,7 @@ int* readyQueue;
 int* segmentTable;
 int notReady;
 int calledYield;
-int numberOfProcesses;
+int numberOfProcesses = 1;
 int numberOfInstructions;
 int numberOfThreads = 0;
 int* lock = (int*) 0;
@@ -3202,6 +3212,8 @@ void compile() {
 	emitLock();
 	emitUnlock();
 	emitGetpid();
+	emitFork();
+	emitWait();
 	
     // parser
     gr_cstar();
@@ -3527,7 +3539,7 @@ void emit() {
 
     // 1537 = 0x0601 = O_CREAT (0x0200) | O_WRONLY (0x0001) | O_TRUNC (0x0400)
     // 420 = 00644 = S_IRUSR (00400) | S_IWUSR (00200) | S_IRGRP (00040) | S_IROTH (00004)
-    fd = open(binaryName, 1537, 420);
+    fd = open(binaryName, 577, 420);
 
     if (fd < 0) {
         print(selfieName);
@@ -3906,6 +3918,67 @@ void syscall_getpid() {
     *(registers+REG_V0) = *(currentProcess + 4);
 }
 
+void emitFork() {
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "fork", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_FORK);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_fork() {
+	int* child;
+	int* childRegisters;
+	int* childElement;
+	child = copyCurrentProcess();
+
+	if (child == (int*) 0) {
+    	*(registers+REG_V0) = -1;
+		return;
+	}
+	
+	childElement = malloc(3 * 4);
+	*childElement = 0;
+	*(childElement + 1) = 0;
+	*(childElement + 2) = *(child + 4);
+	enqueue((int*) *(currentProcess + 5), childElement);
+
+	*(child + 2) = *(child + 2) + 4;
+	enqueue(readyQueue, child);
+	
+	childRegisters = *(child + 3);
+	*(childRegisters + REG_V0) = 0;
+
+   	*(registers+REG_V0) = *(child + 4);
+
+}
+
+void emitWait() {
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "wait", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+
+	// load argument for wait (pid)
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_WAIT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_wait() {
+   
+}
+
 void emitPutchar() {
     createSymbolTableEntry(GLOBAL_TABLE, (int*) "putchar", binaryLength, FUNCTION, INT_T, 0);
 
@@ -3975,13 +4048,13 @@ void remove(int* list, int key) {
     }
 }
 
-// searches for element with specified data, returns pointer to found element or 0 if not found
-int* search(int* list, int key) {
+// searches for element with specified data at specified position, returns pointer to found element or 0 if not found
+int* search(int* list, int key, int position) {
     int* cursor;
     cursor = (int*) *list;
     
     while ((int)cursor != 0) {
-        if (*(cursor + 2) == key) {
+        if (*(cursor + position) == key) {
             return cursor;
         }
         cursor = (int*) *cursor;
@@ -4162,8 +4235,8 @@ int* kmalloc(int size) {
         size = size + 4 - size % 4;
 
     if ((int) (segmentBumpPointer + size / 4) >= memorySize) {
-        print((int*) "out of memory");
-		exit(-1);
+        //print((int*) "out of memory");
+		return -1;
 	}
 
     segmentBumpPointer = segmentBumpPointer + size / 4;
@@ -4171,47 +4244,46 @@ int* kmalloc(int size) {
 	return segmentBumpPointer + (size / (-4));
 }
 
-void duplicateProcesses() {
-	int* process;
-	int processCounter;
-	int* segmentEntry;
-	int* temp;
+int* copyCurrentProcess() {
+	int* child;
 	int* segToCopy;
+	int* segmentEntry;
+	int* childRegisters;
+	int* listEntry;
 
-	segToCopy = (int*) *(segmentTable + 1);
-	
-	processCounter = numberOfProcesses;
+	segToCopy = (int*) *(registers + REG_K0);
+	child = malloc(7 * 4);
 
-	temp = registers;
-	
-	while (processCounter - 1 > 0) {
-		process = malloc(5 * 4);		
-		*process = 0;
-		*(process + 1) = 0;
-		*(process + 2) = 0;
-		*(process + 3) = (int) malloc(32 * 4);
-		*(process + 4) = (numberOfProcesses - processCounter) + 1;
+	*child = 0;
+	*(child + 1) = 0;
+	*(child + 2) = pc;
+	*(child + 3) = (int) malloc(32 * 4);
+	numberOfProcesses = numberOfProcesses + 1;
+	*(child + 4) = numberOfProcesses;
+	*(child + 5) = malloc(2 * 4);
+	*(child + 6) = 0;
 
-		segmentEntry = malloc(4*4);
-		*segmentEntry = 0;
-		*(segmentEntry + 1) = 0;
-		*(segmentEntry + 2) = 4 * 1024 * 1024;
-		*(segmentEntry + 3) = (int) kmalloc(4 * 1024 * 1024);
-		
-		copyMemSpace(registers, (int*)*(process + 3), 32);
-		copyMemSpace(memory + (*(segToCopy + 3) / 4), memory + (*(segmentEntry + 3) / 4), *(segToCopy + 2) / 4);
+	listEntry = *(child + 5);
+	*listEntry = 0;
+	*(listEntry + 1) = 0;
 
-		registers = (int*) *(process + 3);
+	segmentEntry = malloc(4*4);
+	*segmentEntry = 0;
+	*(segmentEntry + 1) = 0;
+	*(segmentEntry + 2) = 4 * 1024 * 1024;
+	*(segmentEntry + 3) = (int) kmalloc(4 * 1024 * 1024);
 
-		*(registers + REG_K0) = (int) segmentEntry;
+	if (*(segmentEntry + 3) == -1)
+		return 0;
 
-		registers = temp;
-		
-		enqueue(readyQueue, process);
-		enqueue(segmentTable, segmentEntry);
-	
-		processCounter = processCounter - 1;
-	}
+	copyMemSpace(registers, (int*)*(child + 3), 32);
+	copyMemSpace(memory + (*(segToCopy + 3) / 4), memory + (*(segmentEntry + 3) / 4), *(segToCopy + 2) / 4);
+
+	childRegisters = (int*) *(child + 3);
+
+	*(childRegisters + REG_K0) = (int) segmentEntry;
+
+	return child;
 }
 
 void createThreads(int* process) {
@@ -4223,13 +4295,15 @@ void createThreads(int* process) {
 	nrOfThreads = numberOfThreads - 1;
 
 	while (nrOfThreads > 0) {
-		thread = malloc(5 * 4);
+		thread = malloc(7 * 4);
 
 		*thread = 0;
 		*(thread + 1) = 0;
 		*(thread + 2) = 0;
 		*(thread + 3) = malloc(32 * 4);
 		*(thread + 4) = *(process + 4);
+		*(thread + 5) = 0;
+		*(thread + 6) = 0;
 
 		copyMemSpace((int*)*(process + 3), (int*)*(thread + 3), 32);
 
@@ -4313,6 +4387,10 @@ void fct_syscall() {
     	syscall_unlock();
     } else if (*(registers+REG_V0) == SYSCALL_GETPID) {
     	syscall_getpid();
+    } else if (*(registers+REG_V0) == SYSCALL_FORK) {
+    	syscall_fork();
+    } else if (*(registers+REG_V0) == SYSCALL_WAIT) {
+    	syscall_wait();
     } else {
         exception_handler(EXCEPTION_UNKNOWNSYSCALL);
     }
@@ -4830,19 +4908,32 @@ void up_copyArguments(int argc, int *argv) {
 void initFirstProcess() {
 	int* process;
 	int* segmentEntry;
+	int* listEntry;
 
-	process = malloc(5 * 4);
+	process = malloc(7 * 4);
 	*process = 0;
 	*(process + 1) = 0;
 	*(process + 2) = 0;
 	*(process + 3) = (int) registers;
-	*(process + 4) = 0;	
+	*(process + 4) = numberOfProcesses;	
+	*(process + 5) = malloc(2 * 4);
+	*(process + 6) = 0;
+
+	listEntry = *(process + 5);
+	*listEntry = 0;
+	*(listEntry + 1) = 0;
 
 	segmentEntry = malloc(4 * 4);
+
 	*segmentEntry = 0;
 	*(segmentEntry + 1) = 0;
 	*(segmentEntry + 2) = 4 * 1024 * 1024;
 	*(segmentEntry + 3) = (int) kmalloc(4 * 1024 * 1024); // 2 MB per process
+	
+	if (*(segmentEntry + 3) == -1) {
+		print((int*) "not enough memory for first process");
+		exit(-1);	
+	}
 
 	*(registers + REG_K0) = (int) segmentEntry; // R26 used as segment register
 	
@@ -4890,11 +4981,9 @@ void emulate(int argc, int *argv) {
 
     up_copyArguments(argc, argv);
 
-	duplicateProcesses();
-
-	if (numberOfThreads > 0) {
-		createThreads(*readyQueue); // multithread first process
-	}
+	//if (numberOfThreads > 0) {
+		//createThreads(*readyQueue); // multithread first process
+	//}
     
     //scheduling
     while (*readyQueue != 0) {    
@@ -4915,7 +5004,7 @@ int selfie(int argc, int* argv) {
         return -1;
     else {
     
-    	numberOfProcesses = 1;
+    	//numberOfProcesses = 1;
         numberOfInstructions = 10000;
     	
         while (argc >= 2) {
@@ -4977,7 +5066,7 @@ int selfie(int argc, int* argv) {
             } else if (stringCompare((int*) *argv, (int*) "-a")) {
 				initMemory(atoi((int*) *(argv+1)));
 
-				numberOfProcesses = atoi((int*) *(argv+2));
+				//numberOfProcesses = atoi((int*) *(argv+2));
         		numberOfInstructions = atoi((int*) *(argv+3));
 
                 argc = argc - 3;
@@ -4998,7 +5087,7 @@ int selfie(int argc, int* argv) {
 
                 return 0;
 			} else if (stringCompare((int*) *argv, (int*) "-t")) {
-				numberOfProcesses = 1;
+				//numberOfProcesses = 1;
         		numberOfInstructions = 10;
 
 				numberOfThreads = 3;
