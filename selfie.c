@@ -3628,6 +3628,7 @@ void emitExit() {
 
 void syscall_exit() {
     int exitCode;
+	int* parent;
 
     exitCode = *(registers+REG_A0);
 
@@ -3641,6 +3642,17 @@ void syscall_exit() {
     //exit(0);
     syscall_unlock();//in case the exiting process holds a lock
     notReady = 1;
+
+	parent = search(blockingQueue, *(currentProcess + 4), 6);
+
+	if (parent != (int*) 0) {
+		*(parent + 6) = 0;
+		remove(*(parent + 5), *(currentProcess + 4), 2);
+		remove(blockingQueue, *(parent + 4), 4);
+		enqueue(readyQueue, parent);
+	} else {
+		enqueue(zombieQueue, currentProcess);
+	}
 }
 
 void emitRead() {
@@ -3998,12 +4010,14 @@ void syscall_wait() {
 	childEntry = search(zombieQueue, pid, 4);
 	
 	if (childEntry != (int*) 0) {
+		remove(*(currentProcess + 5), pid, 2);
 		remove(zombieQueue, pid, 4);
 		return;
 	}
 	
 	*(currentProcess + 6) = pid;
 	notReady = 1;
+	*(currentProcess + 2) = pc + 4;
 	enqueue(blockingQueue, currentProcess);
 	
 }
@@ -5014,6 +5028,14 @@ void emulate(int argc, int *argv) {
 		save(process);
     }
 
+	if (*blockingQueue != 0) {
+		println();
+		print((int*) "all processes blocked :-(");
+		println();
+		println();
+		//exit(-1);
+	}
+
     exit(0);
 }
 
@@ -5027,7 +5049,7 @@ int selfie(int argc, int* argv) {
     else {
     
     	//numberOfProcesses = 1;
-        numberOfInstructions = 10000;
+        numberOfInstructions = 1;
     	
         while (argc >= 2) {
             if (stringCompare((int*) *argv, (int*) "-c")) {
@@ -5089,10 +5111,10 @@ int selfie(int argc, int* argv) {
 				initMemory(atoi((int*) *(argv+1)));
 
 				//numberOfProcesses = atoi((int*) *(argv+2));
-        		numberOfInstructions = atoi((int*) *(argv+3));
+        		numberOfInstructions = atoi((int*) *(argv+2));
 
-                argc = argc - 3;
-                argv = argv + 3;
+                argc = argc - 2;
+                argv = argv + 2;
 
                 // pass binaryName as first argument replacing size
                 *argv = (int) binaryName;
