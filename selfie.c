@@ -891,7 +891,7 @@ int npid = 0;
 int number_of_proc = 1;
 int proc_count;
 int instr_count;
-int instr_cycles = 15;
+int instr_cycles = 10;
 int triggerContextSwitch;
 
 int *segment_table;
@@ -5890,4 +5890,5 @@ int main(int argc, int *argv) {
         println();
     }
 }
+
 

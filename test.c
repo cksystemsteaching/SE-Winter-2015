@@ -5,7 +5,6 @@ int main() {
 	pid = fork();
 
 	if (pid == 0) {
-		a = 42;
 		putchar('a');
 		putchar('a');
 		putchar('a');
@@ -34,6 +33,8 @@ int main() {
 
 		pid = fork();
 
+		lock();
+
 		if (pid == 0) {
 			putchar('d');
 			putchar('d');
@@ -47,17 +48,22 @@ int main() {
 			putchar('d');
 			putchar('d');
 			putchar('d');
-			exit(5);			
+			putchar('d');
+			unlock();
 		} else if (pid > 0) {
 			putchar('e');
 			putchar('e');
 			putchar('e');
 			putchar('e');
+			unlock();
 			wait(pid);
-			exit(6);			
+			putchar('f');
 		} else {
 			exit(1);
 		}
+
+		exit(5);
+
 	} else if (pid > 0) {
 		putchar('b');
 		putchar('b');
@@ -71,4 +77,3 @@ int main() {
 		exit(1);
 	}
 }
-
