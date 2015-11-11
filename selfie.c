@@ -767,8 +767,6 @@ int os_kmalloc(int size);
 void os_prepare();
 void os_createProcess();
 
-
-
 // -----------------------------------------------------------------
 // ---------------------------- MEMORY -----------------------------
 // -----------------------------------------------------------------
@@ -862,17 +860,17 @@ void emulate(int argc, int* argv);
 
 int debug_load = 0;
 
-int debug_read = 1;
-int debug_write = 1;
-int debug_open = 1;
-int debug_malloc = 1;
-int debug_yield = 1;
+int debug_read = 0;
+int debug_write = 0;
+int debug_open = 0;
+int debug_malloc = 0;
+int debug_yield = 0;
 
-int debug_contextSwitch = 1;
-int debug_lock = 1;
+int debug_contextSwitch = 0;
+int debug_lock = 0;
 
-int debug_registers = 1;
-int debug_disassemble = 1;
+int debug_registers = 0;
+int debug_disassemble = 0;
 
 int EXCEPTION_SIGNAL = 1;
 int EXCEPTION_ADDRESSERROR = 2;
@@ -897,7 +895,7 @@ int halt = 0; // flag for halting mipster
 
 int interpret = 0;
 
-int debug = 0;
+int debug = 1;
 
 int calls = 0;                  // total number of executed procedure calls
 int* callsPerAddress = (int*)0; // number of executed calls of each procedure
@@ -3667,7 +3665,6 @@ void printFunction(int function)
 void decode()
 {
     opcode = getOpcode(ir);
-
     if (opcode == 0)
         decodeRFormat();
     else if (opcode == OP_JAL)
@@ -4035,7 +4032,7 @@ void syscall_unlock()
     if (os_blockedCtr == 1) {
         os_lock = 0;
     }
-    if(os_lockQ != 0){
+    if (os_lockQ != 0) {
         os_move2readyQ(os_lockQ);
     }
     if (debug_lock) {
@@ -4102,14 +4099,15 @@ void syscall_exit()
     print((int*)" [PID] ");
     print(itoa(os_pId, string_buffer, 10, 0, 0));
     println();
-    
+
     node = os_readyQ;
     os_removeNode(node);
     if (*os_readyQ == 0) {
         halt = 1;
     }
-    os_contextSwitch();
-
+    else {
+        os_contextSwitch();
+    }
 }
 
 void emitRead()
@@ -4336,7 +4334,6 @@ void emitPutchar()
 // ---------------------     E M U L A T O R   ---------------------
 // -----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
-
 
 // -----------------------------------------------------------------
 // ---------------------------- MEMORY -----------------------------
@@ -5444,10 +5441,9 @@ void emulate(int argc, int* argv)
     copyBinaryToMemory();
 
     resetInterpreter();
-    
-    
+
     os_prepare();
-    
+
     os_createProcess();
 
     *(registers + REG_SP) = os_bumpPointer - 4; // initialize stack pointer
@@ -5461,7 +5457,7 @@ void emulate(int argc, int* argv)
     pc = os_getListEntry(1, os_readyQ);
     registers = (int*)os_getListEntry(2, os_readyQ);
     os_pId = os_getListEntry(4, os_readyQ);
-    
+
     run();
 
     print(selfieName);
@@ -5865,6 +5861,4 @@ void os_createProcess()
     pc = os_getListEntry(1, newP);
     registers = (int*)os_getListEntry(2, newP);
     os_segStart = os_getListEntry(3, newP);
-    //Set Global binaryLength to 0
-    binaryLength = 0;
 }
