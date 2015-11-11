@@ -3,11 +3,20 @@ int main(){
     pid = fork();
     
     if(pid == 0){
-        putchar('b');
-        putchar(10);
+        putchar('c');
+        putchar('h');
+        putchar('i');
+        putchar('l');
+        putchar('d');
     }else{
+        putchar('p');
         putchar('a');
-        putchar(10);
+        putchar('r');
+        putchar('e');
+        putchar('n');
+        putchar('t');
+        
     }
+
     exit(0);
 }
