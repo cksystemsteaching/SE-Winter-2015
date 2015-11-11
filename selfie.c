@@ -743,14 +743,14 @@ int *memory = (int*) 0;
 // ------------------------- INITIALIZATION ------------------------
 
 void initMemory(int bytes) {
-    if (bytes < 0)
-        memorySize = 64 * MEGABYTE;
-    else if (bytes > 1024 * MEGABYTE)
-        memorySize = 1024 * MEGABYTE;
-    else
-        memorySize = bytes;
+	if (bytes < 0)
+		memorySize = 64 * MEGABYTE;
+	else if (bytes > 1024 * MEGABYTE)
+		memorySize = 1024 * MEGABYTE;
+	else
+		memorySize = bytes;
 
-    memory = malloc(memorySize);
+	memory = malloc(memorySize);
 }
 
 // -----------------------------------------------------------------
@@ -878,9 +878,19 @@ void iter_list(int* list);
 int getPC(int* proc);
 int getRegisters(int* proc);
 int getSegment(int* proc);
+int getPrev(int* proc);
+int getNextProc(int* proc);
 int get_pid();
-int get_pid_proc(int* proc);
-int get_pid_wait(int* proc);
+int getPIDProc(int* proc);
+int getPIDWait(int* proc);
+
+void setPC(int* proc, int pc);
+void setRegisters(int* proc, int* reg);
+void setSegment(int* proc, int* seg);
+void setPrev(int* proc, int* prev);
+void setNextProc(int* proc, int* next);
+void setPID(int* proc, int pid);
+void setPIDWait(int* proc, int wait_pid);
 
 int *proc_list; // ready+run list
 int *current_proc; // run list
@@ -891,7 +901,7 @@ int npid = 0;
 int number_of_proc = 1;
 int proc_count;
 int instr_count;
-int instr_cycles = 10;
+int instr_cycles = 3;
 int triggerContextSwitch;
 
 int *segment_table;
@@ -985,24 +995,24 @@ void initInterpreter() {
 }
 
 void resetInterpreter() {
-    pc = 4;
+	pc = 4;
 
-    reg_hi = 0;
-    reg_lo = 0;
+	reg_hi = 0;
+	reg_lo = 0;
 
-    if (interpret) {
-        calls           = 0;
-        callsPerAddress = malloc(maxBinaryLength);
+	if (interpret) {
+		calls = 0;
+		callsPerAddress = malloc(maxBinaryLength);
 
-        loops           = 0;
-        loopsPerAddress = malloc(maxBinaryLength);
+		loops = 0;
+		loopsPerAddress = malloc(maxBinaryLength);
 
-        loads           = 0;
-        loadsPerAddress = malloc(maxBinaryLength);
+		loads = 0;
+		loadsPerAddress = malloc(maxBinaryLength);
 
-        stores           = 0;
-        storesPerAddress = malloc(maxBinaryLength);
-    }
+		stores = 0;
+		storesPerAddress = malloc(maxBinaryLength);
+	}
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -1265,24 +1275,23 @@ int* itoa(int n, int *s, int b, int a, int p) {
 	return s;
 }
 
-
 void putCharacter(int character) {
-    if (outputFD == 1)
-        putchar(character);
-    else {
-        *character_buffer = character;
+	if (outputFD == 1)
+		putchar(character);
+	else {
+		*character_buffer = character;
 
-        if (write(outputFD, character_buffer, 1) != 1) {
-            outputFD = 1;
+		if (write(outputFD, character_buffer, 1) != 1) {
+			outputFD = 1;
 
-            print(selfieName);
-            print((int*) ": could not write character to output file ");
-            print(outputName);
-            println();
+			print(selfieName);
+			print((int*) ": could not write character to output file ");
+			print(outputName);
+			println();
 
-            exit(-1);
-        }
-    }
+			exit(-1);
+		}
+	}
 }
 
 void print(int *s) {
@@ -3785,25 +3794,25 @@ void emitGlobalsStrings() {
 }
 
 void emit() {
-    int fd;
-    
-    fd = open(binaryName, O_CREAT_WRONLY_TRUNC, S_IRUSR_IWUSR_IRGRP_IROTH);
+	int fd;
 
-    if (fd < 0) {
-        print(selfieName);
-        print((int*) ": could not create output file ");
-        print(binaryName);
-        println();
+	fd = open(binaryName, O_CREAT_WRONLY_TRUNC, S_IRUSR_IWUSR_IRGRP_IROTH);
 
-        exit(-1);
-    }
+	if (fd < 0) {
+		print(selfieName);
+		print((int*) ": could not create output file ");
+		print(binaryName);
+		println();
 
-    print(selfieName);
-    print((int*) ": writing code into output file ");
-    print(binaryName);
-    println();
+		exit(-1);
+	}
 
-    write(fd, binary, binaryLength);
+	print(selfieName);
+	print((int*) ": writing code into output file ");
+	print(binaryName);
+	println();
+
+	write(fd, binary, binaryLength);
 }
 
 void load() {
@@ -3882,6 +3891,8 @@ void syscall_exit() {
 
 	*(registers + REG_V0) = exitCode;
 
+	print((int*) "\n-------------------------\n");
+
 	print(binaryName);
 	print((int*) ": exiting with error code ");
 	print(itoa(exitCode, string_buffer, 10, 0, 0));
@@ -3895,27 +3906,34 @@ void syscall_exit() {
 	// take your parent out of the waiting queue into the ready queue, thanks
 	if (get_pid() != INIT_0_PID) {
 		print((int*) "I am the child of someone\n");
-		waitingProcess = get_proc_by_pid(waiting_queue, get_pid(), PROC_OFF_NEXT, PROC_OFF_WAIT_FOR_PID);
+		waitingProcess = get_proc_by_pid(waiting_queue, get_pid(),
+				PROC_OFF_NEXT, PROC_OFF_WAIT_FOR_PID);
 
 		if ((int) waitingProcess != 0) {
 			print((int*) "There is a process waiting for me! Its PID is: ");
 			print(itoa(getPIDProc(waitingProcess), string_buffer, 10, 0, 0));
 			println();
 
-			print((int*) "Take that waiting process out of the WL and insert it into ready queue\n");
+			print(
+					(int*) "Take that waiting process out of the WL and insert it into ready queue\n");
 			waiting_queue = remove(waitingProcess, waiting_queue);
-			proc_list = insert_process(getPC(waitingProcess), getRegisters(waitingProcess),
-					getSegment(waitingProcess), 0, proc_list, getPIDProc(waitingProcess));
+			proc_list = insert_process(getPC(waitingProcess),
+					getRegisters(waitingProcess), getSegment(waitingProcess), 0,
+					proc_list, getPIDProc(waitingProcess));
 		} else {
 			// If you are a child exiting here and there's no parent waiting for you
 			// (you look at the waiting queue to find out), enter zombie land.
-			print((int*) "Oy, there is no process waiting for me! Does that... does that mean I'm a zombie?? ;___;\n");
-			zombie_queue = insert_process(getPC(current_proc), getRegisters(current_proc),
-					getSegment(current_proc), 0, zombie_queue, getPIDProc(current_proc));
+			print(
+					(int*) "Oy, there is no process waiting for me! Does that mean I'm a zombie now?\n");
+			zombie_queue = insert_process(getPC(current_proc),
+					getRegisters(current_proc), getSegment(current_proc), 0,
+					zombie_queue, getPIDProc(current_proc));
 		}
 	}
 
 	halt = 1;
+
+	print((int*) "-------------------------\n");
 
 	proc_list = remove(current_proc, proc_list);
 
@@ -4181,7 +4199,7 @@ void emitLock() {
 void syscall_lock() {
 	if ((int) lock_owner == 0) {
 		occupy_lock();
-	} else if ((int) lock_owner != current_proc) {
+	} else if ((int) lock_owner != (int) current_proc) {
 		make_blocking();
 	} else {
 		print((int*) "No point to locking mate, you got the lock (Process: ");
@@ -4211,10 +4229,11 @@ void syscall_unlock() {
 		free_lock();
 		sched_block_proc();
 	} else {
-		print(
-				(int*) "What are you unlocking? You don't have the lock (Process: ");
-		print(itoa(*(current_proc + 5), string_buffer, 10, 0, 0));
+		print((int*) "\n-------------------------\n");
+		print((int*) "What are you unlocking? You don't have the lock (Process: ");
+		print(itoa(get_pid(), string_buffer, 10, 0, 0));
 		print((int*) ")");
+		print((int*) "\n-------------------------");
 		println();
 	}
 }
@@ -4256,8 +4275,8 @@ void make_blocking() {
 	locked_process = current_proc;
 
 	proc_list = remove(locked_process, proc_list);
-	blocked_queue = insert_process(*locked_process, *(locked_process + 1),
-			*(locked_process + 2), 0, blocked_queue, *(locked_process + 5));
+	blocked_queue = insert_process(getPC(locked_process), getRegisters(locked_process),
+			getSegment(locked_process), 0, blocked_queue, getPIDProc(locked_process));
 
 	triggerContextSwitch = 1;
 }
@@ -4278,9 +4297,9 @@ void sched_block_proc() {
 	blocked_queue = remove(next_unblocked_process, blocked_queue);
 
 	if ((int) next_unblocked_process != 0)
-		proc_list = insert_process(*next_unblocked_process,
-				*(next_unblocked_process + 1), *(next_unblocked_process + 2), 0,
-				proc_list, *(next_unblocked_process + 5));
+		proc_list = insert_process(getPC(next_unblocked_process),
+				getRegisters(next_unblocked_process), getSegment(next_unblocked_process), 0,
+				proc_list, getPIDProc(next_unblocked_process));
 
 }
 
@@ -4300,12 +4319,48 @@ int getSegment(int* proc) {
 	return *(proc + PROC_OFF_SEG);
 }
 
+int getPrev(int* proc) {
+	return *(proc + PROC_OFF_PREV);
+}
+
+int getNextProc(int* proc) {
+	return *(proc + PROC_OFF_NEXT);
+}
+
 int getPIDProc(int* proc) {
 	return *(proc + PROC_OFF_PID);
 }
 
 int getPIDProcWait(int* proc) {
 	return *(proc + PROC_OFF_WAIT_FOR_PID);
+}
+
+void setPC(int* proc, int pc) {
+	*(proc + PROC_OFF_PC) = pc;
+}
+
+void setRegisters(int* proc, int* reg) {
+	*(proc + PROC_OFF_REG) = reg;
+}
+
+void setSegment(int* proc, int* seg) {
+	*(proc + PROC_OFF_SEG) = seg;
+}
+
+void setPrev(int* proc, int* prev) {
+	*(proc + PROC_OFF_PREV) = prev;
+}
+
+void setNextProc(int* proc, int* next) {
+	*(proc + PROC_OFF_NEXT) = next;
+}
+
+void setPID (int* proc, int pid) {
+	*(proc + PROC_OFF_PID) = pid;
+}
+
+void setPIDWait(int* proc, int wait_pid) {
+	*(proc + PROC_OFF_WAIT_FOR_PID) = wait_pid;
 }
 
 int* get_next_proc() {
@@ -4361,8 +4416,8 @@ void syscall_fork() {
 	print((int*) "\n-------------------------\n");
 	print((int*) "forkin yo\n");
 
-	reg_current = getRegisters(current_proc);
-	next_seg = *(last_created_segment + SEG_OFF_PREV);
+	reg_current = (int*) getRegisters(current_proc);
+	next_seg = (int*) *(last_created_segment + SEG_OFF_PREV);
 	next_seg_id = *(next_seg + SEG_OFF_SEGID);
 
 	number_of_proc = number_of_proc + 1;
@@ -4407,17 +4462,19 @@ void syscall_fork() {
 	*(reg_current + REG_V0) = npid;
 
 	print((int*) "\n-------------------------\n");
+
+	triggerContextSwitch = 1;
 }
 
 void segment_copy(int* old_seg, int* new_seg) {
 	int* border;
 	int* cursor;
 
-	border = *(new_seg + SEG_OFF_PREV);
-	cursor = *(new_seg + SEG_OFF_BEGIN);
+	border = (int*) *(new_seg + SEG_OFF_PREV);
+	cursor = (int*) *(new_seg + SEG_OFF_BEGIN);
 
-	old_seg = *old_seg;
-	new_seg = *new_seg;
+	old_seg = (int*) *old_seg;
+	new_seg = (int*) *new_seg;
 
 	while ((int) cursor != *(border + SEG_OFF_BEGIN)) {
 		if ((int) old_seg != 0) {
@@ -4464,7 +4521,7 @@ void syscall_wait() {
 	int* process_wait;
 	int* process_reg;
 
-	process_reg = getRegisters(current_proc);
+	process_reg = (int*) getRegisters(current_proc);
 
 	print((int*) "\n-----------------------\n");
 	print((int*) "wait! I'm process: ");
@@ -4476,20 +4533,24 @@ void syscall_wait() {
 	// Take a look at the ready queue (+ blocked queue!), is process with PID <argument> in it?
 	pid_wait = *(registers + REG_A0);
 
-	process_wait = get_proc_by_pid(proc_list, pid_wait, PROC_OFF_NEXT, PROC_OFF_PID);
+	process_wait = get_proc_by_pid(proc_list, pid_wait, PROC_OFF_NEXT,
+			PROC_OFF_PID);
 
 	if ((int) process_wait == 0) {
-		process_wait = get_proc_by_pid(blocked_queue, pid_wait, PROC_OFF_NEXT, PROC_OFF_PID);
-		print((int*) "There is no such process among the ready/run ones... maybe blocking?\n");
+		process_wait = get_proc_by_pid(blocked_queue, pid_wait, PROC_OFF_NEXT,
+				PROC_OFF_PID);
+		print(
+				(int*) "There is no such process among the ready/run ones... maybe blocking?\n");
 	}
 
 	if ((int) process_wait != 0) {
 		// If so, insert yourself into the waiting queue (with that process pid <argument> as condition)
 		waiting_queue = insert_process_wait(*(process_reg + REG_RA),
-				getRegisters(current_proc), getSegment(current_proc), 0, waiting_queue,
-				getPIDProc(current_proc), pid_wait);
+				getRegisters(current_proc), getSegment(current_proc), 0,
+				waiting_queue, getPIDProc(current_proc), pid_wait);
 
-		print((int*) "I'm going to the waiting queue and will remove myself from the ready processes!\n");
+		print(
+				(int*) "I'm going to the waiting queue and will remove myself from the ready processes!\n");
 
 		// ... and don't forget to take yourself out of the run/ready queue for the mean time
 		proc_list = remove(current_proc, proc_list);
@@ -4497,9 +4558,11 @@ void syscall_wait() {
 		// switch context
 		triggerContextSwitch = 1;
 	} else {
-		print((int*) "Not there either, maybe a zombie waiting to be woken up?\n");
+		print(
+				(int*) "Not there either, maybe a zombie waiting to be woken up?\n");
 		// If there is no process pid <argument> (because it terminated already, consult the zombie queue to find out)... continue in the run/ready queue
-		process_wait = get_proc_by_pid(zombie_queue, pid_wait, PROC_OFF_NEXT, PROC_OFF_PID);
+		process_wait = get_proc_by_pid(zombie_queue, pid_wait, PROC_OFF_NEXT,
+				PROC_OFF_PID);
 
 		// ... and maybe take it out of the zombie queue if there is anything
 		if ((int) process_wait != 0) {
@@ -4589,636 +4652,638 @@ void fct_syscall() {
 }
 
 void fct_nop() {
-    if (debug) {
-        printFunction(function);
-        println();
-    }
+	if (debug) {
+		printFunction(function);
+		println();
+	}
 
-    if (interpret)
-        pc = pc + 4;
+	if (interpret)
+		pc = pc + 4;
 }
 
 void op_jal() {
-    if (debug) {
-        printOpcode(opcode);
-        print((int*) " ");
-        print(itoa(instr_index, string_buffer, 16, 0, 0));
-        print((int*) "[");
-        print(itoa(instr_index * 4, string_buffer, 16, 0, 0));
-        print((int*) "]");
-        if (interpret) {
-            print((int*) ": ");
-            printRegister(REG_RA);
-            print((int*) "=");
-            print(itoa(*(registers+REG_RA), string_buffer, 16, 0, 0));
-        }
-    }
+	if (debug) {
+		printOpcode(opcode);
+		print((int*) " ");
+		print(itoa(instr_index, string_buffer, 16, 0, 0));
+		print((int*) "[");
+		print(itoa(instr_index * 4, string_buffer, 16, 0, 0));
+		print((int*) "]");
+		if (interpret) {
+			print((int*) ": ");
+			printRegister(REG_RA);
+			print((int*) "=");
+			print(itoa(*(registers + REG_RA), string_buffer, 16, 0, 0));
+		}
+	}
 
-    if (interpret) {
-        *(registers+REG_RA) = pc + 8;
+	if (interpret) {
+		*(registers + REG_RA) = pc + 8;
 
-        pc = instr_index * 4;
+		pc = instr_index * 4;
 
-        // keep track of number of procedure calls
-        calls = calls + 1;
+		// keep track of number of procedure calls
+		calls = calls + 1;
 
-        *(callsPerAddress + pc / 4) = *(callsPerAddress + pc / 4) + 1;
+		*(callsPerAddress + pc / 4) = *(callsPerAddress + pc / 4) + 1;
 
-        // TODO: execute delay slot
-    }
+		// TODO: execute delay slot
+	}
 
-    if (debug) {
-        if (interpret) {
-            print((int*) " -> ");
-            printRegister(REG_RA);
-            print((int*) "=");
-            print(itoa(*(registers+REG_RA), string_buffer, 16, 0, 0));
-            print((int*) ",$pc=");
-            print(itoa(pc, string_buffer, 16, 0, 0));
-        }
-        println();
-    }
+	if (debug) {
+		if (interpret) {
+			print((int*) " -> ");
+			printRegister(REG_RA);
+			print((int*) "=");
+			print(itoa(*(registers + REG_RA), string_buffer, 16, 0, 0));
+			print((int*) ",$pc=");
+			print(itoa(pc, string_buffer, 16, 0, 0));
+		}
+		println();
+	}
 }
 
 void op_j() {
-    if (debug) {
-        printOpcode(opcode);
-        print((int*) " ");
-        print(itoa(instr_index, string_buffer, 16, 0, 0));
-        print((int*) "[");
-        print(itoa(instr_index * 4, string_buffer, 16, 0, 0));
-        print((int*) "]");
-    }
+	if (debug) {
+		printOpcode(opcode);
+		print((int*) " ");
+		print(itoa(instr_index, string_buffer, 16, 0, 0));
+		print((int*) "[");
+		print(itoa(instr_index * 4, string_buffer, 16, 0, 0));
+		print((int*) "]");
+	}
 
-    if (interpret) {
-        pc = instr_index * 4;
+	if (interpret) {
+		pc = instr_index * 4;
 
-        // TODO: execute delay slot
-    }
+		// TODO: execute delay slot
+	}
 
-    if (debug) {
-        if (interpret) {
-            print((int*) ": -> $pc=");
-            print(itoa(pc, string_buffer, 16, 0, 0));
-        }
-        println();
-    }
+	if (debug) {
+		if (interpret) {
+			print((int*) ": -> $pc=");
+			print(itoa(pc, string_buffer, 16, 0, 0));
+		}
+		println();
+	}
 }
 
 void op_beq() {
-    if (debug) {
-        printOpcode(opcode);
-        print((int*) " ");
-        printRegister(rs);
-        print((int*) ",");
-        printRegister(rt);
-        print((int*) ",");
-        print(itoa(signExtend(immediate), string_buffer, 10, 0, 0));
-        print((int*) "[");
-        print(itoa(pc + 4 + signExtend(immediate) * 4, string_buffer, 16, 0, 0));
-        print((int*) "]");
-        if (interpret) {
-            print((int*) ": ");
-            printRegister(rs);
-            print((int*) "=");
-            print(itoa(*(registers+rs), string_buffer, 10, 0, 0));
-            print((int*) ",");
-            printRegister(rt);
-            print((int*) "=");
-            print(itoa(*(registers+rt), string_buffer, 10, 0, 0));
-        }
-    }
+	if (debug) {
+		printOpcode(opcode);
+		print((int*) " ");
+		printRegister(rs);
+		print((int*) ",");
+		printRegister(rt);
+		print((int*) ",");
+		print(itoa(signExtend(immediate), string_buffer, 10, 0, 0));
+		print((int*) "[");
+		print(
+				itoa(pc + 4 + signExtend(immediate) * 4, string_buffer, 16, 0,
+						0));
+		print((int*) "]");
+		if (interpret) {
+			print((int*) ": ");
+			printRegister(rs);
+			print((int*) "=");
+			print(itoa(*(registers + rs), string_buffer, 10, 0, 0));
+			print((int*) ",");
+			printRegister(rt);
+			print((int*) "=");
+			print(itoa(*(registers + rt), string_buffer, 10, 0, 0));
+		}
+	}
 
-    if (interpret) {
-        pc = pc + 4;
+	if (interpret) {
+		pc = pc + 4;
 
-        if (*(registers+rs) == *(registers+rt)) {
-            pc = pc + signExtend(immediate) * 4;
+		if (*(registers + rs) == *(registers + rt)) {
+			pc = pc + signExtend(immediate) * 4;
 
-            if (signExtend(immediate) < 0) {
-                // keep track of number of loop iterations
-                loops = loops + 1;
+			if (signExtend(immediate) < 0) {
+				// keep track of number of loop iterations
+				loops = loops + 1;
 
-                *(loopsPerAddress + pc / 4) = *(loopsPerAddress + pc / 4) + 1;
-            }
+				*(loopsPerAddress + pc / 4) = *(loopsPerAddress + pc / 4) + 1;
+			}
 
-            // TODO: execute delay slot
-        }
-    }
+			// TODO: execute delay slot
+		}
+	}
 
-    if (debug) {
-        if (interpret) {
-            print((int*) " -> $pc=");
-            print(itoa(pc, string_buffer, 16, 0, 0));
-        }
-        println();
-    }
+	if (debug) {
+		if (interpret) {
+			print((int*) " -> $pc=");
+			print(itoa(pc, string_buffer, 16, 0, 0));
+		}
+		println();
+	}
 }
 
 void op_bne() {
-    if (debug) {
-        printOpcode(opcode);
-        print((int*) " ");
-        printRegister(rs);
-        print((int*) ",");
-        printRegister(rt);
-        print((int*) ",");
-        print(itoa(signExtend(immediate), string_buffer, 10, 0, 0));
-        print((int*) "[");
-        print(itoa(pc + 4 + signExtend(immediate) * 4, string_buffer, 16, 0, 0));
-        print((int*) "]");
-        if (interpret) {
-            print((int*) ": ");
-            printRegister(rs);
-            print((int*) "=");
-            print(itoa(*(registers+rs), string_buffer, 10, 0, 0));
-            print((int*) ",");
-            printRegister(rt);
-            print((int*) "=");
-            print(itoa(*(registers+rt), string_buffer, 10, 0, 0));
-        }
-    }
+	if (debug) {
+		printOpcode(opcode);
+		print((int*) " ");
+		printRegister(rs);
+		print((int*) ",");
+		printRegister(rt);
+		print((int*) ",");
+		print(itoa(signExtend(immediate), string_buffer, 10, 0, 0));
+		print((int*) "[");
+		print(itoa(pc + 4 + signExtend(immediate) * 4, string_buffer, 16, 0, 0));
+		print((int*) "]");
+		if (interpret) {
+			print((int*) ": ");
+			printRegister(rs);
+			print((int*) "=");
+			print(itoa(*(registers + rs), string_buffer, 10, 0, 0));
+			print((int*) ",");
+			printRegister(rt);
+			print((int*) "=");
+			print(itoa(*(registers + rt), string_buffer, 10, 0, 0));
+		}
+	}
 
-    if (interpret) {
-        pc = pc + 4;
+	if (interpret) {
+		pc = pc + 4;
 
-        if (*(registers+rs) != *(registers+rt)) {
-            pc = pc + signExtend(immediate) * 4;
+		if (*(registers + rs) != *(registers + rt)) {
+			pc = pc + signExtend(immediate) * 4;
 
-            // TODO: execute delay slot
-        }
-    }
+			// TODO: execute delay slot
+		}
+	}
 
-    if (debug) {
-        if (interpret) {
-            print((int*) " -> $pc=");
-            print(itoa(pc, string_buffer, 16, 0, 0));
-        }
-        println();
-    }
+	if (debug) {
+		if (interpret) {
+			print((int*) " -> $pc=");
+			print(itoa(pc, string_buffer, 16, 0, 0));
+		}
+		println();
+	}
 }
 
 void op_addiu() {
-    if (debug) {
-        printOpcode(opcode);
-        print((int*) " ");
-        printRegister(rt);
-        print((int*) ",");
-        printRegister(rs);
-        print((int*) ",");
-        print(itoa(signExtend(immediate), string_buffer, 10, 0, 0));
-        if (interpret) {
-            print((int*) ": ");
-            printRegister(rt);
-            print((int*) "=");
-            print(itoa(*(registers+rt), string_buffer, 10, 0, 0));
-            print((int*) ",");
-            printRegister(rs);
-            print((int*) "=");
-            print(itoa(*(registers+rs), string_buffer, 10, 0, 0));
-        }
-    }
+	if (debug) {
+		printOpcode(opcode);
+		print((int*) " ");
+		printRegister(rt);
+		print((int*) ",");
+		printRegister(rs);
+		print((int*) ",");
+		print(itoa(signExtend(immediate), string_buffer, 10, 0, 0));
+		if (interpret) {
+			print((int*) ": ");
+			printRegister(rt);
+			print((int*) "=");
+			print(itoa(*(registers + rt), string_buffer, 10, 0, 0));
+			print((int*) ",");
+			printRegister(rs);
+			print((int*) "=");
+			print(itoa(*(registers + rs), string_buffer, 10, 0, 0));
+		}
+	}
 
-    if (interpret) {
-        *(registers+rt) = *(registers+rs) + signExtend(immediate);
+	if (interpret) {
+		*(registers + rt) = *(registers + rs) + signExtend(immediate);
 
-        // TODO: check for overflow
+		// TODO: check for overflow
 
-        pc = pc + 4;
-    }
+		pc = pc + 4;
+	}
 
-    if (debug) {
-        if (interpret) {
-            print((int*) " -> ");
-            printRegister(rt);
-            print((int*) "=");
-            print(itoa(*(registers+rt), string_buffer, 10, 0, 0));
-        }
-        println();
-    }
+	if (debug) {
+		if (interpret) {
+			print((int*) " -> ");
+			printRegister(rt);
+			print((int*) "=");
+			print(itoa(*(registers + rt), string_buffer, 10, 0, 0));
+		}
+		println();
+	}
 }
 
 void fct_jr() {
-    if (debug) {
-        printFunction(function);
-        print((int*) " ");
-        printRegister(rs);
-        if (interpret) {
-            print((int*) ": ");
-            printRegister(rs);
-            print((int*) "=");
-            print(itoa(*(registers+rs), string_buffer, 16, 0, 0));
-        }
-    }
+	if (debug) {
+		printFunction(function);
+		print((int*) " ");
+		printRegister(rs);
+		if (interpret) {
+			print((int*) ": ");
+			printRegister(rs);
+			print((int*) "=");
+			print(itoa(*(registers + rs), string_buffer, 16, 0, 0));
+		}
+	}
 
-    if (interpret)
-        pc = *(registers+rs);
+	if (interpret)
+		pc = *(registers + rs);
 
-    if (debug) {
-        if (interpret) {
-            print((int*) " -> $pc=");
-            print(itoa(pc, string_buffer, 16, 0, 0));
-        }
-        println();
-    }
+	if (debug) {
+		if (interpret) {
+			print((int*) " -> $pc=");
+			print(itoa(pc, string_buffer, 16, 0, 0));
+		}
+		println();
+	}
 }
 
 void fct_mfhi() {
-    if (debug) {
-        printFunction(function);
-        print((int*) " ");
-        printRegister(rd);
-        if (interpret) {
-            print((int*) ": ");
-            printRegister(rd);
-            print((int*) "=");
-            print(itoa(*(registers+rd), string_buffer, 10, 0, 0));
-            print((int*) ",$hi=");
-            print(itoa(reg_hi, string_buffer, 10, 0, 0));
-        }
-    }
+	if (debug) {
+		printFunction(function);
+		print((int*) " ");
+		printRegister(rd);
+		if (interpret) {
+			print((int*) ": ");
+			printRegister(rd);
+			print((int*) "=");
+			print(itoa(*(registers + rd), string_buffer, 10, 0, 0));
+			print((int*) ",$hi=");
+			print(itoa(reg_hi, string_buffer, 10, 0, 0));
+		}
+	}
 
-    if (interpret) {
-        *(registers+rd) = reg_hi;
+	if (interpret) {
+		*(registers + rd) = reg_hi;
 
-        pc = pc + 4;
-    }
+		pc = pc + 4;
+	}
 
-    if (debug) {
-        if (interpret) {
-            print((int*) " -> ");
-            printRegister(rd);
-            print((int*) "=");
-            print(itoa(*(registers+rd), string_buffer, 10, 0, 0));
-        }
-        println();
-    }
+	if (debug) {
+		if (interpret) {
+			print((int*) " -> ");
+			printRegister(rd);
+			print((int*) "=");
+			print(itoa(*(registers + rd), string_buffer, 10, 0, 0));
+		}
+		println();
+	}
 }
 
 void fct_mflo() {
-    if (debug) {
-        printFunction(function);
-        print((int*) " ");
-        printRegister(rd);
-        if (interpret) {
-            print((int*) ": ");
-            printRegister(rd);
-            print((int*) "=");
-            print(itoa(*(registers+rd), string_buffer, 10, 0, 0));
-            print((int*) ",$lo=");
-            print(itoa(reg_lo, string_buffer, 10, 0, 0));
-        }
-    }
+	if (debug) {
+		printFunction(function);
+		print((int*) " ");
+		printRegister(rd);
+		if (interpret) {
+			print((int*) ": ");
+			printRegister(rd);
+			print((int*) "=");
+			print(itoa(*(registers + rd), string_buffer, 10, 0, 0));
+			print((int*) ",$lo=");
+			print(itoa(reg_lo, string_buffer, 10, 0, 0));
+		}
+	}
 
-    if (interpret) {
-        *(registers+rd) = reg_lo;
+	if (interpret) {
+		*(registers + rd) = reg_lo;
 
-        pc = pc + 4;
-    }
+		pc = pc + 4;
+	}
 
-    if (debug) {
-        if (interpret) {
-            print((int*) " -> ");
-            printRegister(rd);
-            print((int*) "=");
-            print(itoa(*(registers+rd), string_buffer, 10, 0, 0));
-        }
-        println();
-    }
+	if (debug) {
+		if (interpret) {
+			print((int*) " -> ");
+			printRegister(rd);
+			print((int*) "=");
+			print(itoa(*(registers + rd), string_buffer, 10, 0, 0));
+		}
+		println();
+	}
 }
 
 void fct_multu() {
-    if (debug) {
-        printFunction(function);
-        print((int*) " ");
-        printRegister(rs);
-        print((int*) ",");
-        printRegister(rt);
-        if (interpret) {
-            print((int*) ": ");
-            printRegister(rs);
-            print((int*) "=");
-            print(itoa(*(registers+rs), string_buffer, 10, 0, 0));
-            print((int*) ",");
-            printRegister(rt);
-            print((int*) "=");
-            print(itoa(*(registers+rt), string_buffer, 10, 0, 0));
-            print((int*) ",$lo=");
-            print(itoa(reg_lo, string_buffer, 10, 0, 0));
-        }
-    }
+	if (debug) {
+		printFunction(function);
+		print((int*) " ");
+		printRegister(rs);
+		print((int*) ",");
+		printRegister(rt);
+		if (interpret) {
+			print((int*) ": ");
+			printRegister(rs);
+			print((int*) "=");
+			print(itoa(*(registers + rs), string_buffer, 10, 0, 0));
+			print((int*) ",");
+			printRegister(rt);
+			print((int*) "=");
+			print(itoa(*(registers + rt), string_buffer, 10, 0, 0));
+			print((int*) ",$lo=");
+			print(itoa(reg_lo, string_buffer, 10, 0, 0));
+		}
+	}
 
-    if (interpret) {
-        // TODO: 64-bit resolution currently not supported
-        reg_lo = *(registers+rs) * *(registers+rt);
+	if (interpret) {
+		// TODO: 64-bit resolution currently not supported
+		reg_lo = *(registers + rs) * *(registers + rt);
 
-        pc = pc + 4;
-    }
+		pc = pc + 4;
+	}
 
-    if (debug) {
-        if (interpret) {
-            print((int*) " -> $lo=");
-            print(itoa(reg_lo, string_buffer, 10, 0, 0));
-        }
-        println();
-    }
+	if (debug) {
+		if (interpret) {
+			print((int*) " -> $lo=");
+			print(itoa(reg_lo, string_buffer, 10, 0, 0));
+		}
+		println();
+	}
 }
 
 void fct_divu() {
-    if (debug) {
-        printFunction(function);
-        print((int*) " ");
-        printRegister(rs);
-        print((int*) ",");
-        printRegister(rt);
-        if (interpret) {
-            print((int*) ": ");
-            printRegister(rs);
-            print((int*) "=");
-            print(itoa(*(registers+rs), string_buffer, 10, 0, 0));
-            print((int*) ",");
-            printRegister(rt);
-            print((int*) "=");
-            print(itoa(*(registers+rt), string_buffer, 10, 0, 0));
-            print((int*) ",$lo=");
-            print(itoa(reg_lo, string_buffer, 10, 0, 0));
-            print((int*) ",$hi=");
-            print(itoa(reg_hi, string_buffer, 10, 0, 0));
-        }
-    }
+	if (debug) {
+		printFunction(function);
+		print((int*) " ");
+		printRegister(rs);
+		print((int*) ",");
+		printRegister(rt);
+		if (interpret) {
+			print((int*) ": ");
+			printRegister(rs);
+			print((int*) "=");
+			print(itoa(*(registers + rs), string_buffer, 10, 0, 0));
+			print((int*) ",");
+			printRegister(rt);
+			print((int*) "=");
+			print(itoa(*(registers + rt), string_buffer, 10, 0, 0));
+			print((int*) ",$lo=");
+			print(itoa(reg_lo, string_buffer, 10, 0, 0));
+			print((int*) ",$hi=");
+			print(itoa(reg_hi, string_buffer, 10, 0, 0));
+		}
+	}
 
-    if (interpret) {
-        reg_lo = *(registers+rs) / *(registers+rt);
-        reg_hi = *(registers+rs) % *(registers+rt);
+	if (interpret) {
+		reg_lo = *(registers + rs) / *(registers + rt);
+		reg_hi = *(registers + rs) % *(registers + rt);
 
-        pc = pc + 4;
-    }
+		pc = pc + 4;
+	}
 
-    if (debug) {
-        if (interpret) {
-            print((int*) " -> $lo=");
-            print(itoa(reg_lo, string_buffer, 10, 0, 0));
-            print((int*) ",$hi=");
-            print(itoa(reg_hi, string_buffer, 10, 0, 0));
-        }
-        println();
-    }
+	if (debug) {
+		if (interpret) {
+			print((int*) " -> $lo=");
+			print(itoa(reg_lo, string_buffer, 10, 0, 0));
+			print((int*) ",$hi=");
+			print(itoa(reg_hi, string_buffer, 10, 0, 0));
+		}
+		println();
+	}
 }
 
 void fct_addu() {
-    if (debug) {
-        printFunction(function);
-        print((int*) " ");
-        printRegister(rd);
-        print((int*) ",");
-        printRegister(rs);
-        print((int*) ",");
-        printRegister(rt);
-        if (interpret) {
-            print((int*) ": ");
-            printRegister(rd);
-            print((int*) "=");
-            print(itoa(*(registers+rd), string_buffer, 10, 0, 0));
-            print((int*) ",");
-            printRegister(rs);
-            print((int*) "=");
-            print(itoa(*(registers+rs), string_buffer, 10, 0, 0));
-            print((int*) ",");
-            printRegister(rt);
-            print((int*) "=");
-            print(itoa(*(registers+rt), string_buffer, 10, 0, 0));
-        }
-    }
+	if (debug) {
+		printFunction(function);
+		print((int*) " ");
+		printRegister(rd);
+		print((int*) ",");
+		printRegister(rs);
+		print((int*) ",");
+		printRegister(rt);
+		if (interpret) {
+			print((int*) ": ");
+			printRegister(rd);
+			print((int*) "=");
+			print(itoa(*(registers + rd), string_buffer, 10, 0, 0));
+			print((int*) ",");
+			printRegister(rs);
+			print((int*) "=");
+			print(itoa(*(registers + rs), string_buffer, 10, 0, 0));
+			print((int*) ",");
+			printRegister(rt);
+			print((int*) "=");
+			print(itoa(*(registers + rt), string_buffer, 10, 0, 0));
+		}
+	}
 
-    if (interpret) {
-        *(registers+rd) = *(registers+rs) + *(registers+rt);
+	if (interpret) {
+		*(registers + rd) = *(registers + rs) + *(registers + rt);
 
-        pc = pc + 4;
-    }
+		pc = pc + 4;
+	}
 
-    if (debug) {
-        if (interpret) {
-            print((int*) " -> ");
-            printRegister(rd);
-            print((int*) "=");
-            print(itoa(*(registers+rd), string_buffer, 10, 0, 0));
-        }
-        println();
-    }
+	if (debug) {
+		if (interpret) {
+			print((int*) " -> ");
+			printRegister(rd);
+			print((int*) "=");
+			print(itoa(*(registers + rd), string_buffer, 10, 0, 0));
+		}
+		println();
+	}
 }
 
 void fct_subu() {
-    if (debug) {
-        printFunction(function);
-        print((int*) " ");
-        printRegister(rd);
-        print((int*) ",");
-        printRegister(rs);
-        print((int*) ",");
-        printRegister(rt);
-        if (interpret) {
-            print((int*) ": ");
-            printRegister(rd);
-            print((int*) "=");
-            print(itoa(*(registers+rd), string_buffer, 10, 0, 0));
-            print((int*) ",");
-            printRegister(rs);
-            print((int*) "=");
-            print(itoa(*(registers+rs), string_buffer, 10, 0, 0));
-            print((int*) ",");
-            printRegister(rt);
-            print((int*) "=");
-            print(itoa(*(registers+rt), string_buffer, 10, 0, 0));
-        }
-    }
+	if (debug) {
+		printFunction(function);
+		print((int*) " ");
+		printRegister(rd);
+		print((int*) ",");
+		printRegister(rs);
+		print((int*) ",");
+		printRegister(rt);
+		if (interpret) {
+			print((int*) ": ");
+			printRegister(rd);
+			print((int*) "=");
+			print(itoa(*(registers + rd), string_buffer, 10, 0, 0));
+			print((int*) ",");
+			printRegister(rs);
+			print((int*) "=");
+			print(itoa(*(registers + rs), string_buffer, 10, 0, 0));
+			print((int*) ",");
+			printRegister(rt);
+			print((int*) "=");
+			print(itoa(*(registers + rt), string_buffer, 10, 0, 0));
+		}
+	}
 
-    if (interpret) {
-        *(registers+rd) = *(registers+rs) - *(registers+rt);
+	if (interpret) {
+		*(registers + rd) = *(registers + rs) - *(registers + rt);
 
-        pc = pc + 4;
-    }
+		pc = pc + 4;
+	}
 
-    if (debug) {
-        if (interpret) {
-            print((int*) " -> ");
-            printRegister(rd);
-            print((int*) "=");
-            print(itoa(*(registers+rd), string_buffer, 10, 0, 0));
-        }
-        println();
-    }
+	if (debug) {
+		if (interpret) {
+			print((int*) " -> ");
+			printRegister(rd);
+			print((int*) "=");
+			print(itoa(*(registers + rd), string_buffer, 10, 0, 0));
+		}
+		println();
+	}
 }
 
 void op_lw() {
-    int vaddr;
+	int vaddr;
 
-    if (debug) {
-        printOpcode(opcode);
-        print((int*) " ");
-        printRegister(rt);
-        print((int*) ",");
-        print(itoa(signExtend(immediate), string_buffer, 10, 0, 0));
-        print((int*) "(");
-        printRegister(rs);
-        print((int*) ")");
-        if (interpret) {
-            print((int*) ": ");
-            printRegister(rt);
-            print((int*) "=");
-            print(itoa(*(registers+rt), string_buffer, 10, 0, 0));
-            print((int*) ",");
-            printRegister(rs);
-            print((int*) "=");
-            print(itoa(*(registers+rs), string_buffer, 16, 0, 0));
-        }
-    }
+	if (debug) {
+		printOpcode(opcode);
+		print((int*) " ");
+		printRegister(rt);
+		print((int*) ",");
+		print(itoa(signExtend(immediate), string_buffer, 10, 0, 0));
+		print((int*) "(");
+		printRegister(rs);
+		print((int*) ")");
+		if (interpret) {
+			print((int*) ": ");
+			printRegister(rt);
+			print((int*) "=");
+			print(itoa(*(registers + rt), string_buffer, 10, 0, 0));
+			print((int*) ",");
+			printRegister(rs);
+			print((int*) "=");
+			print(itoa(*(registers + rs), string_buffer, 16, 0, 0));
+		}
+	}
 
-    if (interpret) {
-        vaddr = *(registers+rs) + signExtend(immediate);
+	if (interpret) {
+		vaddr = *(registers + rs) + signExtend(immediate);
 
-        *(registers+rt) = loadMemory(vaddr);
+		*(registers + rt) = loadMemory(vaddr);
 
-        // keep track of number of loads
-        loads = loads + 1;
+		// keep track of number of loads
+		loads = loads + 1;
 
-        *(loadsPerAddress + pc / 4) = *(loadsPerAddress + pc / 4) + 1;
+		*(loadsPerAddress + pc / 4) = *(loadsPerAddress + pc / 4) + 1;
 
-        pc = pc + 4;
-    }
+		pc = pc + 4;
+	}
 
-    if (debug) {
-        if (interpret) {
-            print((int*) " -> ");
-            printRegister(rt);
-            print((int*) "=");
-            print(itoa(*(registers+rt), string_buffer, 10, 0, 0));
-            print((int*) "=memory[vaddr=");
-            print(itoa(vaddr, string_buffer, 16, 0, 0));
-            print((int*) "]");
-        }
-        println();
-    }
+	if (debug) {
+		if (interpret) {
+			print((int*) " -> ");
+			printRegister(rt);
+			print((int*) "=");
+			print(itoa(*(registers + rt), string_buffer, 10, 0, 0));
+			print((int*) "=memory[vaddr=");
+			print(itoa(vaddr, string_buffer, 16, 0, 0));
+			print((int*) "]");
+		}
+		println();
+	}
 }
 
 void fct_slt() {
-    if (debug) {
-        printFunction(function);
-        print((int*) " ");
-        printRegister(rd);
-        print((int*) ",");
-        printRegister(rs);
-        print((int*) ",");
-        printRegister(rt);
-        if (interpret) {
-            print((int*) ": ");
-            printRegister(rs);
-            print((int*) "=");
-            print(itoa(*(registers+rs), string_buffer, 10, 0, 0));
-            print((int*) ",");
-            printRegister(rt);
-            print((int*) "=");
-            print(itoa(*(registers+rt), string_buffer, 10, 0, 0));
-        }
-    }
+	if (debug) {
+		printFunction(function);
+		print((int*) " ");
+		printRegister(rd);
+		print((int*) ",");
+		printRegister(rs);
+		print((int*) ",");
+		printRegister(rt);
+		if (interpret) {
+			print((int*) ": ");
+			printRegister(rs);
+			print((int*) "=");
+			print(itoa(*(registers + rs), string_buffer, 10, 0, 0));
+			print((int*) ",");
+			printRegister(rt);
+			print((int*) "=");
+			print(itoa(*(registers + rt), string_buffer, 10, 0, 0));
+		}
+	}
 
-    if (interpret) {
-        if (*(registers+rs) < *(registers+rt))
-            *(registers+rd) = 1;
-        else
-            *(registers+rd) = 0;
+	if (interpret) {
+		if (*(registers + rs) < *(registers + rt))
+			*(registers + rd) = 1;
+		else
+			*(registers + rd) = 0;
 
-        pc = pc + 4;
-    }
+		pc = pc + 4;
+	}
 
-    if (debug) {
-        if (interpret) {
-            print((int*) " -> ");
-            printRegister(rd);
-            print((int*) "=");
-            print(itoa(*(registers+rd), string_buffer, 10, 0, 0));
-        }
-        println();
-    }
+	if (debug) {
+		if (interpret) {
+			print((int*) " -> ");
+			printRegister(rd);
+			print((int*) "=");
+			print(itoa(*(registers + rd), string_buffer, 10, 0, 0));
+		}
+		println();
+	}
 }
 
 void op_sw() {
-    int vaddr;
+	int vaddr;
 
-    if (debug) {
-        printOpcode(opcode);
-        print((int*) " ");
-        printRegister(rt);
-        print((int*) ",");
-        print(itoa(signExtend(immediate), string_buffer, 10, 0, 0));
-        print((int*) "(");
-        printRegister(rs);
-        print((int*) ")");
-        if (interpret) {
-            print((int*) ": ");
-            printRegister(rt);
-            print((int*) "=");
-            print(itoa(*(registers+rt), string_buffer, 10, 0, 0));
-            print((int*) ",");
-            printRegister(rs);
-            print((int*) "=");
-            print(itoa(*(registers+rs), string_buffer, 16, 0, 0));
-        }
-    }
+	if (debug) {
+		printOpcode(opcode);
+		print((int*) " ");
+		printRegister(rt);
+		print((int*) ",");
+		print(itoa(signExtend(immediate), string_buffer, 10, 0, 0));
+		print((int*) "(");
+		printRegister(rs);
+		print((int*) ")");
+		if (interpret) {
+			print((int*) ": ");
+			printRegister(rt);
+			print((int*) "=");
+			print(itoa(*(registers + rt), string_buffer, 10, 0, 0));
+			print((int*) ",");
+			printRegister(rs);
+			print((int*) "=");
+			print(itoa(*(registers + rs), string_buffer, 16, 0, 0));
+		}
+	}
 
-    if (interpret) {
-        vaddr = *(registers+rs) + signExtend(immediate);
+	if (interpret) {
+		vaddr = *(registers + rs) + signExtend(immediate);
 
-        storeMemory(vaddr, *(registers+rt));
+		storeMemory(vaddr, *(registers + rt));
 
-        // keep track of number of stores
-        stores = stores + 1;
+		// keep track of number of stores
+		stores = stores + 1;
 
-        *(storesPerAddress + pc / 4) = *(storesPerAddress + pc / 4) + 1;
+		*(storesPerAddress + pc / 4) = *(storesPerAddress + pc / 4) + 1;
 
-        pc = pc + 4;
-    }
+		pc = pc + 4;
+	}
 
-    if (debug) {
-        if (interpret) {
-            print((int*) " -> memory[vaddr=");
-            print(itoa(vaddr, string_buffer, 16, 0, 0));
-            print((int*) "]=");
-            print(itoa(*(registers+rt), string_buffer, 10, 0, 0));
-            print((int*) "=");
-            printRegister(rt);
-        }
-        println();
-    }
+	if (debug) {
+		if (interpret) {
+			print((int*) " -> memory[vaddr=");
+			print(itoa(vaddr, string_buffer, 16, 0, 0));
+			print((int*) "]=");
+			print(itoa(*(registers + rt), string_buffer, 10, 0, 0));
+			print((int*) "=");
+			printRegister(rt);
+		}
+		println();
+	}
 }
 
 void fct_teq() {
-    if (debug) {
-        printFunction(function);
-        print((int*) " ");
-        printRegister(rs);
-        print((int*) ",");
-        printRegister(rt);
-        if (interpret) {
-            print((int*) ": ");
-            printRegister(rs);
-            print((int*) "=");
-            print(itoa(*(registers+rs), string_buffer, 10, 0, 0));
-            print((int*) ",");
-            printRegister(rt);
-            print((int*) "=");
-            print(itoa(*(registers+rt), string_buffer, 10, 0, 0));
-        }
-    }
+	if (debug) {
+		printFunction(function);
+		print((int*) " ");
+		printRegister(rs);
+		print((int*) ",");
+		printRegister(rt);
+		if (interpret) {
+			print((int*) ": ");
+			printRegister(rs);
+			print((int*) "=");
+			print(itoa(*(registers + rs), string_buffer, 10, 0, 0));
+			print((int*) ",");
+			printRegister(rt);
+			print((int*) "=");
+			print(itoa(*(registers + rt), string_buffer, 10, 0, 0));
+		}
+	}
 
-    if (interpret) {
-        if (*(registers+rs) == *(registers+rt))
-            exception_handler(EXCEPTION_SIGNAL);
+	if (interpret) {
+		if (*(registers + rs) == *(registers + rt))
+			exception_handler(EXCEPTION_SIGNAL);
 
-        pc = pc + 4;
-    }
+		pc = pc + 4;
+	}
 
-    if (debug)
-        println();
+	if (debug)
+		println();
 }
 
 // -----------------------------------------------------------------
@@ -5243,76 +5308,76 @@ void fetch() {
 }
 
 void execute() {
-    if (debug)
-        if (sourceLineNumber != (int*) 0) {
-            print(binaryName);
-            print((int*) ": ");
-        }
+	if (debug)
+		if (sourceLineNumber != (int*) 0) {
+			print(binaryName);
+			print((int*) ": ");
+		}
 
-    if (interpret)
-        if (debug)
-            print((int*) "$pc=");
+	if (interpret)
+		if (debug)
+			print((int*) "$pc=");
 
-    if (debug) {
-        print(itoa(pc, string_buffer, 16, 8, 0));
-        if (sourceLineNumber != (int*) 0) {
-            print((int*) "(~");
-            print(itoa(*(sourceLineNumber + pc / 4), string_buffer, 10, 0, 0));
-            print((int*) ")");
-        }
-        print((int*) ": ");
-    }
+	if (debug) {
+		print(itoa(pc, string_buffer, 16, 8, 0));
+		if (sourceLineNumber != (int*) 0) {
+			print((int*) "(~");
+			print(itoa(*(sourceLineNumber + pc / 4), string_buffer, 10, 0, 0));
+			print((int*) ")");
+		}
+		print((int*) ": ");
+	}
 
-    if (opcode == OP_SPECIAL) {
-        if (function == FCT_NOP) {
-            fct_nop();
-        } else if (function == FCT_ADDU) {
-            fct_addu();
-        } else if (function == FCT_SUBU) {
-            fct_subu();
-        } else if (function == FCT_MULTU) {
-            fct_multu();
-        } else if (function == FCT_DIVU) {
-            fct_divu();
-        } else if (function == FCT_MFHI) {
-            fct_mfhi();
-        } else if (function == FCT_MFLO) {
-            fct_mflo();
-        } else if (function == FCT_SLT) {
-            fct_slt();
-        } else if (function == FCT_JR) {
-            fct_jr();
-        } else if (function == FCT_SYSCALL) {
-            fct_syscall();
-        } else if (function == FCT_TEQ) {
-            fct_teq();
-        } else {
-            exception_handler(EXCEPTION_UNKNOWNINSTRUCTION);
-        }
-    } else if (opcode == OP_ADDIU) {
-        op_addiu();
-    } else if (opcode == OP_LW) {
-        op_lw();
-    } else if (opcode == OP_SW) {
-        op_sw();
-    } else if (opcode == OP_BEQ) {
-        op_beq();
-    } else if (opcode == OP_BNE) {
-        op_bne();
-    } else if (opcode == OP_JAL) {
-        op_jal();
-    } else if (opcode == OP_J) {
-        op_j();
-    } else {
-        exception_handler(EXCEPTION_UNKNOWNINSTRUCTION);
-    }
+	if (opcode == OP_SPECIAL) {
+		if (function == FCT_NOP) {
+			fct_nop();
+		} else if (function == FCT_ADDU) {
+			fct_addu();
+		} else if (function == FCT_SUBU) {
+			fct_subu();
+		} else if (function == FCT_MULTU) {
+			fct_multu();
+		} else if (function == FCT_DIVU) {
+			fct_divu();
+		} else if (function == FCT_MFHI) {
+			fct_mfhi();
+		} else if (function == FCT_MFLO) {
+			fct_mflo();
+		} else if (function == FCT_SLT) {
+			fct_slt();
+		} else if (function == FCT_JR) {
+			fct_jr();
+		} else if (function == FCT_SYSCALL) {
+			fct_syscall();
+		} else if (function == FCT_TEQ) {
+			fct_teq();
+		} else {
+			exception_handler(EXCEPTION_UNKNOWNINSTRUCTION);
+		}
+	} else if (opcode == OP_ADDIU) {
+		op_addiu();
+	} else if (opcode == OP_LW) {
+		op_lw();
+	} else if (opcode == OP_SW) {
+		op_sw();
+	} else if (opcode == OP_BEQ) {
+		op_beq();
+	} else if (opcode == OP_BNE) {
+		op_bne();
+	} else if (opcode == OP_JAL) {
+		op_jal();
+	} else if (opcode == OP_J) {
+		op_j();
+	} else {
+		exception_handler(EXCEPTION_UNKNOWNINSTRUCTION);
+	}
 
-    if (interpret == 0) {
-        if (pc == codeLength - 4)
-            halt = 1;
-        else
-            pc = pc + 4;
-    }
+	if (interpret == 0) {
+		if (pc == codeLength - 4)
+			halt = 1;
+		else
+			pc = pc + 4;
+	}
 }
 
 void run() {
@@ -5539,36 +5604,37 @@ void printProfile(int *message, int total, int *counters) {
 }
 
 void disassemble() {
-    assemblyFD = open(assemblyName, O_CREAT_WRONLY_TRUNC, S_IRUSR_IWUSR_IRGRP_IROTH);
+	assemblyFD = open(assemblyName, O_CREAT_WRONLY_TRUNC,
+			S_IRUSR_IWUSR_IRGRP_IROTH);
 
-    if (assemblyFD < 0) {
-        print(selfieName);
-        print((int*) ": could not create assembly output file ");
-        print(assemblyName);
-        println();
+	if (assemblyFD < 0) {
+		print(selfieName);
+		print((int*) ": could not create assembly output file ");
+		print(assemblyName);
+		println();
 
-        exit(-1);
-    }
+		exit(-1);
+	}
 
-    print(selfieName);
-    print((int*) ": writing assembly into output file ");
-    print(assemblyName);
-    println();
+	print(selfieName);
+	print((int*) ": writing assembly into output file ");
+	print(assemblyName);
+	println();
 
-    outputName = assemblyName;
-    outputFD   = assemblyFD;
+	outputName = assemblyName;
+	outputFD = assemblyFD;
 
-    interpret = 0;
-    debug     = 1;
+	interpret = 0;
+	debug = 1;
 
-    copyBinaryToMemory();
-    
-    resetInterpreter();
+	copyBinaryToMemory();
 
-    run();
+	resetInterpreter();
 
-    outputName = (int*) 0;
-    outputFD   = 1;
+	run();
+
+	outputName = (int*) 0;
+	outputFD = 1;
 }
 
 void emulate(int argc, int *argv) {
@@ -5635,7 +5701,7 @@ void iter_list(int* list) {
 
 	while ((int) cursor != 0) {
 		print(itoa(*cursor, string_buffer, 10, 0, 0));
-		cursor = *(cursor + 4);
+		cursor = (int*) *(cursor + 4);
 		print((int*) "\n");
 	}
 
@@ -5648,18 +5714,18 @@ int* insert_process(int pc, int* reg, int* seg, int* prev, int* next, int pid) {
 
 	node = malloc(6 * 4);
 
-	*(node + PROC_OFF_PC) = pc;
-	*(node + PROC_OFF_REG) = (int) reg;
-	*(node + PROC_OFF_SEG) = (int) seg;
-	*(node + PROC_OFF_PREV) = (int) prev;
-	*(node + PROC_OFF_NEXT) = (int) next;
-	*(node + PROC_OFF_PID) = pid;
+	setPC(node, pc);
+	setRegisters(node, (int) reg);
+	setSegment(node, seg);
+	setPrev(node, prev);
+	setNextProc(node, next);
+	setPID(node, pid);
 
 	if ((int) prev != 0) {
-		*(prev + PROC_OFF_NEXT) = (int) node;
+		setNextProc(prev, (int) node);
 	}
 	if ((int) next != 0) {
-		*(next + PROC_OFF_PREV) = (int) node;
+		setPrev(next, (int) node);
 	}
 
 	return node;
@@ -5671,19 +5737,19 @@ int* insert_process_wait(int pc, int* reg, int* seg, int* prev, int* next,
 
 	node = malloc(7 * 4);
 
-	*(node + PROC_OFF_PC) = pc;
-	*(node + PROC_OFF_REG) = (int) reg;
-	*(node + PROC_OFF_SEG) = (int) seg;
-	*(node + PROC_OFF_PREV) = (int) prev;
-	*(node + PROC_OFF_NEXT) = (int) next;
-	*(node + PROC_OFF_PID) = pid;
-	*(node + PROC_OFF_WAIT_FOR_PID) = wait_for_pid;
+	setPC(node, pc);
+	setRegisters(node, (int) reg);
+	setSegment(node, seg);
+	setPrev(node, prev);
+	setNextProc(node, next);
+	setPID(node, pid);
+	setPIDWait(node, wait_for_pid);
 
 	if ((int) prev != 0) {
-		*(prev + PROC_OFF_NEXT) = (int) node;
+		setNextProc(prev, (int) node);
 	}
 	if ((int) next != 0) {
-		*(next + PROC_OFF_PREV) = (int) node;
+		setPrev(next, (int) node);
 	}
 
 	return node;
@@ -5699,7 +5765,7 @@ int* get_proc_by_pid(int* list, int pid, int next_offset, int pid_offset) {
 			return cursor;
 		}
 
-		cursor = *(cursor + next_offset);
+		cursor = (int*) *(cursor + next_offset);
 	}
 
 	return (int*) 0;
@@ -5734,18 +5800,19 @@ int* remove(int* node, int* list) {
 	if ((int) node == 0)
 		return list;
 
-	next = (int*) *(node + PROC_OFF_NEXT);
-	prev = (int*) *(node + PROC_OFF_PREV);
+	next = (int*) getNextProc(node);
+	prev = (int*) getPrev(node);
 
 	if ((int) prev != 0) {
-		*(prev + PROC_OFF_NEXT) = (int) next;
+		setNextProc(prev, (int) next);
 	} else {
 		list = next;
 	}
 
 	if ((int) next != 0) {
-		*(next + PROC_OFF_PREV) = (int) prev;
+		setPrev(next, (int) prev);
 	}
+
 	return list;
 }
 
@@ -5762,133 +5829,133 @@ void printLists() {
 // -----------------------------------------------------------------
 
 int selfie(int argc, int* argv) {
-    if (argc < 2)
-        return -1;
-    else {
-        while (argc >= 2) {
-            if (stringCompare((int*) *argv, (int*) "-c")) {
-                sourceName = (int*) *(argv+1);
-                binaryName = sourceName;
+	if (argc < 2)
+		return -1;
+	else {
+		while (argc >= 2) {
+			if (stringCompare((int*) *argv, (int*) "-c")) {
+				sourceName = (int*) *(argv + 1);
+				binaryName = sourceName;
 
-                argc = argc - 2;
-                argv = argv + 2;
+				argc = argc - 2;
+				argv = argv + 2;
 
-                compile();
-            } else if (stringCompare((int*) *argv, (int*) "-o")) {
-                binaryName = (int*) *(argv+1);
+				compile();
+			} else if (stringCompare((int*) *argv, (int*) "-o")) {
+				binaryName = (int*) *(argv + 1);
 
-                argc = argc - 2;
-                argv = argv + 2;
+				argc = argc - 2;
+				argv = argv + 2;
 
-                if (binaryLength > 0)
-                    emit();
-                else {                    
-                    print(selfieName);
-                    print((int*) ": nothing to emit to output file ");
-                    print(binaryName);
-                    println();
-                }
-            } else if (stringCompare((int*) *argv, (int*) "-s")) {
-                assemblyName = (int*) *(argv+1);
+				if (binaryLength > 0)
+					emit();
+				else {
+					print(selfieName);
+					print((int*) ": nothing to emit to output file ");
+					print(binaryName);
+					println();
+				}
+			} else if (stringCompare((int*) *argv, (int*) "-s")) {
+				assemblyName = (int*) *(argv + 1);
 
-                argc = argc - 2;
-                argv = argv + 2;
+				argc = argc - 2;
+				argv = argv + 2;
 
-                if (binaryLength > 0) {
-                    initMemory(binaryLength);
+				if (binaryLength > 0) {
+					initMemory(binaryLength);
 
-                    disassemble();
-                } else {
-                    print(selfieName);
-                    print((int*) ": nothing to disassemble to output file ");
-                    print(assemblyName);
-                    println();
-                }
-            } else if (stringCompare((int*) *argv, (int*) "-l")) {
-                binaryName = (int*) *(argv+1);
+					disassemble();
+				} else {
+					print(selfieName);
+					print((int*) ": nothing to disassemble to output file ");
+					print(assemblyName);
+					println();
+				}
+			} else if (stringCompare((int*) *argv, (int*) "-l")) {
+				binaryName = (int*) *(argv + 1);
 
-                argc = argc - 2;
-                argv = argv + 2;
+				argc = argc - 2;
+				argv = argv + 2;
 
-                load();
-            } else if (stringCompare((int*) *argv, (int*) "-m")) {
-                initMemory(atoi((int*) *(argv+1)) * MEGABYTE);
+				load();
+			} else if (stringCompare((int*) *argv, (int*) "-m")) {
+				initMemory(atoi((int*) *(argv + 1)) * MEGABYTE);
 
-                argc = argc - 1;
-                argv = argv + 1;
+				argc = argc - 1;
+				argv = argv + 1;
 
-                // pass binaryName as first argument replacing size
-                *argv = (int) binaryName;
+				// pass binaryName as first argument replacing size
+				*argv = (int) binaryName;
 
-                if (binaryLength > 0) {
-                    debug = 0;
+				if (binaryLength > 0) {
+					debug = 0;
 
-                    emulate(argc, argv);
-                } else {
-                    print(selfieName);
-                    print((int*) ": nothing to emulate");
-                    println();
+					emulate(argc, argv);
+				} else {
+					print(selfieName);
+					print((int*) ": nothing to emulate");
+					println();
 
-                    exit(-1);
-                }
+					exit(-1);
+				}
 
-                return 0;
-            } else if (stringCompare((int*) *argv, (int*) "-d")) {
-                initMemory(atoi((int*) *(argv+1)) * MEGABYTE);
+				return 0;
+			} else if (stringCompare((int*) *argv, (int*) "-d")) {
+				initMemory(atoi((int*) *(argv + 1)) * MEGABYTE);
 
-                argc = argc - 1;
-                argv = argv + 1;
+				argc = argc - 1;
+				argv = argv + 1;
 
-                // pass binaryName as first argument replacing size
-                *argv = (int) binaryName;
+				// pass binaryName as first argument replacing size
+				*argv = (int) binaryName;
 
-                if (binaryLength > 0) {
-                    debug = 1;
+				if (binaryLength > 0) {
+					debug = 1;
 
-                    emulate(argc, argv);
-                } else {
-                    print(selfieName);
-                    print((int*) ": nothing to debug");
-                    println();
+					emulate(argc, argv);
+				} else {
+					print(selfieName);
+					print((int*) ": nothing to debug");
+					println();
 
-                    exit(-1);
-                }
+					exit(-1);
+				}
 
-                return 0;
-            } else if (stringCompare((int*) *argv, (int*) "-k")) {
-                print(selfieName);
-                print((int*) ": selfie -k size ... not yet implemented");
-                println();
+				return 0;
+			} else if (stringCompare((int*) *argv, (int*) "-k")) {
+				print(selfieName);
+				print((int*) ": selfie -k size ... not yet implemented");
+				println();
 
-                return 0;
-            } else
-                return -1;
-        }
-    }
+				return 0;
+			} else
+				return -1;
+		}
+	}
 
-    return 0;
+	return 0;
 }
 
 int main(int argc, int *argv) {
-    initLibrary();
+	initLibrary();
 
-    initScanner();
-    
-    initRegister();
-    initDecoder();
-    
-    initInterpreter();
+	initScanner();
 
-    selfieName = (int*) *argv;
+	initRegister();
+	initDecoder();
 
-    argc = argc - 1;
-    argv = argv + 1;
+	initInterpreter();
 
-    if (selfie(argc, (int*) argv) != 0) {
-        print(selfieName);
-        print((int*) ": usage: selfie { -c source | -o binary | -s assembly | -l binary } [ -m size ... | -d size ... | -k size ... ] ");
-        println();
-    }
+	selfieName = (int*) *argv;
+
+	argc = argc - 1;
+	argv = argv + 1;
+
+	if (selfie(argc, (int*) argv) != 0) {
+		print(selfieName);
+		print(
+				(int*) ": usage: selfie { -c source | -o binary | -s assembly | -l binary } [ -m size ... | -d size ... | -k size ... ] ");
+		println();
+	}
 }
-
 
