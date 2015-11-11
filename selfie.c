@@ -4058,9 +4058,10 @@ void emitGetpid()
 
 void syscall_getpid()
 {
-    print((int*)"[PID] ");
+    print((int*)"getpid() [PID]: ");
     print(itoa(os_pId, string_buffer, 10, 0, 0));
     println();
+    *(registers + REG_V0) = os_pId;
 }
 
 void emitExit()
@@ -5832,6 +5833,8 @@ void os_prepare()
 //		+----------------+
 //      |   pid	     	 |
 //		+----------------+
+//		|   parent id    | //If 0 OS is the parent else we are a child
+//		+----------------+
 //-----------------------------------------------------//
 //We Assume that createProcess only get called
 //on emulator start, so we set the pc and reg
@@ -5844,12 +5847,12 @@ void os_createProcess()
     seg = os_kmalloc(os_segSize);
     os_readyCtr = os_readyCtr + 1;
     if (os_readyQ == 0) {
-        newP = os_createLList(4);
+        newP = os_createLList(5);
         os_readyQ = newP;
         os_pId = 1;
     }
     else {
-        newP = os_addNodeToLList(4, os_readyQ);
+        newP = os_addNodeToLList(5, os_readyQ);
         os_pId = os_pId + 1;
     }
     dRegister = malloc(32 * 4);
@@ -5857,6 +5860,7 @@ void os_createProcess()
     os_setListEntry(2, (int)dRegister, newP);
     os_setListEntry(3, seg, newP);
     os_setListEntry(4, os_pId, newP);
+    os_setListEntry(5, 0, newP);
 
     pc = os_getListEntry(1, newP);
     registers = (int*)os_getListEntry(2, newP);
