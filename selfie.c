@@ -31,9 +31,9 @@
 // into the emulator. Selfie is meant to be extended in numerous ways.
 //
 // C* is a tiny Turing-complete subset of C that includes dereferencing
-// (the * operator) but excludes data structures, Boolean expressions, and
-// many other features. There are only signed 32-bit integers and pointers,
-// and character constants for constructing word-aligned strings manually.
+// (the * operator) but excludes data structures, bitwise and Boolean
+// operators, and many other features. There are only signed 32-bit
+// integers and pointers as well as character and string constants.
 // This choice turns out to be helpful for students to understand the
 // true role of composite data structures such as arrays and records.
 // Bitwise operations are implemented in libcstar using signed integer
@@ -62,6 +62,9 @@
 // Selfie is the result of many years of teaching systems engineering.
 // The design of the compiler is inspired by the Oberon compiler of
 // Professor Niklaus Wirth from ETH Zurich.
+
+int *selfieName = (int*) 0;
+int isEmulator = 0;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -165,12 +168,15 @@ void initLibrary() {
 // -----------------------------------------------------------------
 
 void initScanner();
+void resetScanner();
 
 void printSymbol(int symbol);
 void printLineNumber(int* message);
 
 void syntaxErrorMessage(int *message);
 void syntaxErrorCharacter(int character);
+
+void getCharacter();
 
 int isCharacterWhitespace();
 int findNextCharacter();
@@ -180,11 +186,10 @@ int isCharacterLetterOrDigitOrUnderscore();
 int isNotDoubleQuoteOrEOF();
 int identifierStringMatch(int stringIndex);
 int identifierOrKeyword();
+
 int getSymbol();
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
-
-int isEmulator = 0;
 
 int SYM_EOF          = -1; // end of file
 int SYM_IDENTIFIER   = 0;  // identifier
@@ -218,9 +223,11 @@ int SYM_STRING       = 27; // string
 
 int *SYMBOLS; // array of strings representing symbols
 
+int *character_buffer; // buffer for reading characters
+
 int maxIdentifierLength = 64; // maximum number of characters in an identifier
 int maxIntegerLength    = 10; // maximum number of characters in an integer
-int maxStringLength     = 64; // maximum number of characters in a string
+int maxStringLength     = 128; // maximum number of characters in a string
 
 // ------------------------ GLOBAL VARIABLES -----------------------
 
@@ -239,6 +246,9 @@ int isINTMINConstant    = 0;
 
 int character; // most recently read character
 int symbol;    // most recently recognized symbol
+
+int *sourceName = (int*) 0; // name of source file
+int sourceFD    = 0;        // file descriptor of source file
 
 // ------------------------- INITIALIZATION ------------------------
 
@@ -274,13 +284,24 @@ void initScanner () {
     *(SYMBOLS + SYM_CHARACTER)    = (int) "character";
     *(SYMBOLS + SYM_STRING)       = (int) "string";
 
-    character  = getchar();
-    symbol     = SYM_EOF;
+    character_buffer = malloc(1);
+
+    character = CHAR_EOF;
+    symbol    = SYM_EOF;
+}
+
+void resetScanner() {
+    lineNumber = 1;
+
+    getCharacter();
+    getSymbol();
 }
 
 // -----------------------------------------------------------------
 // ------------------------- SYMBOL TABLE --------------------------
 // -----------------------------------------------------------------
+
+void resetGlobalSymbolTable();
 
 void createSymbolTableEntry(int which, int *string, int data, int class, int type, int value);
 int* getSymbolTableEntry(int *string, int class, int *symbol_table);
@@ -323,11 +344,15 @@ int LOCAL_TABLE  = 2;
 int *global_symbol_table = (int*) 0;
 int *local_symbol_table  = (int*) 0;
 
+// ------------------------- INITIALIZATION ------------------------
+
+void resetGlobalSymbolTable() {
+    global_symbol_table = (int*) 0;
+}
+
 // -----------------------------------------------------------------
 // ---------------------------- PARSER -----------------------------
 // -----------------------------------------------------------------
-
-void initParser();
 
 int isNotRbraceOrEOF();
 int isExpression();
@@ -371,10 +396,6 @@ void gr_initialization(int *name, int offset, int type);
 void gr_procedure(int *procedure, int returnType);
 void gr_cstar();
 
-// ------------------------ GLOBAL CONSTANTS -----------------------
-
-int maxBinaryLength;
-
 // ------------------------ GLOBAL VARIABLES -----------------------
 
 int allocatedTemporaries = 0; // number of allocated temporaries
@@ -386,20 +407,18 @@ int returnBranches  = 0; // fixup chain for return statements
 
 int *currentProcedureName = (int*) 0; // name of currently parsed procedure
 
-// ------------------------- INITIALIZATION ------------------------
-
-void
-initParser() {
-    // set maximum code length in bytes for emitting code
-    maxBinaryLength = twoToThePowerOf(17);
-}
-
 // -----------------------------------------------------------------
 // ---------------------- MACHINE CODE LIBRARY ---------------------
 // -----------------------------------------------------------------
 
 void emitLeftShiftBy(int b);
 void emitMainEntry();
+
+// -----------------------------------------------------------------
+// ----------------------------- MAIN ------------------------------
+// -----------------------------------------------------------------
+
+void compile();
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -458,37 +477,37 @@ void initRegister() {
     REGISTERS = malloc(32*4);
 
     *(REGISTERS + REG_ZR) = (int) "$zero";
-    *(REGISTERS + REG_AT) = (int) "$at ";
-    *(REGISTERS + REG_V0) = (int) "$v0 ";
-    *(REGISTERS + REG_V1) = (int) "$v1 ";
-    *(REGISTERS + REG_A0) = (int) "$a0 ";
-    *(REGISTERS + REG_A1) = (int) "$a1 ";
-    *(REGISTERS + REG_A2) = (int) "$a2 ";
-    *(REGISTERS + REG_A3) = (int) "$a3 ";
-    *(REGISTERS + REG_T0) = (int) "$t0 ";
-    *(REGISTERS + REG_T1) = (int) "$t1 ";
-    *(REGISTERS + REG_T2) = (int) "$t2 ";
-    *(REGISTERS + REG_T3) = (int) "$t3 ";
-    *(REGISTERS + REG_T4) = (int) "$t4 ";
-    *(REGISTERS + REG_T5) = (int) "$t5 ";
-    *(REGISTERS + REG_T6) = (int) "$t6 ";
-    *(REGISTERS + REG_T7) = (int) "$t7 ";
-    *(REGISTERS + REG_S0) = (int) "$s0 ";
-    *(REGISTERS + REG_S1) = (int) "$s1 ";
-    *(REGISTERS + REG_S2) = (int) "$s2 ";
-    *(REGISTERS + REG_S3) = (int) "$s3 ";
-    *(REGISTERS + REG_S4) = (int) "$s4 ";
-    *(REGISTERS + REG_S5) = (int) "$s5 ";
-    *(REGISTERS + REG_S6) = (int) "$s6 ";
-    *(REGISTERS + REG_S7) = (int) "$s7 ";
-    *(REGISTERS + REG_T8) = (int) "$t8 ";
-    *(REGISTERS + REG_T9) = (int) "$t9 ";
-    *(REGISTERS + REG_K0) = (int) "$k0 ";
-    *(REGISTERS + REG_K1) = (int) "$k1 ";
-    *(REGISTERS + REG_GP) = (int) "$gp ";
-    *(REGISTERS + REG_SP) = (int) "$sp ";
-    *(REGISTERS + REG_FP) = (int) "$fp ";
-    *(REGISTERS + REG_RA) = (int) "$ra ";
+    *(REGISTERS + REG_AT) = (int) "$at";
+    *(REGISTERS + REG_V0) = (int) "$v0";
+    *(REGISTERS + REG_V1) = (int) "$v1";
+    *(REGISTERS + REG_A0) = (int) "$a0";
+    *(REGISTERS + REG_A1) = (int) "$a1";
+    *(REGISTERS + REG_A2) = (int) "$a2";
+    *(REGISTERS + REG_A3) = (int) "$a3";
+    *(REGISTERS + REG_T0) = (int) "$t0";
+    *(REGISTERS + REG_T1) = (int) "$t1";
+    *(REGISTERS + REG_T2) = (int) "$t2";
+    *(REGISTERS + REG_T3) = (int) "$t3";
+    *(REGISTERS + REG_T4) = (int) "$t4";
+    *(REGISTERS + REG_T5) = (int) "$t5";
+    *(REGISTERS + REG_T6) = (int) "$t6";
+    *(REGISTERS + REG_T7) = (int) "$t7";
+    *(REGISTERS + REG_S0) = (int) "$s0";
+    *(REGISTERS + REG_S1) = (int) "$s1";
+    *(REGISTERS + REG_S2) = (int) "$s2";
+    *(REGISTERS + REG_S3) = (int) "$s3";
+    *(REGISTERS + REG_S4) = (int) "$s4";
+    *(REGISTERS + REG_S5) = (int) "$s5";
+    *(REGISTERS + REG_S6) = (int) "$s6";
+    *(REGISTERS + REG_S7) = (int) "$s7";
+    *(REGISTERS + REG_T8) = (int) "$t8";
+    *(REGISTERS + REG_T9) = (int) "$t9";
+    *(REGISTERS + REG_K0) = (int) "$k0";
+    *(REGISTERS + REG_K1) = (int) "$k1";
+    *(REGISTERS + REG_GP) = (int) "$gp";
+    *(REGISTERS + REG_SP) = (int) "$sp";
+    *(REGISTERS + REG_FP) = (int) "$fp";
+    *(REGISTERS + REG_RA) = (int) "$ra";
 }
 
 // -----------------------------------------------------------------
@@ -589,414 +608,11 @@ void initDecoder() {
 }
 
 // -----------------------------------------------------------------
-// ---------------------------- MEMORY -----------------------------
-// -----------------------------------------------------------------
-
-void initMemory(int size, int* name);
-
-int tlb(int vaddr);
-
-int  loadMemory(int vaddr);
-void storeMemory(int vaddr, int data);
-
-// ------------------------ GLOBAL VARIABLES -----------------------
-
-int *memory;
-int  memorySize;
-
-int *binaryName;
-int  binaryLength;
-
-// ------------------------- INITIALIZATION ------------------------
-
-void initMemory(int size, int *name) {
-    memory     = malloc(size);
-    memorySize = size;
-
-    binaryName   = name;
-    binaryLength = 0;
-}
-
-
-
-
-
-// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
-// -----------------------------------------------------------------
-// ---------------------------     O S   ---------------------------
-// -----------------------------------------------------------------
-// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
-
-int currentInstCount;
-int *registers; // general purpose registers
-int pc = 0; // program counter
-int debug_load = 0;
-
-int debug_read    = 0;
-int debug_write   = 0;
-int debug_open    = 0;
-int debug_malloc  = 0;
-int debug_getchar = 0;
-int debug_getpid  = 0;
-int debug_gettid  = 0;
-int debug_yield   = 0;
-int debug_lock    = 0; 
-int debug_unlock  = 0;
-int debug_exit    = 1; 
-int debug_sm      = 0;
-int debug_pr      = 0;
-int debug_createThread= 0;
-int debug_registers   = 0;
-int debug_disassemble = 0;
-
-
-
-int pid = 0;                   // last process identifier
-int sr = 0;                    // segment register
-int lock = 0;                  
-int lockthread = 0;            // a lock is identified as (pid, tid)
-
-int segment_size;
-int segmentBumpPointer = 0;
-
-int *readyQ;
-int *blockedQ;
-
-
-// List Operations (generic)
-int* os_createQueue();                     // create empty queue
-int* os_removeQueue(int* list, int* data); // remove element from queue
-int* os_getHead(int* list);                // get current head of queue
-int* os_appendQueue(int* list, int* data); // append element to a queue
-
-// process specific queue functions:
-int* os_searchPqueue(int* list, int key);  //  search process queue for given pid
-void os_printQueue(int* list, int qnr);
-
-// process functions
-int* os_createProcess();                   // create new process element
-int  os_getProcessID(int* process);        // get pid for a given process
-int  os_getProcessPc(int* process);        // get program counter of process object
-int* os_getProcessRegister(int* process);  // get pointer to registers of a process
-int  os_getProcessSegment(int* process);   // get pointer to memory of a given process
-int  os_getProcessTID(int* process);        // get Thread identifer 
-int  os_getProcessThreadNumber(int* process); 
-int  os_getProcessSegmentRegister(int* process); 
-
-// functions for process scheduling:
-void os_restoreContext();                  //  restore context (reg,mem,pc) of a given process
-void os_saveContext();                     // save context of current process
-int  os_contextSwitch(int notTerminated);  // carry out a context switch
-int  os_kmalloc();                         // allocate segment memory
-void os_fifo();                            // process scheduling modelled after fifo queue
-
-
-// create and initialize a queue, return pointer to it.
-// a queue consists of a pointer to a head and a tail.
-int* os_createQueue() {
-    int *q;
-    q = (int*)malloc(2*4);
-    *(q + 0) = 0;             // head
-    *(q + 1) = 0;             // tail
-    return q;
-}
-
-// remove element data from list
-int* os_removeQueue(int* list, int* data) {
-    int *prev;
-    int *next;
-    int *tmp;
-
-    if (*list == 0) {
-       return (int*)0;
-    }
-
-    if ((int)data == 0) {
-        return (int*)0;
-    }
-
-    if ((int)data == *list) {      // case 1: we must remove the head
-        // data is head (?)
-        *list = *data;
-        tmp = (int*)*list;
-
-
-         if ((int)tmp != 0) {
-            *(tmp+1) = 0;          // set prev from new head element
-        }
-        if ((int)data == *(list+1)) {
-            *(list+1) = 0;
-        }
-    } else if ((int)data == *(list + 1)) {// case 2: we must remove the tail
-        *(list+1) = *(data + 1);
-        tmp = (int*)*(list + 1);
-        *tmp = 0;
-    } else {                       // case 3: we must remove in between.
-        prev = (int*)*(data + 1);
-        next = (int*)*(data + 0);
-        *prev = (int)next;
-        *(next + 1) = (int)prev;
-    }
-    return data;
-}
-
-// getHead: get head of list
-int* os_getHead(int* list) {
-    return (int*)*list;
-}
-
-
-// getHead: get head of list
-int* os_getTail(int* list) {
-    return (int*)*(list+1);
-}
-
-
-// append:  append a data object 'data' to the list
-int* os_appendQueue(int* list, int* data) {
-    int* head;
-    int* tail;
-    int tmp;
-
-    *data    = 0;                // next
-    *(data+1)= 0;                // prev
-    head = (int*)*(list + 0);
-    tail = (int*)*(list + 1);
-
-    if ((int)head == 0) {
-        // list is empty!
-        *list = (int)data;
-        *(list + 1) = (int)data;
-        return data;
-    } else {
-        tmp = (int)tail;
-        *tail = (int)data;
-        *(list+1) = (int)data;
-        *(data+1) = (int)tmp;
-    }
-    return (int*)0;
-}
-
-
-// search process queue, key is a PID
-// important: list must be a list of 'process'-records.
-int* os_searchPqueue(int* list, int key) {
-    int* q;
-
-    q = (int*)*list;
-
-    while ((int)q != 0) {
-        if (*(q + 2) == key)
-            return q;
-        q = (int*)*q;
-    }
-    return (int*)0;
-}
-
-void os_printQueue(int* list, int qnr) {
-    int* q;
-    int* tail;
-    q = os_getHead(list);
-    tail = os_getTail(list);
-
-    if ((int)q == 0)
-        return;
-
-    if (qnr == 1) {
-        print((int*) "[PR] Ready Queue: ");
-    } else if (qnr == 2) {
-        print((int*) "[PR] Blocked Queue: ");
-    } 
-    while (q != tail) {
-        print(itoa(os_getProcessID(q), string_buffer, 10, 0));
-        putchar('[');
-        print(itoa(os_getProcessTID(q), string_buffer, 10, 0));
-        putchar(']');
-        putchar(',');
-        q = (int*)*q;
-    }
-    print(itoa(os_getProcessID(q), string_buffer, 10, 0));
-        putchar('[');
-        print(itoa(os_getProcessTID(q), string_buffer, 10, 0));
-        putchar(']');
-
-    println();
-}
-
-// process:  create a new process object:
-// return :  return pointer to the new prrocess
-// +-------------------+
-// |0 next pointer     |
-// |1 prev pointer     |
-// |2 process id       |
-// |3 program counter  |
-// |4 register ptr     |
-// |5 segment register |
-// |6 thread id        |      // if it's a process, then thread id == 0.  
-// |7 thread number    |      // store number of 'client' threads
-// +-------------------+
-int* os_createProcess() {
-    int *new;
-    new = malloc(8*4);
-
-    pid = pid + 1;   // use 0 for the operating system
-
-    *(new + 0) = 0;                  // next pointer
-    *(new + 1) = 0;                  // prev pointer
-    *(new + 2) = pid;                // PID
-    *(new + 3) = 0;                  // PC
-    *(new + 4) = (int)malloc(32*4);  // registers
-    *(new + 5) = sr;                 // segment register
-    *(new + 6) = 0;                  // thread identifier
-    *(new + 7) = 0;                  // parent process/thread
-
-    *(registers + REG_ZR) = 0;
-
-    if (debug_pr) {
-        print((int*) "[PR] create process/thread ");
-    	itoa(pid, string_buffer, 10, 2);
-        print(string_buffer);
-        putchar(CHAR_LF);
-    }
-    if (debug_sm) {
-        print((int*) "[SM] Current SR: ");
-        print(itoa(sr, string_buffer, 10, 10));
-        println();
-    }
-    return new;
-
-}
-
-int os_getProcessThreadNumber(int* process) { 
-  return *(process + 7);
-}
-
-int* os_createThread(int* parent) {
-    int* thread;
-    int* parentRegs;
-    int* threadRegs; 
-    int seg; 
-    thread = os_createProcess(); 
-
-    parentRegs = (int*)*(parent + 4); 
-    threadRegs = (int*)*(thread + 4);
-
-    *(thread + 2) = os_getProcessID(parent);             // threads have the same PID
-    *(thread + 3) = 0; 
-    *(thread + 6) = os_getProcessThreadNumber(parent) + 1;  
-    *(thread + 5) = os_getProcessSegmentRegister(parent); 
-
-    *(parent + 7) = *(parent + 7) + 1;                  // update thread counter
-
-    seg = os_kmalloc(); 
-
-    *(threadRegs + 0) = 0;
-    *(threadRegs+REG_GP) = *(parentRegs+REG_GP);
-    *(threadRegs+REG_K1) = *(parentRegs+REG_K1);
-    *(threadRegs+REG_SP) = seg + segment_size - 4 - os_getProcessSegmentRegister(parent);
-
-    return thread;
-}
-
-int os_getProcessSegmentRegister(int* process) {
-    return *(process + 5);
-}
-
-
-int os_getProcessTID(int* process) {
-    return *(process + 6);
-}
-
-int os_getProcessID(int* process) {
-    return *(process + 2);
-}
-
-int os_getProcessPc(int* process) {
-    return *(process + 3);
-}
-
-int* os_getProcessRegister(int* process) {
-    return (int*)*(process + 4);
-}
-
-int os_getProcessSegment(int* process) {
-    return *(process + 5);
-}
-
-// Restore Context from Head Process
-void os_restoreContext() {
-    int *process;
-
-    process = os_getHead(readyQ);
-
-    if ((int)process == 0) {
-        process = os_getHead(blockedQ);
-        if ((int) process == 0) { 
-             exit(0);
-        }
-        os_appendQueue(readyQ, process);
-    }
-    pc = os_getProcessPc(process);
-    registers = os_getProcessRegister(process);
-    sr = os_getProcessSegment(process);
-}
-
-// save context of current process
-void os_saveContext() {
-    int *process;
-    process = os_getHead(readyQ);
-    *(process + 3) = pc;
-}
-
-
-void os_printSwitch(int *process) {
-    if (debug_pr) {
-        os_printQueue(readyQ, 1);
-        print((int*) "[PR] switch to PID ");
-        itoa(os_getProcessID(process), string_buffer, 10, 2);
-        print(string_buffer);
-        print((int*) ", with thread id: ");
-        itoa(os_getProcessTID(process), string_buffer, 10, 2);
-        print(string_buffer);
-        putchar(CHAR_LF);
-    }
-}
-
-int os_contextSwitch(int notTerminated) {
-    int *process;
-    int newpid;
-
-    // save old context
-    if (notTerminated) {
-        os_saveContext();
-	os_fifo();
-    }
-
-    os_restoreContext();
-    process = os_getHead(readyQ);
-    os_printSwitch(process);
-    return os_getProcessID(process);
-}
-
-void os_fifo() {
-    int *headp;
-    headp = os_getHead(readyQ);
-    os_removeQueue(readyQ, headp);
-    os_appendQueue(readyQ, headp);
-}
-
-
-int os_kmalloc() {
-    int old;
-    old = segmentBumpPointer;
-    segmentBumpPointer = segmentBumpPointer + segment_size;
-    return old;
-}
-
-
-// -----------------------------------------------------------------
 // ---------------------------- BINARY -----------------------------
 // -----------------------------------------------------------------
+
+int  loadBinary(int addr);
+void storeBinary(int addr, int instruction);
 
 void emitInstruction(int instruction);
 void emitRFormat(int opcode, int rs, int rt, int rd, int function);
@@ -1007,10 +623,22 @@ void fixup_relative(int fromAddress);
 void fixup_absolute(int fromAddress, int toAddress);
 void fixlink_absolute(int fromAddress, int toAddress);
 
-int copyStringToMemory(int *s, int a);
+int copyStringToBinary(int *s, int a);
 
-void emitBinary();
-void loadBinary();
+void emitGlobalsStrings();
+
+void emit();
+void load();
+
+// ------------------------ GLOBAL CONSTANTS -----------------------
+
+int maxBinaryLength = 131072; // 128KB
+
+// ------------------------ GLOBAL VARIABLES -----------------------
+
+int *binary       = (int*) 0;
+int  binaryLength = 0;
+int *binaryName   = (int*) 0;
 
 // -----------------------------------------------------------------
 // --------------------------- SYSCALLS ----------------------------
@@ -1031,9 +659,6 @@ void syscall_open();
 void emitMalloc();
 void syscall_malloc();
 
-void emitGetchar();
-void syscall_getchar();
-
 void emitPutchar();
 
 void emitGetpid();
@@ -1048,31 +673,61 @@ void syscall_lock();
 void emitUnlock();
 void syscall_unlock();
 
-void emitCreateThread();
-void syscall_CreateThread();
+void emitFork();
+void syscall_fork();
 
-void emitGettid();
-void syscall_gettid();
+void emitWait();
+void syscall_wait();
+
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int SYSCALL_EXIT    = 4001;
+int SYSCALL_FORK    = 4002;
 int SYSCALL_READ    = 4003;
 int SYSCALL_WRITE   = 4004;
 int SYSCALL_OPEN    = 4005;
+int SYSCALL_WAIT    = 4007;
 int SYSCALL_GETPID  = 4020;
 int SYSCALL_YIELD   = 4162;
 int SYSCALL_MALLOC  = 5001;
-int SYSCALL_GETCHAR = 5002;
-int SYSCALL_LOCK    = 6000; 
-int SYSCALL_UNLOCK  = 6001; 
-int SYSCALL_CREATETHREAD = 6002; 
-int SYSCALL_GETTID  = 6003; 
+int SYSCALL_LOCK    = 6000;
+int SYSCALL_UNLOCK  = 6001;
+
+
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
 // -----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+
+// -----------------------------------------------------------------
+// ---------------------------- MEMORY -----------------------------
+// -----------------------------------------------------------------
+
+void initMemory(int megabytes);
+
+int tlb(int vaddr);
+
+int  loadMemory(int vaddr);
+void storeMemory(int vaddr, int data);
+
+// ------------------------ GLOBAL VARIABLES -----------------------
+
+int  memorySize;
+int *memory;
+
+// ------------------------- INITIALIZATION ------------------------
+
+void initMemory(int megabytes) {
+    if (megabytes < 0)
+        megabytes = 64;
+    else if (megabytes > 1024)
+        megabytes = 1024;
+
+    memorySize = megabytes * 1024 * 1024;
+    memory     = malloc(memorySize);
+}
 
 // -----------------------------------------------------------------
 // ------------------------- INSTRUCTIONS --------------------------
@@ -1103,6 +758,7 @@ void op_teq();
 // -----------------------------------------------------------------
 
 void initInterpreter();
+void resetInterpreter();
 
 void printException(int enumber);
 
@@ -1115,16 +771,30 @@ void fetch();
 void execute();
 void run();
 
-void initRegisterPointers(int *process);
-void parse_args(int argc, int *argv);
+// -----------------------------------------------------------------
+// ----------------------------- MAIN ------------------------------
+// -----------------------------------------------------------------
 
 void up_push(int value);
 int  up_malloc(int size);
+int  up_copyString(int *s);
 void up_copyArguments(int argc, int *argv);
 
-int main_emulator(int argc, int *argv);
+void copyBinaryToMemory();
+
+void emulate(int argc, int *argv);
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
+
+int debug_load = 0;
+
+int debug_read    = 0;
+int debug_write   = 0;
+int debug_open    = 0;
+int debug_malloc  = 0;
+
+int debug_registers   = 0;
+int debug_disassemble = 0;
 
 int EXCEPTION_SIGNAL             = 1;
 int EXCEPTION_ADDRESSERROR       = 2;
@@ -1132,13 +802,14 @@ int EXCEPTION_UNKNOWNINSTRUCTION = 3;
 int EXCEPTION_HEAPOVERFLOW       = 4;
 int EXCEPTION_UNKNOWNSYSCALL     = 5;
 int EXCEPTION_UNKNOWNFUNCTION    = 6;
-int EXCEPTION_SEGMENTATIONFAULT  = 7;
 
 int *EXCEPTIONS; // array of strings representing exceptions
 
 // ------------------------ GLOBAL VARIABLES -----------------------
 
+int *registers; // general purpose registers
 
+int pc = 0; // program counter
 int ir = 0; // instruction record
 
 int reg_hi = 0; // hi register for multiplication/division
@@ -1147,7 +818,7 @@ int reg_lo = 0; // lo register for multiplication/division
 // ------------------------- INITIALIZATION ------------------------
 
 void initInterpreter() {
-    EXCEPTIONS = malloc(8*4);
+    EXCEPTIONS = malloc(7*4);
 
     *(EXCEPTIONS + EXCEPTION_SIGNAL)             = (int) "signal";
     *(EXCEPTIONS + EXCEPTION_ADDRESSERROR)       = (int) "address error";
@@ -1155,11 +826,16 @@ void initInterpreter() {
     *(EXCEPTIONS + EXCEPTION_HEAPOVERFLOW)       = (int) "heap overflow";
     *(EXCEPTIONS + EXCEPTION_UNKNOWNSYSCALL)     = (int) "unknown syscall";
     *(EXCEPTIONS + EXCEPTION_UNKNOWNFUNCTION)    = (int) "unknown function";
-    *(EXCEPTIONS + EXCEPTION_SEGMENTATIONFAULT)  = (int) "Segmentation Fault";
 
     registers = malloc(32*4);
 }
 
+void resetInterpreter() {
+    pc = 0;
+
+    reg_hi = 0;
+    reg_lo = 0;
+}
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     L I B R A R Y     ---------------------
@@ -1197,7 +873,7 @@ int rightShift(int n, int b) {
             (INT_MAX / twoToThePowerOf(b) + 1);
 }
 
-int getCharacter(int *s, int i) {
+int loadCharacter(int *s, int i) {
     // assert: i >= 0
     int a;
 
@@ -1206,13 +882,13 @@ int getCharacter(int *s, int i) {
     return rightShift(leftShift(*(s + a), 24 - (i % 4) * 8), 24);
 }
 
-int* putCharacter(int *s, int i, int c) {
+int* storeCharacter(int *s, int i, int c) {
     // assert: i >= 0, all characters are 7-bit
     int a;
 
     a = i / 4;
 
-    *(s + a) = (*(s + a) - leftShift(getCharacter(s, i), (i % 4) * 8)) + leftShift(c, (i % 4) * 8);
+    *(s + a) = (*(s + a) - leftShift(loadCharacter(s, i), (i % 4) * 8)) + leftShift(c, (i % 4) * 8);
 
     return s;
 }
@@ -1222,7 +898,7 @@ int stringLength(int *s) {
 
     i = 0;
 
-    while (getCharacter(s, i) != 0)
+    while (loadCharacter(s, i) != 0)
         i = i + 1;
 
     return i;
@@ -1237,10 +913,10 @@ void stringReverse(int *s) {
     j = stringLength(s) - 1;
 
     while (i < j) {
-        tmp = getCharacter(s, i);
+        tmp = loadCharacter(s, i);
 
-        putCharacter(s, i, getCharacter(s, j));
-        putCharacter(s, j, tmp);
+        storeCharacter(s, i, loadCharacter(s, j));
+        storeCharacter(s, j, tmp);
 
         i = i + 1;
         j = j - 1;
@@ -1253,12 +929,12 @@ int stringCompare(int *s, int *t) {
     i = 0;
 
     while (1)
-        if (getCharacter(s, i) == 0)
-            if (getCharacter(t, i) == 0)
+        if (loadCharacter(s, i) == 0)
+            if (loadCharacter(t, i) == 0)
                 return 1;
             else
                 return 0;
-        else if (getCharacter(s, i) == getCharacter(t, i))
+        else if (loadCharacter(s, i) == loadCharacter(t, i))
             i = i + 1;
         else
             return 0;
@@ -1267,15 +943,34 @@ int stringCompare(int *s, int *t) {
 int atoi(int *s) {
     int i;
     int n;
+    int c;
 
     i = 0;
 
     n = 0;
 
-    while (getCharacter(s, i) != 0) {
-        n = n * 10 + getCharacter(s, i) - '0';
+    c = loadCharacter(s, i);
+
+    while (c != 0) {
+        c = c - '0';
+
+        if (c < 0)
+            return -1;
+        else if (c > 9)
+            return -1;
+
+        n = n * 10 + c;
 
         i = i + 1;
+
+        c = loadCharacter(s, i);
+
+        if (n < 0) {
+            if (n != INT_MIN)
+                return -1;
+            else if (c != 0)
+                return -1;
+        }
     }
 
     return n;
@@ -1292,7 +987,7 @@ int* itoa(int n, int *s, int b, int a) {
     sign = 0;
 
     if (n == 0) {
-        putCharacter(s, 0, '0');
+        storeCharacter(s, 0, '0');
 
         i = 1;
     } else if (n < 0) {
@@ -1301,7 +996,7 @@ int* itoa(int n, int *s, int b, int a) {
         if (b == 10) {
             if (n == INT_MIN) {
                 // rightmost decimal digit of 32-bit INT_MIN
-                putCharacter(s, 0, '8');
+                storeCharacter(s, 0, '8');
 
                 n = -(n / 10);
                 i = i + 1;
@@ -1310,7 +1005,7 @@ int* itoa(int n, int *s, int b, int a) {
         } else {
             if (n == INT_MIN) {
                 // rightmost non-decimal digit of INT_MIN
-                putCharacter(s, 0, '0');
+                storeCharacter(s, 0, '0');
 
                 n = (rightShift(INT_MIN, 1) / b) * 2;
                 i = i + 1;
@@ -1321,9 +1016,9 @@ int* itoa(int n, int *s, int b, int a) {
 
     while (n != 0) {
         if (n % b > 9)
-            putCharacter(s, i, n % b - 10 + 'A');
+            storeCharacter(s, i, n % b - 10 + 'A');
         else
-            putCharacter(s, i, n % b + '0');
+            storeCharacter(s, i, n % b + '0');
 
         n = n / b;
         i = i + 1;
@@ -1338,24 +1033,29 @@ int* itoa(int n, int *s, int b, int a) {
 
     if (b != 10) {
         while (i < a) {
-            putCharacter(s, i, '0'); // align with zeros
+            storeCharacter(s, i, '0'); // align with zeros
 
             i = i + 1;
         }
 
-        if (b == 16) {
-            putCharacter(s, i, 'x');
-            putCharacter(s, i + 1, '0');
+        if (b == 8) {
+            storeCharacter(s, i, '0');
+            storeCharacter(s, i + 1, '0');
+
+            i = i + 2;
+        } else if (b == 16) {
+            storeCharacter(s, i, 'x');
+            storeCharacter(s, i + 1, '0');
 
             i = i + 2;
         }
     } else if (sign) {
-        putCharacter(s, i, '-');
+        storeCharacter(s, i, '-');
 
         i = i + 1;
     }
 
-    putCharacter(s, i, 0); // null terminated string
+    storeCharacter(s, i, 0); // null terminated string
 
     stringReverse(s);
 
@@ -1367,8 +1067,8 @@ void print(int *s) {
 
     i = 0;
 
-    while (getCharacter(s, i) != 0) {
-        putchar(getCharacter(s, i));
+    while (loadCharacter(s, i) != 0) {
+        putchar(loadCharacter(s, i));
 
         i = i + 1;
     }
@@ -1425,8 +1125,11 @@ void printSymbol(int symbol) {
 }
 
 void printLineNumber(int* message) {
-    print((int*) "cstarc: ");
+    print(selfieName);
+    print((int*) ": ");
     print(message);
+    print((int*) " in ");
+    print(sourceName);
     print((int*) " in line ");
     print(itoa(lineNumber, string_buffer, 10, 0));
     print((int*) ": ");
@@ -1452,6 +1155,25 @@ void syntaxErrorCharacter(int expected) {
     println();
 }
 
+void getCharacter() {
+    int numberOfReadBytes;
+
+    numberOfReadBytes = read(sourceFD, character_buffer, 1);
+
+    if (numberOfReadBytes == 1)
+        character = *character_buffer;
+    else if (numberOfReadBytes == 0)
+        character = CHAR_EOF;
+    else {
+        print(selfieName);
+        print((int*) ": could not read character from input file ");
+        print(sourceName);
+        println();
+
+        exit(-1);
+    }
+}
+
 int isCharacterWhitespace() {
     if (character == CHAR_SPACE)
         return 1;
@@ -1472,7 +1194,7 @@ int findNextCharacter() {
 
     while (1) {
         if (inComment) {
-            character = getchar();
+            getCharacter();
 
             if (character == CHAR_LF)
                 inComment = 0;
@@ -1487,14 +1209,16 @@ int findNextCharacter() {
             else if (character == CHAR_CR)
                 lineNumber = lineNumber + 1;
 
-            character = getchar();
+            getCharacter();
 
         } else if (character == CHAR_HASH) {
-            character = getchar();
+            getCharacter();
+
             inComment = 1;
 
         } else if (character == CHAR_SLASH) {
-            character = getchar();
+            getCharacter();
+
             if (character == CHAR_SLASH)
                 inComment = 1;
             else {
@@ -1595,14 +1319,14 @@ int getSymbol() {
                 exit(-1);
             }
 
-            putCharacter(identifier, i, character);
+            storeCharacter(identifier, i, character);
 
             i = i + 1;
 
-            character = getchar();
+            getCharacter();
         }
 
-        putCharacter(identifier, i, 0); // null terminated string
+        storeCharacter(identifier, i, 0); // null terminated string
 
         symbol = identifierOrKeyword();
 
@@ -1617,14 +1341,14 @@ int getSymbol() {
                 exit(-1);
             }
 
-            putCharacter(integer, i, character);
+            storeCharacter(integer, i, character);
 
             i = i + 1;
 
-            character = getchar();
+            getCharacter();
         }
 
-        putCharacter(integer, i, 0); // null terminated string
+        storeCharacter(integer, i, 0); // null terminated string
 
         constant = atoi(integer);
 
@@ -1645,7 +1369,7 @@ int getSymbol() {
         symbol = SYM_INTEGER;
 
     } else if (character == CHAR_SINGLEQUOTE) {
-        character = getchar();
+        getCharacter();
 
         constant = 0;
 
@@ -1656,10 +1380,10 @@ int getSymbol() {
         } else
             constant = character;
 
-        character = getchar();
+        getCharacter();
 
         if (character == CHAR_SINGLEQUOTE)
-            character = getchar();
+            getCharacter();
         else if (character == CHAR_EOF) {
             syntaxErrorCharacter(CHAR_SINGLEQUOTE);
 
@@ -1670,7 +1394,7 @@ int getSymbol() {
         symbol = SYM_CHARACTER;
 
     } else if (character == CHAR_DOUBLEQUOTE) {
-        character = getchar();
+        getCharacter();
 
         string = malloc(maxStringLength + 1);
 
@@ -1682,96 +1406,113 @@ int getSymbol() {
                 exit(-1);
             }
 
-            putCharacter(string, i, character);
+            storeCharacter(string, i, character);
 
             i = i + 1;
 
-            character = getchar();
+            getCharacter();
         }
 
         if (character == CHAR_DOUBLEQUOTE)
-            character = getchar();
+            getCharacter();
         else {
             syntaxErrorCharacter(CHAR_DOUBLEQUOTE);
 
             exit(-1);
         }
 
-        putCharacter(string, i, 0); // null terminated string
+        storeCharacter(string, i, 0); // null terminated string
 
         symbol = SYM_STRING;
 
     } else if (character == CHAR_SEMICOLON) {
-        character = getchar();
+        getCharacter();
+
         symbol = SYM_SEMICOLON;
 
     } else if (character == CHAR_PLUS) {
-        character = getchar();
+        getCharacter();
+
         symbol = SYM_PLUS;
 
     } else if (character == CHAR_DASH) {
-        character = getchar();
+        getCharacter();
+
         symbol = SYM_MINUS;
 
     } else if (character == CHAR_ASTERISK) {
-        character = getchar();
+        getCharacter();
+
         symbol = SYM_ASTERISK;
 
     } else if (character == CHAR_EQUAL) {
-        character = getchar();
+        getCharacter();
+
         if (character == CHAR_EQUAL) {
-            character = getchar();
+            getCharacter();
+
             symbol = SYM_EQUALITY;
         } else
             symbol = SYM_ASSIGN;
 
     } else if (character == CHAR_LPARENTHESIS) {
-        character = getchar();
+        getCharacter();
+
         symbol = SYM_LPARENTHESIS;
 
     } else if (character == CHAR_RPARENTHESIS) {
-        character = getchar();
+        getCharacter();
+
         symbol = SYM_RPARENTHESIS;
 
     } else if (character == CHAR_LBRACE) {
-        character = getchar();
+        getCharacter();
+
         symbol = SYM_LBRACE;
 
     } else if (character == CHAR_RBRACE) {
-        character = getchar();
+        getCharacter();
+
         symbol = SYM_RBRACE;
 
     } else if (character == CHAR_COMMA) {
-        character = getchar();
+        getCharacter();
+
         symbol = SYM_COMMA;
 
     } else if (character == CHAR_LT) {
-        character = getchar();
+        getCharacter();
+
         if (character == CHAR_EQUAL) {
-            character = getchar();
+            getCharacter();
+
             symbol = SYM_LEQ;
         } else
             symbol = SYM_LT;
 
     } else if (character == CHAR_GT) {
-        character = getchar();
+        getCharacter();
+
         if (character == CHAR_EQUAL) {
-            character = getchar();
+            getCharacter();
+
             symbol = SYM_GEQ;
         } else
             symbol = SYM_GT;
 
     } else if (character == CHAR_EXCLAMATION) {
-        character = getchar();
+        getCharacter();
+
         if (character == CHAR_EQUAL)
-            character = getchar();
+            getCharacter();
         else
             syntaxErrorCharacter(CHAR_EQUAL);
 
         symbol = SYM_NOTEQ;
 
     } else if (character == CHAR_PERCENTAGE) {
-        character = getchar();
+        getCharacter();
+
         symbol = SYM_MOD;
 
     } else {
@@ -2254,7 +1995,7 @@ int help_call_codegen(int *entry, int *procedure) {
             setData(entry, binaryLength);
 
             emitJFormat(OP_JAL, 0);
-        } else if (getOpcode(loadMemory(getData(entry))) == OP_JAL) {
+        } else if (getOpcode(loadBinary(getData(entry))) == OP_JAL) {
             // CASE 3: function call, no declaration
             emitJFormat(OP_JAL, getData(entry) / 4);
 
@@ -3248,7 +2989,7 @@ void gr_procedure(int *procedure, int returnType) {
             createSymbolTableEntry(GLOBAL_TABLE, currentProcedureName, binaryLength, FUNCTION, returnType, 0);
         else {
             if (getData(entry) != 0) {
-                if (getOpcode(loadMemory(getData(entry))) == OP_JAL)
+                if (getOpcode(loadBinary(getData(entry))) == OP_JAL)
                     fixlink_absolute(getData(entry), functionStart);
                 else {
                     printLineNumber((int*) "error");
@@ -3398,14 +3139,32 @@ void emitMainEntry() {
 // ----------------------------- MAIN ------------------------------
 // -----------------------------------------------------------------
 
-int main_compiler() {
-    initScanner();
-    initParser();
+void compile() {
+    print(selfieName);
+    print((int*) ": this is selfie's cstarc compiling ");
+    print(sourceName);
+    println();
 
-    // memory in bytes and executable file name "out"
-    initMemory(maxBinaryLength, (int*) "out");
+    sourceFD = open(sourceName, 0, 0); // 0 = O_RDONLY
 
-    getSymbol();
+    if (sourceFD < 0) {
+        print(selfieName);
+        print((int*) ": could not open input file ");
+        print(sourceName);
+        println();
+
+        exit(-1);
+    }
+
+    // reset scanner
+    resetScanner();
+
+    // reset global symbol table
+    resetGlobalSymbolTable();
+
+    // allocate space for storing binary
+    binary       = malloc(maxBinaryLength);
+    binaryLength = 0;
 
     // jump to main
     emitMainEntry();
@@ -3418,25 +3177,28 @@ int main_compiler() {
     emitWrite();
     emitOpen();
     emitMalloc();
-    emitGetchar();
     emitPutchar();
     emitGetpid();
-    emitGettid();
     emitYield();
     emitLock();
     emitUnlock();
-    emitCreateThread();
+    emitFork();
+    emitWait();
+
     // parser
     gr_cstar();
 
-    if (getInstrIndex(loadMemory(mainJumpAddress)) != 0)
-        emitBinary();
-    else {
-        print((int*) "cstarc: main function missing");
-        println();
-    }
+    // emit global variables and strings
+    emitGlobalsStrings();
 
-    exit(0);
+    if (getInstrIndex(loadBinary(mainJumpAddress)) == 0) {
+        print(selfieName);
+        print((int*) ": main function missing in ");
+        print(sourceName);
+        println();
+
+        exit(-1);
+    }
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -3615,40 +3377,23 @@ void decodeJFormat() {
 }
 
 // -----------------------------------------------------------------
-// ---------------------------- MEMORY -----------------------------
-// -----------------------------------------------------------------
-
-int tlb(int vaddr) {
-    if (vaddr % 4 != 0)
-        exception_handler(EXCEPTION_ADDRESSERROR);
-
-    if (isEmulator) {
-        // XXX Currently, no Segmentation Fault will occur because 
-        //     of threads.  
-        return (sr + vaddr) / 4;
-    }
-    // physical memory is word-addressed for lack of byte-sized data type
-    return vaddr/4;
-}
-
-int loadMemory(int vaddr) {
-    return *(memory + tlb(vaddr));
-}
-
-void storeMemory(int vaddr, int data) {
-    *(memory + tlb(vaddr)) = data;
-}
-
-// -----------------------------------------------------------------
 // ---------------------------- BINARY -----------------------------
 // -----------------------------------------------------------------
+
+int loadBinary(int addr) {
+    return *(binary + addr / 4);
+}
+
+void storeBinary(int addr, int instruction) {
+    *(binary + addr / 4) = instruction;
+}
 
 void emitInstruction(int instruction) {
     if (binaryLength >= maxBinaryLength) {
         syntaxErrorMessage((int*) "exceeded maximum binary length");
         exit(-1);
     } else {
-        storeMemory(binaryLength, instruction);
+        storeBinary(binaryLength, instruction);
 
         binaryLength = binaryLength + 4;
     }
@@ -3690,9 +3435,9 @@ void emitJFormat(int opcode, int instr_index) {
 void fixup_relative(int fromAddress) {
     int instruction;
 
-    instruction = loadMemory(fromAddress);
+    instruction = loadBinary(fromAddress);
 
-    storeMemory(fromAddress,
+    storeBinary(fromAddress,
         encodeIFormat(getOpcode(instruction),
             getRS(instruction),
             getRT(instruction),
@@ -3700,21 +3445,21 @@ void fixup_relative(int fromAddress) {
 }
 
 void fixup_absolute(int fromAddress, int toAddress) {
-    storeMemory(fromAddress,
-        encodeJFormat(getOpcode(loadMemory(fromAddress)), toAddress / 4));
+    storeBinary(fromAddress,
+        encodeJFormat(getOpcode(loadBinary(fromAddress)), toAddress / 4));
 }
 
 void fixlink_absolute(int fromAddress, int toAddress) {
     int previousAddress;
 
     while (fromAddress != 0) {
-        previousAddress = getInstrIndex(loadMemory(fromAddress)) * 4;
+        previousAddress = getInstrIndex(loadBinary(fromAddress)) * 4;
         fixup_absolute(fromAddress, toAddress);
         fromAddress = previousAddress;
     }
 }
 
-int copyStringToMemory(int *s, int a) {
+int copyStringToBinary(int *s, int a) {
     int l;
     int w;
 
@@ -3726,7 +3471,7 @@ int copyStringToMemory(int *s, int a) {
         w = w + 4 - l % 4;
 
     while (a < w) {
-        storeMemory(a, *s);
+        storeBinary(a, *s);
 
         s = s + 1;
         a = a + 4;
@@ -3735,58 +3480,88 @@ int copyStringToMemory(int *s, int a) {
     return w;
 }
 
-void emitBinary() {
+void emitGlobalsStrings() {
     int *entry;
-    int fd;
 
     entry = global_symbol_table;
+
+    // assert: n = binaryLength
 
     // allocate space for global variables and copy strings
     while ((int) entry != 0) {
         if (getClass(entry) == VARIABLE) {
-            storeMemory(binaryLength, getValue(entry));
+            storeBinary(binaryLength, getValue(entry));
 
             binaryLength = binaryLength + 4;
         } else if (getClass(entry) == STRING)
-            binaryLength = copyStringToMemory(getString(entry), binaryLength);
+            binaryLength = copyStringToBinary(getString(entry), binaryLength);
 
         entry = getNext(entry);
     }
 
-    // assert: file with name binaryName exists prior to execution of compiler
-    fd = open(binaryName, 1); // 1 = O_WRONLY
+    // assert: binaryLength == n + allocatedMemory
+
+    allocatedMemory = 0;
+}
+
+void emit() {
+    int fd;
+
+    // 1537 = 0x0601 = O_CREAT (0x0200) | O_WRONLY (0x0001) | O_TRUNC (0x0400)
+    // 420 = 00644 = S_IRUSR (00400) | S_IWUSR (00200) | S_IRGRP (00040) | S_IROTH (00004)
+    fd = open(binaryName, 1537, 420);
 
     if (fd < 0) {
-        syntaxErrorMessage((int*) "output file not found");
+        print(selfieName);
+        print((int*) ": could not create output file ");
+        print(binaryName);
+        println();
+
         exit(-1);
     }
 
-    // The mipster_syscall 4004 writes the code array into a file.
-    // The syscall uses the "write" system call of the OS and compiler.
-    // The write system call of our Linux uses little endian byte ordering.
-    write(fd, memory, binaryLength);
+    print(selfieName);
+    print((int*) ": writing code into output file ");
+    print(binaryName);
+    println();
+
+    write(fd, binary, binaryLength);
 }
 
-void loadBinary() {
+void load() {
     int fd;
     int numberOfReadBytes;
 
-    fd = open(binaryName, 0); // 0 = O_RDONLY
+    fd = open(binaryName, 0, 0); // 0 = O_RDONLY
 
-    if (fd < 0)
+    if (fd < 0) {
+        print(selfieName);
+        print((int*) ": could not open input file ");
+        print(binaryName);
+        println();
+
         exit(-1);
+    }
+
+    binary       = malloc(maxBinaryLength);
+    binaryLength = 0;
 
     numberOfReadBytes = 4;
 
+    print(selfieName);
+    print((int*) ": loading code from input file ");
+    print(binaryName);
+    println();
+
     while (numberOfReadBytes == 4) {
-        numberOfReadBytes = read(fd, memory + tlb(binaryLength), 4);
+        numberOfReadBytes = read(fd, binary + binaryLength / 4, 4);
 
         if (debug_load) {
             print(binaryName);
             print((int*) ": ");
             print(itoa(binaryLength, string_buffer, 16, 8));
             print((int*) ": ");
-            print(itoa(loadMemory(binaryLength), string_buffer, 16, 8));
+            print(itoa(loadBinary(binaryLength), string_buffer, 16, 8));
             println();
         }
 
@@ -3795,10 +3570,383 @@ void loadBinary() {
     }
 }
 
+
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+// -----------------------------------------------------------------
+// ---------------------------     O S   ---------------------------
+// -----------------------------------------------------------------
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+
+int currentInstCount;
+
+int debug_getpid  = 0;
+int debug_yield   = 0;
+int debug_lock    = 0;
+int debug_unlock  = 0;
+int debug_exit    = 1;
+int debug_fork    = 0;
+int debug_wait    = 0;
+int debug_sm      = 0;
+int debug_pr      = 0;
+
+int pid = 0;                   // last process identifier
+int sr = 0;                    // segment register
+int lock = 0;
+
+int segment_size;
+int segmentBumpPointer = 0;
+
+int *readyQ;
+int *blockedQ;
+int *zombieQ;
+int *waitQ;
+
+
+// List Operations (generic)
+int* os_createQueue();                     // create empty queue
+int* os_removeQueue(int* list, int* data); // remove element from queue
+int* os_getHead(int* list);                // get current head of queue
+int* os_appendQueue(int* list, int* data); // append element to a queue
+
+// process specific queue functions:
+int* os_searchPqueue(int* list, int key);  //  search process queue for given pid
+void os_printQueue(int* list, int* qname);
+
+// process functions
+int* os_createProcess();                   // create new process element
+int  os_getProcessID(int* process);        // get pid for a given process
+int  os_getProcessPc(int* process);        // get program counter of process object
+int* os_getProcessRegister(int* process);  // get pointer to registers of a process
+int  os_getProcessSegment(int* process);   // get pointer to memory of a given process
+int os_processTerminated(int* process);
+int* os_getProcessParent(int* process);
+int os_getProcessExitCode(int* process);
+
+// functions for process scheduling:
+void os_restoreContext();                  //  restore context (reg,mem,pc) of a given process
+void os_saveContext();                     // save context of current process
+void os_contextSwitch(int notTerminated);  // carry out a context switch
+int  os_kmalloc();                         // allocate segment memory
+void os_fifo();                            // process scheduling modelled after fifo queue
+int os_queuesNotEmpty();
+
+void os_copyRegisters(int* fromProcess, int* toProcess);
+void os_copyMemory(int* fromProcess, int* toProcess, int fromAddress, int toAddress);
+
+
+
+// create and initialize a queue, return pointer to it.
+// a queue consists of a pointer to a head and a tail.
+int* os_createQueue() {
+    int *q;
+    q = (int*)malloc(2*4);
+    *(q + 0) = 0;             // head
+    *(q + 1) = 0;             // tail
+    return q;
+}
+
+// remove element data from list
+int* os_removeQueue(int* list, int* data) {
+    int *prev;
+    int *next;
+    int *tmp;
+
+    if (*list == 0) {
+       return (int*)0;
+    }
+
+    if ((int)data == 0) {
+        return (int*)0;
+    }
+
+    if ((int)data == *list) {      // case 1: we must remove the head
+        // data is head (?)
+        *list = *data;
+        tmp = (int*)*list;
+
+
+         if ((int)tmp != 0) {
+            *(tmp+1) = 0;          // set prev from new head element
+        }
+        if ((int)data == *(list+1)) {
+            *(list+1) = 0;
+        }
+    } else if ((int)data == *(list + 1)) {// case 2: we must remove the tail
+        *(list+1) = *(data + 1);
+        tmp = (int*)*(list + 1);
+        *tmp = 0;
+    } else {                       // case 3: we must remove in between.
+        prev = (int*)*(data + 1);
+        next = (int*)*(data + 0);
+        *prev = (int)next;
+        *(next + 1) = (int)prev;
+    }
+    return data;
+}
+
+// getHead: get head of list
+int* os_getHead(int* list) {
+    return (int*)*list;
+}
+
+
+// getHead: get head of list
+int* os_getTail(int* list) {
+    return (int*)*(list+1);
+}
+
+
+// append:  append a data object 'data' to the list
+int* os_appendQueue(int* list, int* data) {
+    int* head;
+    int* tail;
+    int tmp;
+
+    *data    = 0;                // next
+    *(data+1)= 0;                // prev
+    head = (int*)*(list + 0);
+    tail = (int*)*(list + 1);
+
+    if ((int)head == 0) {
+        // list is empty!
+        *list = (int)data;
+        *(list + 1) = (int)data;
+        return data;
+    } else {
+        tmp = (int)tail;
+        *tail = (int)data;
+        *(list+1) = (int)data;
+        *(data+1) = (int)tmp;
+    }
+    return (int*)0;
+}
+
+
+// search process queue, key is a PID
+// important: list must be a list of 'process'-records.
+int* os_searchPqueue(int* list, int key) {
+    int* q;
+
+    q = (int*)*list;
+
+    while ((int)q != 0) {
+        if (*(q + 2) == key)
+            return q;
+        q = (int*)*q;
+    }
+    return (int*)0;
+}
+
+void os_printQueue(int* list, int* qname) {
+    int* q;
+    int* tail;
+    q = os_getHead(list);
+    tail = os_getTail(list);
+
+    if ((int)q == 0)
+        return;
+
+    print(qname);
+     while (q != tail) {
+        print(itoa(os_getProcessID(q), string_buffer, 10, 0));
+        putchar(',');
+        q = (int*)*q;
+    }
+    print(itoa(os_getProcessID(q), string_buffer, 10, 0));
+
+    println();
+}
+
+// process:  create a new process object:
+// return :  return pointer to the new prrocess
+// +-------------------+
+// |0 next pointer     |
+// |1 prev pointer     |
+// |2 process id       |
+// |3 program counter  |
+// |4 register ptr     |
+// |5 segment register |
+// |6 parent pointer   |
+// |7 exit code        |
+// |8 hasTerminated    |
+// |9 waitsForPID      |
+// +-------------------+
+
+int* os_createProcess() {
+    int *new;
+    new = malloc(9*4);
+
+    pid = pid + 1;   // use 0 for the operating system
+
+    *(new + 0) = 0;                  // next pointer
+    *(new + 1) = 0;                  // prev pointer
+    *(new + 2) = pid;                // PID
+    *(new + 3) = 0;                  // PC
+    *(new + 4) = (int)malloc(32*4);  // registers
+    *(new + 5) = sr;                 // segment register
+    *(new + 6) = 0;                  // is child of init
+    *(new + 7) = 0;                  // exit code
+    *(new + 8) = 0;                  // has not terminated yet
+    *(new + 9) = 0;
+
+    *(registers + REG_ZR) = 0;
+
+    if (debug_pr) {
+        print((int*) "[PR] create process ");
+    	itoa(pid, string_buffer, 10, 2);
+        print(string_buffer);
+        putchar(CHAR_LF);
+    }
+    if (debug_sm) {
+        print((int*) "[SM] Current SR: ");
+        print(itoa(sr, string_buffer, 10, 10));
+        println();
+    }
+    return new;
+
+}
+
+int os_getProcessID(int* process) {
+    return *(process + 2);
+}
+
+int os_getProcessPc(int* process) {
+    return *(process + 3);
+}
+
+int* os_getProcessRegister(int* process) {
+    return (int*)*(process + 4);
+}
+
+int os_getProcessSegment(int* process) {
+    return *(process + 5);
+}
+
+int* os_getProcessParent(int* process){
+    return (int*)*(process + 6);
+}
+int os_getProcessExitCode(int* process) {
+    return *(process + 7);
+}
+
+int os_processTerminated(int* process){
+    return *(process + 8);
+}
+
+// Restore Context from Head Process
+void os_restoreContext() {
+    int *process;
+
+    process = os_getHead(readyQ);
+
+    if ((int)process == 0) {
+        process = os_getHead(blockedQ);
+        if ((int) process == 0) {
+             exit(0);
+        }
+        os_appendQueue(readyQ, process);
+    }
+    pc = os_getProcessPc(process);
+    registers = os_getProcessRegister(process);
+    sr = os_getProcessSegment(process);
+}
+
+// save context of current process
+void os_saveContext() {
+    int *process;
+    process = os_getHead(readyQ);
+    *(process + 3) = pc;
+}
+
+
+void os_printSwitch(int *process) {
+    if (debug_pr) {
+        os_printQueue(readyQ, (int*)"[PR] Ready Queue: ");
+        print((int*) "[PR] switch to PID ");
+        itoa(os_getProcessID(process), string_buffer, 10, 2);
+        print(string_buffer);
+        putchar(CHAR_LF);
+    }
+}
+
+void os_contextSwitch(int notTerminated) {
+    int *process;
+    int newpid;
+
+    // save old context
+    if (notTerminated) {
+        os_saveContext();
+	os_fifo();
+    }
+
+    os_restoreContext();
+    process = os_getHead(readyQ);
+    os_printSwitch(process);
+}
+
+void os_fifo() {
+    int *headp;
+    headp = os_getHead(readyQ);
+    os_removeQueue(readyQ, headp);
+    os_appendQueue(readyQ, headp);
+}
+
+
+int os_kmalloc() {
+    int old;
+    old = segmentBumpPointer;
+    segmentBumpPointer = segmentBumpPointer + segment_size;
+    return old;
+}
+
+int os_queuesNotEmpty() {
+    int *process;
+    if ((int)os_getHead(readyQ) == 0) {
+        if ((int)os_getHead(blockedQ) == 0) {
+            return 0;
+        } else {
+            process = os_getHead(blockedQ);
+            os_removeQueue(blockedQ, process);
+            os_appendQueue(readyQ, process);
+            currentInstCount = 0;
+            return 1;
+        }
+    } else
+        return 1;
+}
+
+void os_copyRegisters(int* fromProcess, int* toProcess) {
+    int *from_process_regs;
+    int *to_process_regs;
+    int i;
+
+    i = 0;
+    from_process_regs = os_getProcessRegister(fromProcess);
+    to_process_regs = os_getProcessRegister(toProcess);
+
+    while (i < 32) {
+        *(to_process_regs + i) = *(from_process_regs + i);
+        i = i + 1;
+    }
+}
+
+void os_copyMemory(int* fromProcess, int* toProcess, int fromAddress, int toAddress) {
+    int memory_value;
+
+    while (fromAddress < toAddress) {
+        sr = os_getProcessSegment(fromProcess);
+        memory_value = loadMemory(fromAddress);
+
+        sr = os_getProcessSegment(toProcess);
+        storeMemory(fromAddress, memory_value);
+        fromAddress = fromAddress + 4;
+    }
+}
+
+
 // -----------------------------------------------------------------
 // --------------------------- SYSCALLS ----------------------------
 // -----------------------------------------------------------------
-
 
 void emitExit() {
     createSymbolTableEntry(GLOBAL_TABLE, (int*) "exit", binaryLength, FUNCTION, INT_T, 0);
@@ -3817,6 +3965,8 @@ void emitExit() {
 void syscall_exit() {
     int exitCode;
     int* process;
+    int* parent;
+    int* parentRegs;
 
     process = os_getHead(readyQ);
 
@@ -3831,13 +3981,33 @@ void syscall_exit() {
     }
 
     *(registers+REG_V0) = exitCode;
-
+    *(process+7) = exitCode;
+    *(process+8) = 1;
 
     os_removeQueue(readyQ, process);
-    os_contextSwitch(0);
-    currentInstCount = 0; 
-}
 
+    parent = os_getProcessParent(process);
+    if ((int)parent != 0) {
+        if ((int)os_searchPqueue(waitQ, os_getProcessID(parent)) == 0) {
+            if (os_processTerminated(parent))
+                *(process+6) = 0;      //process gets adopted by init
+            else {
+                os_appendQueue(zombieQ, process);
+                if (debug_pr)
+                    os_printQueue(zombieQ, (int*)"[PR] Zombie Queue: ");
+            }
+        } else {
+            os_removeQueue(waitQ, parent);
+            os_appendQueue(readyQ, parent);
+            parentRegs = os_getProcessRegister(parent);
+            *(parentRegs+REG_V0) = exitCode;
+        }
+    }
+
+    os_contextSwitch(0);
+    currentInstCount = 0;
+
+}
 
 void emitRead() {
     createSymbolTableEntry(GLOBAL_TABLE, (int*) "read", binaryLength, FUNCTION, INT_T, 0);
@@ -3940,7 +4110,9 @@ void emitOpen() {
     createSymbolTableEntry(GLOBAL_TABLE, (int*) "open", binaryLength, FUNCTION, INT_T, 0);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+
+    emitIFormat(OP_ADDIU, REG_SP, REG_A2, 0); // mode
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
     emitIFormat(OP_LW, REG_SP, REG_A1, 0); // flags
     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
@@ -3955,26 +4127,30 @@ void emitOpen() {
 }
 
 void syscall_open() {
+    int mode;
     int flags;
     int vaddr;
     int *filename;
     int fd;
 
+    mode  = *(registers+REG_A2);
     flags = *(registers+REG_A1);
     vaddr = *(registers+REG_A0);
 
     filename = memory + tlb(vaddr);
 
-    fd = open(filename, flags);
+    fd = open(filename, flags, mode);
 
     *(registers+REG_V0) = fd;
 
     if (debug_open) {
         print(binaryName);
         print((int*) ": opened file ");
-        print(filename);
+        printString(filename);
         print((int*) " with flags ");
-        print(itoa(flags, string_buffer, 10, 0));
+        print(itoa(flags, string_buffer, 16, 0));
+        print((int*) " and mode ");
+        print(itoa(mode, string_buffer, 8, 0));
         print((int*) " returning file descriptor ");
         print(itoa(fd, string_buffer, 10, 0));
         println();
@@ -4025,35 +4201,6 @@ void syscall_malloc() {
         print(itoa(size, string_buffer, 10, 0));
         print((int*) " bytes returning address ");
         print(itoa(bump, string_buffer, 16, 8));
-        println();
-    }
-}
-
-void emitGetchar() {
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "getchar", binaryLength, FUNCTION, INT_T, 0);
-
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
-
-    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_GETCHAR);
-    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
-
-    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
-}
-
-void syscall_getchar() {
-    int c;
-
-    c = getchar();
-
-    *(registers+REG_V0) = c;
-
-    if (debug_getchar) {
-        print(binaryName);
-        print((int*) ": getchar ");
-        printCharacter(c);
         println();
     }
 }
@@ -4159,21 +4306,21 @@ void syscall_lock() {
     process = os_getHead(readyQ);
 
     if (lock == 0) {
-         lock = os_getProcessID(process); 
-         lockthread = os_getProcessTID(process); 
-         *(registers+REG_V0) = 1; 
+        lock = os_getProcessID(process);
+        *(registers+REG_V0) = 1;
+
     } else {
-         *(registers+REG_V0) = 0; 
-         os_saveContext();
-         os_removeQueue(readyQ, process);
-         os_appendQueue(blockedQ, process);
-         os_restoreContext();
-         os_printSwitch(os_getHead(readyQ));
-         currentInstCount = 0; 
+        *(registers+REG_V0) = 0;
+        os_saveContext();
+        os_removeQueue(readyQ, process);
+        os_appendQueue(blockedQ, process);
+        os_restoreContext();
+        os_printSwitch(os_getHead(readyQ));
+        currentInstCount = 0;
     }
 
     if (debug_pr) {
-        os_printQueue(blockedQ, 2);
+        os_printQueue(blockedQ, (int*)"[PR] Blocked Queue: ");
     }
 
     if (debug_lock) {
@@ -4208,26 +4355,26 @@ void syscall_unlock() {
     process = os_getHead(readyQ);
 
     if (lock == os_getProcessID(process)) {
-         if (lockthread == os_getProcessTID(process)) {
-         lock = 0;
-         lockthread = 0;
-         *(registers+REG_V0) = 1; 
-         firstBlocked = os_getHead(blockedQ); 
-         if ((int) firstBlocked != 0) {
-             os_removeQueue(blockedQ, firstBlocked);
-             os_appendQueue(readyQ, firstBlocked);
-             lock = os_getProcessID(firstBlocked);
-              } 
-         }  else 
+        lock = 0;
+        *(registers+REG_V0) = 1;
+        firstBlocked = os_getHead(blockedQ);
+
+        if ((int) firstBlocked != 0) {
+            os_removeQueue(blockedQ, firstBlocked);
+            os_appendQueue(readyQ, firstBlocked);
+            lock = os_getProcessID(firstBlocked);
+        }  else
              *(registers+REG_V0) = 0;
     } else {
-         *(registers+REG_V0) = 0; 
-          // exception.. kill process? 
+         *(registers+REG_V0) = 0;
+          // exception.. kill process?
     }
 
     if (debug_pr) {
+        print(binaryName);
         print((int*) ": blocked queue after unlock: ");
-        os_printQueue(blockedQ, 2);
+        os_printQueue(blockedQ, (int*)"[PR] Blocked Queue: ");
+        println();
     }
 
 
@@ -4239,9 +4386,8 @@ void syscall_unlock() {
     }
 }
 
-
-void emitCreateThread() {
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "createThread", binaryLength, FUNCTION, INT_T, 0);
+void emitFork() {
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "fork", binaryLength, FUNCTION, INT_T, 0);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
     emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
@@ -4249,62 +4395,125 @@ void emitCreateThread() {
     emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
 
     // load the correct syscall number and invoke syscall
-    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_CREATETHREAD);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_FORK);
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
 
     // jump back to caller, return value is in REG_V0
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
-void syscall_createThread() {
+void syscall_fork() {
     int *process;
-    int *newThread; 
-
-    process   = os_getHead(readyQ);
-    newThread = os_createThread(process);
-
-    os_appendQueue(readyQ, newThread);
-    
-    if (debug_createThread) {
-      print((int*) "[PR] create new thread PID: ");
-      print(itoa(os_getProcessID(process), string_buffer, 10, 0));
-      print((int*) ": Thread ID: ");
-      print(itoa(os_getProcessTID(newThread), string_buffer, 10, 0));
-      println();
-      os_printQueue(readyQ, 1);
-    }
-}
-
-void syscall_gettid() {
-    int *process;
+    int *new_process;
+    int *new_process_regs;
 
     process = os_getHead(readyQ);
-    *(registers+REG_V0) = os_getProcessTID(process);
 
-    if (debug_gettid) {
+    sr = os_kmalloc();
+    new_process = os_createProcess();
+
+    *(new_process+3) = pc;
+    *(new_process+6) = (int)process;
+    os_appendQueue(readyQ, new_process);
+
+    new_process_regs = os_getProcessRegister(new_process);
+
+    os_copyRegisters(process, new_process);
+    os_copyMemory(process, new_process, 0, *(registers + REG_K1));
+    os_copyMemory(process, new_process, *(registers+REG_SP), segment_size);
+
+    sr = os_getProcessSegment(process);
+
+    *(registers + REG_V0) = os_getProcessID(new_process);
+    *(new_process_regs + REG_V0) = 0;
+
+    if (debug_fork) {
         print(binaryName);
-        print((int*) ": gettid ");
-        print(itoa(*(registers+REG_V0), string_buffer, 10, 0));
-        print((int*) " from running process");
+        print((int*) ": forked process ");
+        print(itoa(os_getProcessID(process), string_buffer, 10, 0));
+        print((int*) ", child PID: ");
+        print(itoa(os_getProcessID(new_process), string_buffer, 10, 0));
         println();
     }
 }
 
-void emitGettid() {
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "gettid", binaryLength, FUNCTION, INT_T, 0);
+void emitWait() {
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "wait", binaryLength, FUNCTION, INT_T, 0);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
     emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
     emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
 
-    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_GETTID);
+    // load argument for wait (pid)
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+
+    // remove the argument from the stack
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    // load the correct syscall number and invoke syscall
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_WAIT);
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
 
+    // jump back to caller, return value is in REG_V0
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
+void syscall_wait() {
+    int *parent;
+    int *process;
+    int pid;
 
+    parent = os_getHead(readyQ);
+    pid = *(registers+REG_A0);
+
+    process = os_searchPqueue(readyQ, pid);
+    if ((int)process == 0) {
+        process = os_searchPqueue(blockedQ, pid);
+        if ((int)process == 0) {
+            process = os_searchPqueue(zombieQ, pid);
+            if ((int)process == 0) {
+                return;            // nothing to wait for
+            } else {
+                *(registers+REG_V0) = os_getProcessExitCode(process);
+                os_removeQueue(zombieQ, process);
+
+                if (debug_wait) {
+                    print(binaryName);
+                    print((int*) ": process ");
+                    print(itoa(os_getProcessID(parent), string_buffer, 10, 0));
+                    print((int*) " removed zombie ");
+                    print(itoa(os_getProcessID(process), string_buffer, 10, 0));
+                    println();
+                }
+                return;
+            }
+        } else {
+            os_contextSwitch(1);
+            os_removeQueue(readyQ, parent);
+            os_appendQueue(waitQ, parent);
+            *(parent+9) = pid;
+            currentInstCount = 0;
+        }
+    } else {
+        os_contextSwitch(1);
+        os_removeQueue(readyQ, parent);
+        os_appendQueue(waitQ, parent);
+        *(parent+9) = pid;
+        currentInstCount = 0;
+    }
+
+    if (debug_wait) {
+        print(binaryName);
+        print((int*) ": process ");
+        print(itoa(os_getProcessID(parent), string_buffer, 10, 0));
+        print((int*) " waits for child ");
+        print(itoa(os_getProcessID(process), string_buffer, 10, 0));
+        println();
+    }
+
+    if (debug_pr)
+        os_printQueue(waitQ, (int*)"[PR] Wait Queue: ");
+}
 
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -4312,6 +4521,31 @@ void emitGettid() {
 // ---------------------     E M U L A T O R   ---------------------
 // -----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+
+// -----------------------------------------------------------------
+// ---------------------------- MEMORY -----------------------------
+// -----------------------------------------------------------------
+
+int tlb(int vaddr) {
+    if (vaddr % 4 != 0)
+        exception_handler(EXCEPTION_ADDRESSERROR);
+
+    if (isEmulator) {
+        // XXX Currently, no Segmentation Fault will occur because
+        //     of threads.
+        return (sr + vaddr) / 4;
+    }
+    // physical memory is word-addressed for lack of byte-sized data type
+    return vaddr/4;
+}
+
+int loadMemory(int vaddr) {
+    return *(memory + tlb(vaddr));
+}
+
+void storeMemory(int vaddr, int data) {
+    *(memory + tlb(vaddr)) = data;
+}
 
 // -----------------------------------------------------------------
 // ------------------------- INSTRUCTIONS --------------------------
@@ -4337,9 +4571,6 @@ void fct_syscall() {
     } else if (*(registers+REG_V0) == SYSCALL_MALLOC) {
         syscall_malloc();
         pc = pc + 4;
-    } else if (*(registers+REG_V0) == SYSCALL_GETCHAR) {
-        syscall_getchar();
-        pc = pc + 4;
     } else if (*(registers+REG_V0) == SYSCALL_GETPID) {
         syscall_getpid();
         pc = pc + 4;
@@ -4352,12 +4583,12 @@ void fct_syscall() {
     } else if (*(registers+REG_V0) == SYSCALL_UNLOCK) {
         pc = pc + 4;
         syscall_unlock();
-    } else if (*(registers+REG_V0) == SYSCALL_CREATETHREAD) {
+    } else if (*(registers+REG_V0) == SYSCALL_FORK) {
         pc = pc + 4;
-        syscall_createThread();
-    } else if (*(registers+REG_V0) == SYSCALL_GETTID) {
+        syscall_fork();
+    } else if (*(registers+REG_V0) == SYSCALL_WAIT) {
         pc = pc + 4;
-        syscall_gettid();
+        syscall_wait();
     } else {
         exception_handler(EXCEPTION_UNKNOWNSYSCALL);
     }
@@ -4755,48 +4986,20 @@ void execute() {
     }
 }
 
-int os_queuesNotEmpty() {
-   int *process; 
-   if ((int)os_getHead(readyQ) == 0) {
-       if ((int)os_getHead(blockedQ) == 0) {
-            return 0; 
-       } else {
-            process = os_getHead(blockedQ);
-            os_removeQueue(blockedQ, process);
-            os_appendQueue(readyQ, process);
-            currentInstCount = 0; 
-            return 1; 
-       }
-   } else {
-       return 1; 
-   }
-}
-
 void run() {
-    int currentPID;
     int instrPerContextSwitch;
     int* headProcess;
 
     currentInstCount = 0;
-    instrPerContextSwitch = 1;
+    instrPerContextSwitch = 10;
     headProcess = os_getHead(readyQ);
 
     os_printSwitch(headProcess);
     os_restoreContext();
 
-    currentPID = os_getProcessID(headProcess);
-
     while (os_queuesNotEmpty()) {
-        // dynamic program counter for this assignment, as discussed in lecture. 
-        if (instrPerContextSwitch > 50) {
-            instrPerContextSwitch = 20; 
-        } else {
-            instrPerContextSwitch = instrPerContextSwitch + 1; 
-        } 
-        
-
         if (currentInstCount == instrPerContextSwitch) {
-            currentPID = os_contextSwitch(1);
+            os_contextSwitch(1);
             currentInstCount = 0;
         } else {
                 fetch();
@@ -4805,35 +5008,15 @@ void run() {
                 execute();
                 post_debug();
                 currentInstCount = currentInstCount + 1;
-        } 
+        }
     }
 
-    exit(0);  // Emulator terminates when no process is in any queue. 
+   // exit(0);  // Emulator terminates when no process is in any queue.
 }
 
-void initRegisterPointers(int* process) {
-    registers           = (int*)*(process + 4);
-    // initialize stack pointer
-    *(registers+REG_SP) = segment_size - 4;
-    // initialize global pointer
-    *(registers+REG_GP) = binaryLength;
-    // initialize heap/bump pointer (malloc)
-    *(registers+REG_K1) = *(registers+REG_GP);
-    binaryLength = 0;
-}
-
-void parse_args(int argc, int *argv) {
-    // assert: ./selfie -m size executable {-m size executable}
-
-    // memory size in bytes and executable file name
-    initMemory(atoi((int*) *(argv+2)) * 1024 * 1024, (int*) *(argv+3));
-
-    print(binaryName);
-    print((int*) ": memory size ");
-    print(itoa(memorySize / 1024 / 1024, string_buffer, 10, 0));
-    print((int*) "MB");
-    println();
-}
+// -----------------------------------------------------------------
+// ----------------------------- MAIN ------------------------------
+// -----------------------------------------------------------------
 
 void up_push(int value) {
     int vaddr;
@@ -4856,6 +5039,33 @@ int up_malloc(int size) {
     return *(registers+REG_V0);
 }
 
+int up_copyString(int *s) {
+    int l;
+    int a;
+    int w;
+    int t;
+
+    l = stringLength(s) + 1;
+
+    a = up_malloc(l);
+
+    w = a + l;
+
+    if (l % 4 != 0)
+        w = w + 4 - l % 4;
+
+    t = a;
+
+    while (a < w) {
+        storeMemory(a, *s);
+
+        s = s + 1;
+        a = a + 4;
+    }
+
+    return t;
+}
+
 void up_copyArguments(int argc, int *argv) {
     int vaddr;
 
@@ -4866,9 +5076,7 @@ void up_copyArguments(int argc, int *argv) {
     up_push(vaddr);
 
     while (argc > 0) {
-        storeMemory(vaddr, up_malloc(stringLength((int*) *argv) + 1));
-
-        copyStringToMemory((int*) *argv, loadMemory(vaddr));
+        storeMemory(vaddr, up_copyString((int*) *argv));
 
         vaddr = vaddr + 4;
 
@@ -4877,79 +5085,159 @@ void up_copyArguments(int argc, int *argv) {
     }
 }
 
+void copyBinaryToMemory() {
+    int a;
 
-int main_emulator(int argc, int *argv) {
-    int numberOfProcesses;
+    a = 0;
+
+    while (a < binaryLength) {
+        storeMemory(a, loadBinary(a));
+        a = a + 4;
+    }
+}
+
+void initRegisterPointers(int* process) {
+    registers = (int*)*(process + 4);
+    // initialize stack pointer
+    *(registers+REG_SP) = segment_size - 4;
+    // initialize global pointer
+    *(registers+REG_GP) = binaryLength;
+    // initialize heap/bump pointer (malloc)
+    *(registers+REG_K1) = *(registers+REG_GP);
+}
+
+void emulate(int argc, int *argv) {
     int* process;
 
-    initInterpreter();
+    print(selfieName);
+    print((int*) ": this is selfie's mipster executing ");
+    print(binaryName);
+    print((int*) " with ");
+    print(itoa(memorySize / 1024 / 1024, string_buffer, 10, 0));
+    print((int*) "MB of memory");
+    println();
+
+    resetInterpreter();
 
     isEmulator        = 1;
     segment_size      = 8 * 1024 * 1024;
-    numberOfProcesses = 4;
 
     readyQ   = os_createQueue();
     blockedQ = os_createQueue();
-    parse_args(argc, argv);
+    zombieQ  = os_createQueue();
+    waitQ    = os_createQueue();
 
-    while (numberOfProcesses > 0) {
-        sr      = os_kmalloc();
-        process = os_createProcess();
-        os_appendQueue(readyQ, process);
+    sr = os_kmalloc();
+    process = os_createProcess();
+    os_appendQueue(readyQ, process);
 
-        loadBinary(binaryName);
+    copyBinaryToMemory();
+    initRegisterPointers(process);
+    //up_copyArguments(argc, argv);
 
-        initRegisterPointers(process);
-        up_copyArguments(argc-3, argv+3);
-
-        numberOfProcesses = numberOfProcesses - 1;
-
-        if (debug_sm) {
-            print((int*) "[SM] current SP: ");
-            print(itoa(*(registers+REG_SP)+sr, string_buffer, 10, 10));
-            println();
-            print((int*) "--------------------------");
-            println();
-        }
+    if (debug_sm) {
+        print((int*) "[SM] current SP: ");
+        print(itoa(*(registers+REG_SP)+sr, string_buffer, 10, 10));
+        println();
+        print((int*) "--------------------------");
+        println();
     }
+
     run();
-
-    exit(0);
 }
-
-
 
 // -----------------------------------------------------------------
 // ----------------------------- MAIN ------------------------------
 // -----------------------------------------------------------------
 
-int main(int argc, int *argv) {
-    int *firstParameter;
+int selfie(int argc, int* argv) {
+    if (argc < 2)
+        return -1;
+    else {
+        while (argc >= 2) {
+            if (stringCompare((int*) *argv, (int*) "-c")) {
+                sourceName = (int*) *(argv+1);
+                binaryName = sourceName;
 
+                argc = argc - 2;
+                argv = argv + 2;
+
+                compile();
+            } else if (stringCompare((int*) *argv, (int*) "-o")) {
+                binaryName = (int*) *(argv+1);
+
+                argc = argc - 2;
+                argv = argv + 2;
+
+                if (binaryLength > 0)
+                    emit();
+                else {
+                    print(selfieName);
+                    print((int*) ": nothing to emit to output file ");
+                    print(binaryName);
+                    println();
+                }
+            } else if (stringCompare((int*) *argv, (int*) "-l")) {
+                binaryName = (int*) *(argv+1);
+
+                argc = argc - 2;
+                argv = argv + 2;
+
+                load();
+            } else if (stringCompare((int*) *argv, (int*) "-m")) {
+                initMemory(atoi((int*) *(argv+1)));
+
+                argc = argc - 1;
+                argv = argv + 1;
+
+                // pass binaryName as first argument replacing size
+                *argv = (int) binaryName;
+
+                if (binaryLength > 0)
+                    emulate(argc, argv);
+                else {
+                    print(selfieName);
+                    print((int*) ": nothing to emulate");
+                    println();
+
+                    exit(-1);
+                }
+
+                return 0;
+            } else if (stringCompare((int*) *argv, (int*) "-k")) {
+                print(selfieName);
+                print((int*) ": selfie -k size ... not yet implemented");
+                println();
+
+                return 0;
+            } else
+                return -1;
+        }
+    }
+
+    return 0;
+}
+
+int main(int argc, int *argv) {
     initLibrary();
+
+    initScanner();
 
     initRegister();
     initDecoder();
 
-    if (argc > 1) {
-        firstParameter = (int*) *(argv+1);
+    initInterpreter();
 
-        if (getCharacter(firstParameter, 0) == '-') {
-            if (getCharacter(firstParameter, 1) == 'c')
-                main_compiler();
-            else if (getCharacter(firstParameter, 1) == 'm') {
-                if (argc > 3)
-                    main_emulator(argc, (int*) argv);
-                else
-                    exit(-1);
-            }
-            else {
-                exit(-1);
-            }
-        } else {
-            exit(-1);
-        }
-    } else
-        // default: compiler
-        main_compiler();
+    selfieName = (int*) *argv;
+
+    argc = argc - 1;
+    argv = argv + 1;
+
+    if (selfie(argc, (int*) argv) != 0) {
+        print(selfieName);
+        print((int*) ": usage: selfie { -c source | -o binary | -l binary } [ -m size ... | -k size ... ] ");
+        println();
+    }
+
+    exit(0);
 }
