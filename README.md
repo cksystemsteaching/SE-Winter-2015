@@ -86,3 +86,16 @@ From now on, processes will trigger process creation and synchronization.
 * Modify the exit call such that terminating childprocesses do not quit the emulator
 * Provide a demo process forking at least one child process that performs a different task along with the parent process. Play with interleavings and locks between parent and children
 * Deadline: Nov 12, end of day
+
+Assignment 5: Virtual Memory
+----------------------------
+
+* implement on-demand paging instead of memory segmentation in the emulator.
+* partition the emulated memory (like physical memory on a real machine) into 4KB frames.
+* each process gets a 4MB virtual address space, i.e., each process may access any address between 0x0 to 0x3FFFFFF. Virtual address space is organised in 4KB pages
+* whenever a process actually accesses an address, allocate a frame and provide a mapping between pages and frames, i.e., a page table for each process
+* modify the tlb function accordingly
+* provide a demo program that allocates the whole virtual memory space but only accesses, for example, 128 different addresses evenly distributed within that region. Make sure that in this case only 128 frames are actually allocated, not the whole 4MB.
+* page replacement and swapping is not required in this assignment
+
+* Deadline: November 26, end of day
