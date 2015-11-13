@@ -690,7 +690,9 @@ void setProcessWaitingStatus(int *process);
 void unsetProcessWaitingStatus(int *process);
 
 int* createChild(int pid);
-int* getChildList(int *process);
+int* getChildQueue(int *process);
+
+int* getNextWantedProcess(int pid, int *primaryQueue, int *secondaryQueue, int *tertiaryQueue);
 
 // segmentation table entry operations
 int* createSegmentationTableEntry(int pid, int segmentSize);
@@ -700,6 +702,7 @@ int  getMemorySegmentSize(int *segment);
 
 
 void continueExecuting();
+void releaseLock();
 
 
 
@@ -3812,7 +3815,7 @@ void syscall_write() {
     int vaddr;
     int fd;
     int *buffer;
- //   syscall_lock();
+//    syscall_lock();
 	size  = *(registers+REG_A2);
 	vaddr = *(registers+REG_A1);
 	fd    = *(registers+REG_A0);
@@ -4095,18 +4098,19 @@ void syscall_wait(){
 	waitForPID = *(registers+REG_A0);
 
 	if(waitForPID != getParentPID(currProcess)){
-		if(listContainsElement(waitForPID, zombieQueue) == 0){
+	//	if(listContainsElement(waitForPID, zombieQueue) == 0){
 		
 			waitForPID = *(registers+REG_A0);
 
-			childListOfParent = getChildList(currProcess);
+			childListOfParent = getChildQueue(currProcess);
 			child = createChild(waitForPID);
-			appendListElement(child, childListOfParent);
-			syscall_unlock();
-			setProcessWaitingStatus(currProcess);
-			saveProcessState();
-			switchProcess(0);
-		}
+			if(child != (int*)0){ // if child == (int*)0 then no process with PID 'waitForPID' exists
+				appendListElement(child, childListOfParent);
+				releaseLock();
+				setProcessWaitingStatus(currProcess);
+				switchProcess(0);
+			}
+	//	}
 	}
 }
 
@@ -4198,7 +4202,7 @@ void printProcess(int *element){
 	println();
 	print((int*)"counterchildren ");
 	if(element != (int*)0)
-		print(itoa(getListSize(getChildList(element)), string_buffer, 10, 0));
+		print(itoa(getListSize(getChildQueue(element)), string_buffer, 10, 0));
 	println();
 	
 }
@@ -4348,14 +4352,33 @@ void unsetProcessWaitingStatus(int *process){
 // create child for childlist
 int* createChild(int pid){
 	int *child;
-	child = malloc(3*4);
-	*(child+0) = 0;	// prev
-	*(child+1) = 0;	// next
-	*(child+2) = pid;	// process ID of child
-	return child;
+	int *findProcess;
+	findProcess = getNextWantedProcess(pid, readyQueue, blockedQueue, zombieQueue);
+	if((int)findProcess != 0){ 
+		child = malloc(3*4);
+		*(child+0) = 0;	// prev
+		*(child+1) = 0;	// next
+	
+		*(child+2) = pid;	// process ID of child
+		return child;
+	}
+	return (int*)0;
 }
 
-int* getChildList(int *process){
+int* getNextWantedProcess(int pid, int *primaryQueue, int *secondaryQueue, int *tertiaryQueue){
+	int *findProcess;
+	findProcess = findElementByPID(pid, primaryQueue);
+	
+	if((int)findProcess == 0){
+		findProcess = findElementByPID(pid, secondaryQueue);
+		if((int)findProcess == 0){
+			findProcess = findElementByPID(pid, tertiaryQueue);
+		}		
+	}
+	return findProcess;
+}
+
+int* getChildQueue(int *process){
 	return (int*)*(process+7);
 }
 
@@ -4545,7 +4568,7 @@ int* findElementByPID(int pid, int *list){
 int listContainsElement(int pid, int *list){
 	int *el;
 	el = findElementByPID(pid, list);
-	if(el == (int*)0)
+	if((int)el == 0)
 		return 0;
 	return 1;
 }
@@ -4626,7 +4649,9 @@ int getListSize(int *list){
 	size = 0;
 	pToHead = pollListHead(list);
 	currElement = (int*)*pToHead;
+
 	while((int)currElement != 0){
+
 		size = size+1;
 		currElement = getNextListElement(currElement);
 	}
@@ -4637,14 +4662,14 @@ int* getNextListElement(int *process){
 	return (int*)*(process+1);
 }
 
-int allChildrenTerminated(int *process){
+int allChildrenTerminated1(int *process){
 	int *childrenList;
 	int *current;
 	int currentID;
 	int containsCurrent;
 	int *currentZombie;
 	
-	childrenList = getChildList(process);
+	childrenList = getChildQueue(process);
 	if(isListEmpty(childrenList))
 		return 0;
 	current = (int*)*childrenList;
@@ -4663,7 +4688,195 @@ int allChildrenTerminated(int *process){
 	return 1;
 }
 
-void switchProcess(int finished){ //finished = 1, not finished = 0
+// @return: 1 if all children of process terminated 
+//			0 otherwise
+// children that are terminated are in the zombieQueue
+// if a child is in the zombieQueue it can be removed from the 
+// zombieQueue and the processes childQueue
+// the childQueue is only analyzed as long as the condition 'all children terminated' holds
+int allChildrenTerminated(int *process){
+	int *childQueue;
+	int childQueueSize;
+	int *currChild;
+	int *currZombie;
+	int zombieQueueSize;
+	int listContainsChild;
+	int i;
+	int j;
+	i=0;
+	listContainsChild=0;
+	childQueue = getChildQueue(process);
+	childQueueSize = getListSize(childQueue);
+	while(i < childQueueSize){	// check every child in the queue
+		currChild = removeFirst(childQueue);
+		zombieQueueSize = getListSize(zombieQueue);
+		j = 0;
+		while(j < zombieQueueSize){
+			currZombie = removeFirst(zombieQueue);
+			if(getProcessID(currChild) == getProcessID(currZombie)){
+				listContainsChild = 1;
+				j = zombieQueueSize; // for exiting while loop
+			} else { // if currZombie is not the zombie we are looking for it must be appended in the list again
+				appendListElement(currZombie, zombieQueue);
+			}
+			j = j+1;
+		}
+		if(listContainsChild == 0){ // if the current child is not in the zombie list
+			appendListElement(currChild, childQueue); // it has to be appended in the childQueue again
+			return 0;
+		}
+		i = i+1;
+	}
+	
+	return 1;
+}
+
+// wake up parent process, remove from blocked queue and add to readyQueue
+void notify(int *process){
+	int *findProcess;
+	int blockedListSize;
+	int i;
+	i = 0;
+	blockedListSize = getListSize(blockedQueue);
+	findProcess = removeFirst(blockedQueue);
+	// remove from blocked queue and add to readyQueue
+	while(i < blockedListSize){
+		if(findProcess != process){
+			appendListElement(findProcess, blockedQueue);
+			findProcess = removeFirst(blockedQueue);
+		} else {
+			i = blockedListSize;
+		}
+		i = i+1;
+	} 
+	if((int)findProcess != 0) {
+		unsetProcessWaitingStatus(process);
+		appendListElement(findProcess, readyQueue);
+	}
+}
+
+void releaseLock(){
+	lock = 0;
+	lockCounter = 0;
+}
+
+//@return: first "not waiting" process in blockedQueue
+//			if such a process does not exist it returns the the first process from readyQueue
+int* getNextNotWaitingProcess(){
+	int *curr;
+	int blockedListSize;
+	int i;
+	i = 0;
+	blockedListSize = getListSize(blockedQueue);
+	curr = removeFirst(blockedQueue);
+	while(i < blockedListSize){
+		if(isProcessWaiting(curr)){ // process is waiting, get next
+			appendListElement(curr, blockedQueue);
+		} else {
+			return curr;
+		}
+		curr = removeFirst(blockedQueue);
+		
+		i = i+1;
+	}
+	if((int)curr != 0)
+		appendListElement(curr, blockedQueue);
+	// if all processes from blocked queue are waiting
+	return removeFirst(readyQueue);
+
+}
+
+void switchProcess(int finished){
+	int *parentProcess;
+	if(finished){
+		saveProcessState();
+		if(allChildrenTerminated(currProcess)){// if process waits for child it is in his childList
+		// a child is in the childQueue of a process when the process invokes wait on the childrens PID
+		// has child(ren) and all terminated --> all children are in zombieQueue or counterChildren is 0
+			if(getParentPID(currProcess) == -1) {
+				// --> there is no parent
+				// --> currProcess can terminate
+				// all other processes can be killed because all other (probably existing) processes are children
+				// of this master parent but there was no wait(PID) call
+				continueExecuting();
+			} else {
+				// this currProcess has a parent --> currProcess is added to the zombieQueue
+				// wake up parent process --> if all children terminated of parentProcess --> add to readyQueue
+				//							remove child, remove child from parents childList
+
+				print((int*) "add process with id [");
+		   		print(itoa(getProcessID(currProcess), string_buffer, 10,0));
+			   	print((int*)"] to zombieList");println();
+				appendListElement(currProcess, zombieQueue);
+				
+				parentProcess = findElementByPID(getParentPID(currProcess), readyQueue);
+				if((int)parentProcess == 0){
+					parentProcess = findElementByPID(getParentPID(currProcess), blockedQueue);
+				}
+				if((int)parentProcess != 0){
+					if(allChildrenTerminated(parentProcess)){ // if this is the last child the parent process was waiting
+						notify(parentProcess);		  // for then the parentProcess can be woken up 
+					}
+				}
+				
+			}
+		} else {
+			// not implemented yet, occurs when a parentProcess does not invoke wait(PID) on his child's PID
+			// children of this process are alive
+			// 2 possibilities: 1. invoke wait
+			//					2. kill all children (recursively)
+			continueExecuting();
+		}
+		if(lock){
+			// getNextProcess: if lock is hold by currProcess
+			if(lockID == getProcessID(currProcess)){ // if lock is hold by currProcess --> releaseLock
+				releaseLock();
+				currProcess = getNextNotWaitingProcess();	// get next (not waiting) process from blockedQueue
+			} else {
+				currProcess = removeFirst(readyQueue);
+			}
+		} else {
+			currProcess = getNextNotWaitingProcess();	// get next (not waiting) process from blockedQueue
+		
+			printProcess(currProcess);
+		}
+	} else if (finished == 0) {
+		saveProcessState();
+		if(lock){
+			if(counterInstr < maxInstr){
+				appendListElement(currProcess, readyQueue);
+			} else if(lockID != getProcessID(currProcess)){ // if lock is hold by another process, 
+				appendListElement(currProcess, blockedQueue);	// switchProcess is invoked from syscall_lock()
+			} else if(isProcessWaiting(currProcess)) {
+				appendListElement(currProcess, blockedQueue);	// switchProcess is invoked from syscall_wait()
+			} else {
+				appendListElement(currProcess, readyQueue);
+			}
+		// if it is a cooperative switch --> waiting status == 0,
+		//otherwise waiting status == 1 and switchProcess was invoked from syscall_wait()
+		} else if(isProcessWaiting(currProcess)) {
+			appendListElement(currProcess, blockedQueue);
+		} else { // lock is not hold, cooperative switch
+				appendListElement(currProcess, readyQueue);
+		}
+		// if lock is hold by any process --> get next process from readyQueue
+		//		--> if there 
+		// else -->get next process from blockedQueue
+		if(lock){
+			// get next from readyQueue
+			currProcess = removeFirst(readyQueue);
+		} else {
+			currProcess = getNextNotWaitingProcess();	// get next (not waiting) process from blockedQueue
+		}
+	}
+	if((int)currProcess == 0){	// if there is no such process something went wrong
+		exit(-1);				
+	} else {
+		setProcessState();
+	}
+}
+
+void switchProcess1(int finished){ //finished = 1, not finished = 0
 	int *childList;
 	int *currChild;
 	if(finished == 1){
@@ -4673,7 +4886,7 @@ void switchProcess(int finished){ //finished = 1, not finished = 0
 		}
 		if(isListEmpty(blockedQueue) == 0){
 			currProcess = removeFirst(blockedQueue);
-			childList = getChildList(currProcess);
+			childList = getChildQueue(currProcess);
 			currChild = removeFirst(childList);
 			if(listContainsElement(getProcessID(currChild), zombieQueue)){
 					unsetProcessWaitingStatus(currProcess);
@@ -5218,21 +5431,26 @@ void run() {
 
 	currProcess = removeFirst(readyQueue);
 	setProcessState();
-	 	
+//	 	printProcess(currProcess);
  	while (1) {
  	    fetch();
 	    if (*(registers+REG_V0) == SYSCALL_EXIT) {
 	    	if(1){
-		   		print((int*)"process with id ");
+//	    	printProcessVerbose(currProcess);println();
+		   		print((int*)"process with id [");
 		   		print(itoa(getProcessID(currProcess), string_buffer, 10,0));
-			   	print((int*)" terminates");println();
+			   	print((int*)"] terminates");println();
 			}
+			
 			switchProcess(1);
 			counterInstr = 0;
      	} else if(counterInstr == maxInstr){
 			continueExecuting();
 			switchProcess(0);
 			counterInstr = 0;
+			printProcessList(readyQueue);
+			printProcessList(blockedQueue);
+			printProcessList(zombieQueue);
 		} else {
        		continueExecuting();
 		   	counterInstr = counterInstr + 1;
@@ -5340,8 +5558,8 @@ void copyBinaryToMemory() {
 void emulate(int argc, int *argv) {
 	int segmentSize;
 	int vaddr;
-	int i;
-	i =0;
+//	int i;
+//	i =0;
 	isEmulating = 1;
 	segmentSize = 1024*1024;
 	
@@ -5353,23 +5571,28 @@ void emulate(int argc, int *argv) {
     initInterpreter();
     parse_args(argc, argv);
 	
-	currProcess = createProcess();
-	currSegment = createSegmentationTableEntry(getProcessID(currProcess), segmentSize);
-	*(currProcess+5) = (int)currSegment;
-	appendListElement(currSegment, segmentationTable);
-	appendListElement(currProcess, readyQueue);
+//	while(i< 3){
+	
+		currProcess = createProcess();
+		currSegment = createSegmentationTableEntry(getProcessID(currProcess), segmentSize);
+		*(currProcess+5) = (int)currSegment;
+		appendListElement(currSegment, segmentationTable);
+		appendListElement(currProcess, readyQueue);
 
-	setProcessState();
+		setProcessState();
 
-    copyBinaryToMemory();
+		copyBinaryToMemory();
 
-	*(registers+REG_GP) = binaryLength;
-	*(registers+REG_K1) = *(registers+REG_GP);
-    *(registers+REG_SP) = *(currSegment+4)-4;
+		*(registers+REG_GP) = binaryLength;
+		*(registers+REG_K1) = *(registers+REG_GP);
+		*(registers+REG_SP) = *(currSegment+4)-4;
 
-	up_copyArguments(argc-3, argv+3);
-	up_copyArguments(argc, argv);
-
+		up_copyArguments(argc-3, argv+3);
+		up_copyArguments(argc, argv);
+		
+//		i = i+1;
+//	}
+	
 	run();
 }
 
