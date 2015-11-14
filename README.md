@@ -1,62 +1,148 @@
+# Selfie
 
-Home Work Flow
---------------
+Selfie is a project of the [Computational Systems Group](http://www.cs.uni-salzburg.at/~ck) at the Department of Computer Sciences of the University of Salzburg in Austria.
 
-* Step 0: form a team of 2-3 members
-* Step 1: get a github account (for each member)
-* Step 2: one person per group forks the SE-Winter-2015 repository by clicking [here](https://github.com/cksystemsteaching/SE-Winter-2015/fork) and adds the other team members as collaborators
-* Step 3: check out the branch named __selfie-master__ in __your__ fork of SE-Winter-2015
-* Step 4: implement the first assignment (see below)
-* Step 5: add your names to the AUTHORS file
-* Step 6: send a pull request containing your solution via github.com to [cksystemsteaching/SE-Winter-2015/tree/selfie-master](https://github.com/cksystemsteaching/SE-Winter-2015/tree/selfie-master)
+For further information and support please refer to http://selfie.cs.uni-salzburg.at
 
+## Build Instructions
 
-Assignment 0: Basic data structures
------------------------------------
+### On 32-bit Linux
 
-Review [linked lists](https://en.wikipedia.org/wiki/Linked_list) and implement a simple program using a singly linked list in C*. The minimal requirements are as follows:
+The first step is to produce a binary that runs on your computer. To do that use `gcc` in a terminal to compile `selfie.c`:
 
-* must be implemented in C*
-* must compile with selfie
-* must run on selfie
-* the list must be dynamically allocated
-* every node must be dynamically allocated
-* inserting nodes to the list and removing nodes from the list
-* list iteration
-* Bonus: sort the list. Any way you like
-* Deadline: Oct 15, end of day
+```bash
+$ gcc selfie.c -o selfie
+```
 
+This produces from `selfie.c` an executable called `selfie` as directed by the `-o` option. The executable contains both the C\* compiler as well as the mipster emulator.
 
-Assignment 1: Loading, scheduling, switching, execution
--------------------------------------------------------
+Selfie may be invoked as follows:
 
-Implement basic concurrent execution of _n_ processes in mipster. _n >= 2_ 
+```bash
+./selfie { -c source | -o binary | -s assembly | -l binary } [ -m size ... | -d size ... | -k size ... ]
+```
 
-* understand how mipster [interprets and executes binary instructions](https://github.com/cksystemsteaching/SE-Winter-2015/blob/selfie-master/selfie.c#L3933). Tipp: add your own comments to the code
-* mipster maintains a local state for a process (running executable), e.g., pc, registers, memory
-* understand the purpose of each variable and data structure
-* duplicate the process state n times
-* running mipster like: _./selfie -m 32 yourbinary_ should generate _n_ instances of _yourbinary_ in a single instance of mipster
-* implement [preemptive multitasking](https://en.wikipedia.org/wiki/Preemption_(computing)), i.e., switching between the _n_ instances of _yourbinary_ is determined by mipster 
-* switch processes every m instructions. _1 <= m <= number of instructions in yourbinary_
-* implement [round-robin scheduling](https://en.wikipedia.org/wiki/Round-robin_scheduling)
-* add some output in _yourbinary_ to demonstrate context switching
-* Deadline: Oct 22, end of day
+The order in which the options are provided matters for taking full advantage of self-referentiality.
 
+The `-c` option invokes the C\* compiler on the given `source` file producing MIPSter code that is stored internally.
 
-Assignment 2: Memory segmentation, yield system call
-----------------------------------------------------
+The `-o` option writes MIPSter code produced by the most recent compiler invocation to the given `binary` file.
 
-This assignment deals with cooperative multitasking of _n_ processes in mipster using a single instance of physical memory.
+The `-s` option writes MIPSter assembly of the MIPSter code produced by the most recent compiler invocation including approximate source line numbers to the given `assembly` file.
 
-* again, duplicate the process state _n_ times
-* but, do not duplicate the whole main memory
-* instead, split the main memory into segments by implementing a segment table in mipster
-* each process has an entry in the segment table for the segment start address and segment size
-* design the segment table for constant time access
-* translate the addresses of read and write operations to memory
+The `-l` option loads MIPSter code from the given `binary` file. The `-o` and `-s` options can also be used after the `-l` option. However, in this case the `-s` option does not generate approximate source line numbers.
 
-* implement [cooperative multitasking](https://en.wikipedia.org/wiki/Computer_multitasking) through a yield system call, i.e., a user process calling [sched_yield()](http://linux.die.net/man/2/sched_yield) will cause the OS to re-schedule
-* implement a simple user program that demonstrates yielding, e.g, yield each time after printing a counter to the console
-* Deadline: Oct 29, end of day
+The `-m` option invokes the mipster emulator to execute MIPSter code most recently loaded or produced by a compiler invocation. The emulator creates a machine instance with `size` MB of memory. The `source` or `binary` name of the MIPSter code and any remaining `...` arguments are passed to the main function of the code. The `-d` option is similar to the `-m` option except that mipster outputs each executed instruction, its approximate source line number, if available, and the relevant machine state.
 
+The `-k` option is not yet supported.
+
+To compile `selfie.c` for mipster use the following commands:
+
+```bash
+$ gcc selfie.c -o selfie
+$ ./selfie -c selfie.c -o selfie.mips
+```
+
+This produces a MIPSter binary file called `selfie.mips` that implements selfie.
+
+To execute `selfie.mips` by mipster use the following command:
+
+```bash
+$ ./selfie -l selfie.mips -m 32
+```
+
+This is semantically equivalent to executing `selfie` without any arguments:
+
+```bash
+$ ./selfie
+```
+
+### Self-compilation
+
+Here is an example of how to perform self-compilation of `selfie.c`:
+
+```bash
+$ gcc selfie.c -o selfie
+$ ./selfie -c selfie.c -o selfie1.mips -m 32 -c selfie.c -o selfie2.mips
+$ diff -s selfie1.mips selfie2.mips
+Files selfie1.mips and selfie2.mips are identical
+```
+
+### Self-execution
+
+The following example shows how to perform self-execution of `selfie.c`. In this case we invoke the emulator to invoke itself which then invokes the compiler to compile itself:
+
+```bash
+$ gcc selfie.c -o selfie
+$ ./selfie -c selfie.c -o selfie1.mips -m 64 -l selfie1.mips -m 32 -c selfie.c -o selfie2.mips
+$ diff -s selfie1.mips selfie2.mips
+Files selfie1.mips and selfie2.mips are identical
+```
+
+Note that the example may take several hours to complete. Also, a machine instance A running a machine instance B needs more memory than B, say, 64MB rather than 32MB in the example here.
+
+### Workflow
+
+To compile any C\* source you may use `selfie` directly or on top of the emulator. Both generate identical MIPSter binaries:
+
+```bash
+$ gcc selfie.c -o selfie
+$ ./selfie -c any-cstar-file.c -o any-cstar-file1.mips
+$ ./selfie -c selfie.c -o selfie.mips
+$ ./selfie -l selfie.mips -m 32 -c any-cstar-file.c -o any-cstar-file2.mips
+$ diff -s any-cstar-file1.mips any-cstar-file2.mips
+Files any-cstar-file1.mips and any-cstar-file2.mips are identical
+```
+
+The same can also be done without producing a `selfie.mips` binary file:
+
+```bash
+$ gcc selfie.c -o selfie
+$ ./selfie -c any-cstar-file.c -o any-cstar-file1.mips
+$ ./selfie -c selfie.c -m 32 -c any-cstar-file.c -o any-cstar-file2.mips
+$ diff -s any-cstar-file1.mips any-cstar-file2.mips
+Files any-cstar-file1.mips and any-cstar-file2.mips are identical
+```
+
+And even with a single invocation of `selfie`:
+
+```bash
+$ gcc selfie.c -o selfie
+$ ./selfie -c any-cstar-file.c -o any-cstar-file1.mips -c selfie.c -m 32 -c any-cstar-file.c -o any-cstar-file2.mips
+$ diff -s any-cstar-file1.mips any-cstar-file2.mips
+Files any-cstar-file1.mips and any-cstar-file2.mips are identical
+```
+
+#### Debugging
+
+Console messages always begin with the name of the source or binary file currently running. The emulator also shows the amount of memory allocated for its machine instance and how execution terminated (exit code).
+
+MIPSter assembly for `selfie` and any other C\* file is generated as follows:
+
+```bash
+$ gcc selfie.c -o selfie
+$ ./selfie -c selfie.c -s selfie.s
+```
+
+If the assembly code is generated from a binary generated by the compiler (and not loaded from a file) approximate source line numbers are included in the assembly file.
+
+Verbose debugging information is printed with the `-d` option, for example:
+
+```bash
+$ gcc selfie.c -o selfie
+$ ./selfie -c selfie.c -d 32
+```
+
+Similarly, if the executed binary is generated by the compiler (and not loaded from a file) approximate source line numbers are included in the debug information.
+
+### On Mac OS X / 64-bit Linux
+
+On Mac OS X as well as on 64-bit Linux (requires gcc-multiarch or, on Ubuntu, gcc-multilib), you may use the following command to compile `selfie.c`:
+
+```bash
+clang -w -m32 -D'main(a, b)=main(int argc, char **argv)' selfie.c -o selfie
+```
+
+After that, you can proceed with the same commands as for 32-bit Linux.
+
+The `-w` option suppresses warnings that can be ignored for now. The `-m32` option makes the compiler generate a 32-bit executable. Selfie only supports 32-bit architectures right now. The `-D` option is needed to bootstrap the main function declaration. The `char` data type is not available in C\* but required by `clang`.
