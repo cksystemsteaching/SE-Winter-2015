@@ -940,20 +940,28 @@ void create_process(int argc, int* argv) {
 	// Initalize Registers
 	registers = malloc(32 * 4);
 
+	// Remove this
 	while (seg_size % 4 != 0)
 		seg_size = seg_size - 1;
 
+	// This one will be 4*1024*1024 - 4
 	*(registers + REG_SP) = seg_size - 4;
 
-	// Create a new segment in the segment_table
+	// Create a new segment in the segment_table, no longer necessary
 	if (seg_count == 0) {
 		segment_table = insert_segment(memory, seg_size, 0, 0, seg_count);
 		last_created_segment = segment_table;
 	}
 
+	// Not necessary
 	seg_count = seg_count + 1;
 
-	// Create process
+	// Build page table
+	// Not yet, it's just gonna be zero
+	// Format: KEY - VALUE - PREV - NEXT
+	// Also, save a global variable (=: pOffset), that documents where above info can be found, i.e. 0
+
+	// Create process, replace segment with page table of course
 	if (proc_count == 0) {
 		proc_list = insert_process(pc, registers, last_created_segment, 0, 0,
 				proc_count);
@@ -963,10 +971,11 @@ void create_process(int argc, int* argv) {
 	proc_count = proc_count + 1;
 
 	current_proc = last_created_proc;
-	current_seg = (int*) getSegment(current_proc);
+	current_seg = (int*) getSegment(current_proc); // update this to current_page_table
 	registers = (int*) getRegisters(current_proc);
 }
 
+// Remove this method
 void pop_seg_tbl(int argc, int* argv) {
 	// Create a new segment in the segment_table
 	if (seg_count == 0) {
@@ -4417,6 +4426,8 @@ void syscall_fork() {
 	print((int*) "forkin yo\n");
 
 	reg_current = (int*) getRegisters(current_proc);
+
+	// Remove the next two lines of code
 	next_seg = (int*) *(last_created_segment + SEG_OFF_PREV);
 	next_seg_id = *(next_seg + SEG_OFF_SEGID);
 
@@ -4432,16 +4443,16 @@ void syscall_fork() {
 	println();
 
 	// Allocate space for new memory and new registers for new process
-	new_proc_seg = next_seg;
+	new_proc_seg = next_seg; // remove this line
 	new_proc_reg = malloc(32 * 4);
 
-	last_created_segment = new_proc_seg;
+	last_created_segment = new_proc_seg; // remove this line
 
 	// ... same for registers
 	print((int*) "Copying registers...\n");
 	reg_copy(getRegisters(current_proc), new_proc_reg);
 
-	// Copy segment of current process into new segment
+	// Replace this segment copying business (see segment_copy for more comments)
 	print((int*) "Copying segments...\n");
 	segment_copy(getSegment(current_proc), new_proc_seg);
 
@@ -4466,6 +4477,7 @@ void syscall_fork() {
 	triggerContextSwitch = 1;
 }
 
+// Not yet, sorry...
 void segment_copy(int* old_seg, int* new_seg) {
 	int* border;
 	int* cursor;
@@ -4587,6 +4599,20 @@ void syscall_wait() {
 // -----------------------------------------------------------------
 
 int tlb(int vaddr) {
+
+	// vaddr = vaddr - (vaddr % (4*1024));
+	// look up in page table (KeySet)
+	// if a match has been found, return the value
+	// if no match has been found, however make a new page table node with vaddr as key (--> page_fault_handler!!)
+	// the value will be the frame that palloc returns
+	// then return that value
+
+	// how does palloc work?
+	// look at pOffset, that's gonna be your value
+	// allocate 4kB with pOffset as offset
+	// but before you return with that:
+	// do pOffset = pOffset + 1024
+
 	if (vaddr % 4 != 0)
 		exception_handler(EXCEPTION_ADDRESSERROR);
 
@@ -4594,6 +4620,9 @@ int tlb(int vaddr) {
 	return vaddr / 4;
 }
 
+// Here, look at vaddr, save remainder when dividing by 4*1024
+// return *(tlb(vaddr) + remainder);
+// similar in storeMemory
 int loadMemory(int vaddr) {
 	int* physical_mem_addr;
 
@@ -5400,6 +5429,7 @@ void run() {
 	}
 }
 
+// Just switch Page Table instead
 void context_switch() {
 	save_context();
 	schedule_next_proc();
@@ -5568,9 +5598,7 @@ int printCounters(int total, int *counters, int max) {
 	print(itoa(*(counters + a / 4), string_buffer, 10, 0, 0));
 
 	print((int*) "(");
-	print(
-			itoa(fixedPointRatio(total, *(counters + a / 4)), string_buffer, 10,
-					0, 2));
+	print(itoa(fixedPointRatio(total, *(counters + a / 4)), string_buffer, 10, 0, 2));
 	print((int*) "%)");
 
 	if (*(counters + a / 4) != 0) {
@@ -5647,11 +5675,13 @@ void emulate(int argc, int *argv) {
 	println();
 
 	proc_count = 0;
+
+	// This will no longer be necessary
 	seg_count = 0;
+	seg_size = memorySize / proc_limit;
+	// --------------------------------
 
 	interpret = 1;
-
-	seg_size = memorySize / proc_limit;
 
 	while (proc_count < 1) {
 		resetInterpreter();
@@ -5667,9 +5697,11 @@ void emulate(int argc, int *argv) {
 		up_copyArguments(argc, argv);
 	}
 
+	// Get rid of this while loop
 	while (seg_count < proc_limit) {
 		pop_seg_tbl(argv, argv);
 	}
+	// -----------------------
 
 	run();
 
@@ -5679,8 +5711,7 @@ void emulate(int argc, int *argv) {
 	println();
 
 	print(selfieName);
-	print(
-			(int*) ": profile: total,max(ratio%)@addr(line#),2max(ratio%)@addr(line#),3max(ratio%)@addr(line#)");
+	print((int*) ": profile: total,max(ratio%)@addr(line#),2max(ratio%)@addr(line#),3max(ratio%)@addr(line#)");
 	println();
 	printProfile((int*) ": calls: ", calls, callsPerAddress);
 	printProfile((int*) ": loops: ", loops, loopsPerAddress);
