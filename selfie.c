@@ -819,7 +819,6 @@ int SYSCALL_READ    = 4003;
 int SYSCALL_WRITE   = 4004;
 int SYSCALL_OPEN    = 4005;
 int SYSCALL_MALLOC  = 5001;
-int SYSCALL_GETCHAR = 5002;
 int SYSCALL_YIELD   = 6000;
 int SYSCALL_LOCK	= 6001;
 int SYSCALL_UNLOCK	= 6002;
@@ -3865,15 +3864,26 @@ void syscall_exit() {
     int exitCode;
 
     exitCode = *(registers+REG_A0);
-
     *(registers+REG_V0) = exitCode;
-	println();
-    print(binaryName);
-    print((int*) ": exiting with error code ");
-    print(itoa(exitCode, string_buffer, 10, 0, 0));
-    println();
 
-    halt = 1;
+	syscall_unlock();
+
+	print((int*)"process with id [");
+	print(itoa(getProcessID(currProcess), string_buffer, 10,0, 0));
+   	print((int*)"] terminates");println();
+
+	if(getParentPID(currProcess) > -1){
+		counterInstr = 0;
+		switchProcess(1);
+	} else {
+		print(binaryName);
+		print((int*) ": exiting with error code ");
+		print(itoa(exitCode, string_buffer, 10, 0, 0));
+		println();
+
+		halt = 1;
+	}
+			
 }
 
 void emitRead() {
@@ -4617,8 +4627,8 @@ void sortList(int *list){
 	pToHead = pollListHead(list);
 	pToTail = pollListTail(list);
 	
-	if(isListEmpty(list));	// list is empty, nothing to do 
-	else if(*pToHead == *pToTail);	// list contains only one element, nothing to do
+	if(isListEmpty(list)){}	// list is empty, nothing to do 
+	else if(*pToHead == *pToTail){}	// list contains only one element, nothing to do
 	else {	//otherwise
 		
 		while(unsorted){
@@ -4926,7 +4936,8 @@ void switchFromFinishedProcess(){
 			// --> currProcess can terminate
 			// all other processes can be killed because all other (probably existing) processes are children
 			// of this master parent but there was no wait(PID) call
-			continueExecuting();
+//			continueExecuting();
+			exit(0);
 		} else {
 			// this currProcess has a parent --> currProcess is added to the zombieQueue
 			// wake up parent process --> if all children terminated of parentProcess --> add to readyQueue
@@ -4953,7 +4964,8 @@ void switchFromFinishedProcess(){
 		// children of this process are alive
 		// 2 possibilities: 1. invoke wait
 		//					2. kill all children (recursively)
-		continueExecuting();
+		//continueExecuting();
+		exit(-1);
 	}
 	if(lock){
 		// getNextProcess: if lock is hold by currProcess
@@ -5079,11 +5091,11 @@ int tlb(int vaddr) {
 		if(memoryStartAddress + memorySize < ((int)memory + addr)){ // addressed memory is greater than memory
 			print((int*)"tlb second: ");exception_handler(EXCEPTION_SEGMENTATIONFAULT);
 		}
-		if(nextValidPID != 0){
-			if(*(currSegment+4) < addr){
-			    print((int*)"tlb third: ");exception_handler(EXCEPTION_HEAPOVERFLOW);
-			}
-		}
+//		if(nextValidPID != 0){
+//			if(*(currSegment+4) < addr){
+//			    print((int*)"tlb third: ");exception_handler(EXCEPTION_HEAPOVERFLOW);
+//			}
+//		}
 		if(addr < 0){
 	       print((int*)"tlb fourth: "); exception_handler(EXCEPTION_ADDRESSERROR);
 		}
@@ -5884,24 +5896,12 @@ void run() {
 	setProcessState();
 	while(halt==0){
  	    fetch();
-		if (*(registers+REG_V0) == SYSCALL_EXIT) {
-	   		print((int*)"process with id [");
-	   		print(itoa(getProcessID(currProcess), string_buffer, 10,0, 0));
-		   	print((int*)"] terminates");println();
-		
-			switchProcess(1);
-			counterInstr = 0;
-	
-	 	} else if(counterInstr == maxInstr){
-			continueExecuting();
+		continueExecuting();
+	 	if(counterInstr == maxInstr){
 			switchProcess(0);
 			counterInstr = 0;
-			printProcessList(readyQueue);
-			printProcessList(blockedQueue);
-			printProcessList(zombieQueue);
 		
 		} else {
-	   		continueExecuting();
 		   	counterInstr = counterInstr + 1;
 	   	}
 	}
@@ -6125,9 +6125,8 @@ void disassemble() {
 
 void emulate(int argc, int *argv) {
 	int segmentSize;
-	int vaddr;
 	isEmulating = 1;
-	segmentSize = 1024*1024;
+	segmentSize = 4*1024*1024;
     interpret = 1;
 
     print(selfieName);
@@ -6163,6 +6162,8 @@ void emulate(int argc, int *argv) {
 		
     run();
 
+    println();
+    println();
     print(selfieName);
     print((int*) ": this is selfie's mipster terminating ");
     print(binaryName);
