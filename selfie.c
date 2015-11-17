@@ -736,6 +736,8 @@ void storeMemory(int vaddr, int data);
 int* palloc();
 void pfree(int* frame);
 
+void print_page_table(int* page_table);
+
 int MEGABYTE = 1048576;
 int PAGE_FRAME_SIZE = 4096; // 4 KB
 
@@ -886,7 +888,9 @@ int* insert_process_wait(int pc, int* reg, int* seg, int* prev, int* next,
 		int pid, int wait_for_pid);
 int* insert_pt_node(int key, int* value, int* prev, int* next);
 int* get_proc_by_pid(int* list, int pid, int next_offset, int pid_offset);
-void segment_copy(int* old_seg, int* new_seg);
+int* duplicate_page_table(int* old_page_frame);
+void free_page_table(int* page_table);
+void frame_copy(int* old_seg, int* new_seg);
 void reg_copy(int* old_reg, int* new_reg);
 int* insert_segment(int* begin, int size, int* prev, int* next, int seg_id);
 int* remove(int* node, int* list);
@@ -921,7 +925,7 @@ int random_counter = 0;
 int number_of_proc = 1;
 int proc_count;
 int instr_count;
-int instr_cycles = 3;
+int instr_cycles = 4;
 int triggerContextSwitch;
 
 int* current_page_table;
@@ -1763,8 +1767,7 @@ int getSymbol() {
 // ------------------------- SYMBOL TABLE --------------------------
 // -----------------------------------------------------------------
 
-void createSymbolTableEntry(int whichTable, int *string, int data, int class,
-		int type, int value) {
+void createSymbolTableEntry(int whichTable, int *string, int data, int class, int type, int value) {
 	int *newEntry;
 
 	// symbol table entry:
@@ -3933,7 +3936,11 @@ void syscall_exit() {
 
 	print((int*) "-------------------------\n");
 
+	// Free all page frames of the page table. We don't need them...
+	free_page_table(getPageTable(current_proc));
+
 	proc_list = remove(current_proc, proc_list);
+
 
 	triggerContextSwitch = 1;
 
@@ -4404,12 +4411,10 @@ void emitFork() {
 }
 
 void syscall_fork() {
-	int* new_proc_seg;
+	int* new_proc_page_table;
 	int* new_proc_reg;
 	int new_proc_pc;
 	int* reg_current;
-	int* next_seg;
-	int next_seg_id;
 
 	print((int*) "\n-------------------------\n");
 	print((int*) "forkin yo\n");
@@ -4423,29 +4428,31 @@ void syscall_fork() {
 	print(itoa(number_of_proc, string_buffer, 10, 0, 0));
 	print((int*) " processes and the last created NPID is: ");
 	print(itoa(npid, string_buffer, 10, 0, 0));
-	print((int*) "\nThe forked process receives segment: ");
-	print(itoa((int) next_seg_id, string_buffer, 10, 0, 0));
 	println();
 
 	// Allocate space for new memory and new registers for new process
-	new_proc_seg = next_seg; // remove this line
 	new_proc_reg = malloc(32 * 4);
 
 	// ... same for registers
 	print((int*) "Copying registers...\n");
 	reg_copy(getRegisters(current_proc), new_proc_reg);
 
-	// Replace this segment copying business (see segment_copy for more comments)
-	print((int*) "Copying segments...\n");
-	segment_copy(getPageTable(current_proc), new_proc_seg);
+	print((int*) "Page table of old process...\n");
+	print_page_table(getPageTable(current_proc));
+
+	// New let's duplicate the page table
+	print((int*) "Copying page table...\n");
+	new_proc_page_table = duplicate_page_table(getPageTable(current_proc));
 
 	// ... copy pc too
 	new_proc_pc = *(reg_current + REG_RA);
 
 	// Insert new process node into ready queue (pid corresponds to segment, pid is the only difference here!)
 	print((int*) "Inserting process\n");
-	proc_list = insert_process(new_proc_pc, new_proc_reg, new_proc_seg, 0,
-			last_created_proc, npid);
+	proc_list = insert_process(new_proc_pc, new_proc_reg, new_proc_page_table, 0, last_created_proc, npid);
+
+	print((int*) "Page table of new process...\n");
+	print_page_table(getPageTable(proc_list));
 
 	last_created_proc = proc_list;
 
@@ -4460,29 +4467,71 @@ void syscall_fork() {
 	triggerContextSwitch = 1;
 }
 
-// Not yet, sorry...
-// Grab the page table of the forking process, walk through it!
-// Look at the value, then call palloc, then copy the 4kB over (using storeMemory)
-// Insert into page table of forked process
-// Repeat for all other page table nodes of forking process
-void segment_copy(int* old_seg, int* new_seg) {
-	int* border;
+int* duplicate_page_table(int* old_page_table) {
+
+	int* new_frame;
+	int* new_page_table;
 	int* cursor;
 
-	border = (int*) *(new_seg + SEG_OFF_PREV);
-	cursor = (int*) *(new_seg + SEG_OFF_BEGIN);
+	new_page_table = 0;
 
-	old_seg = (int*) *old_seg;
-	new_seg = (int*) *new_seg;
+	cursor = old_page_table;
 
-	while ((int) cursor != *(border + SEG_OFF_BEGIN)) {
-		if ((int) old_seg != 0) {
-			*cursor = *old_seg;
-		}
+	print((int*) "Duplicate the page table...\n");
+	// Grab the page table of the forking process, walk through it!
+	while ( cursor != 0 ) {
 
-		old_seg = old_seg + 1;
+		// Look at the value, then call palloc, then copy the 4kB over
+		new_frame = palloc();
+		frame_copy( *(cursor+1), new_frame );
+
+		new_page_table = insert_pt_node( *cursor, new_frame, (int*) 0, new_page_table);
+
+		cursor = *(cursor + 3);
+
+	}
+
+	print((int*) "Yes, page table was duplicated...\n");
+
+	return new_page_table;
+
+}
+
+// Copies a single page frame
+void frame_copy(int* old_frame, int* new_frame) {
+
+	int* cursor;
+
+	cursor = new_frame;
+
+	print((int*) "Copying page frames...\n");
+	while ((int) cursor < (new_frame + PAGE_FRAME_SIZE/4)) {
+
+		*cursor = *old_frame;
+
+		old_frame = old_frame + 1;
 		cursor = cursor + 1;
 	}
+
+}
+
+void free_page_table(int* page_table) {
+
+	int* cursor;
+
+	cursor = page_table;
+
+	print((int*) "Free the givenpage table...\n");
+
+	while ( cursor != 0 ) {
+
+		pfree(*(cursor+1));
+		cursor = *(cursor + 3);
+
+	}
+
+	print((int*) "Page table cleared ...\n");
+
 }
 
 void reg_copy(int* old_reg, int* new_reg) {
@@ -4585,11 +4634,12 @@ void syscall_wait() {
 // ---------------------------- MEMORY -----------------------------
 // -----------------------------------------------------------------
 
-void print_page_table() {
+
+void print_page_table(int* page_table) {
 
 	int* cursor;
 
-	cursor = current_page_table;
+	cursor = page_table;
 
 	print((int*)" ---- Page Table: ---- \n");
 	while ((int) cursor != 0) {
@@ -4631,7 +4681,6 @@ int tlb(int vaddr) {
 	println();
 
 	// look up in page table (KeySet)
-	print_page_table();
 	value = lookup_key_pt(tvaddr);
 
 	// if a match has been found, return the value
@@ -5807,7 +5856,7 @@ void emulate(int argc, int *argv) {
 		up_copyArguments(argc, argv);
 
 	}
-  	print_page_table();
+
 	run();
 
 	print(selfieName);
@@ -5867,8 +5916,7 @@ int* insert_process(int pc, int* reg, int* seg, int* prev, int* next, int pid) {
 	return node;
 }
 
-int* insert_process_wait(int pc, int* reg, int* seg, int* prev, int* next,
-		int pid, int wait_for_pid) {
+int* insert_process_wait(int pc, int* reg, int* seg, int* prev, int* next, int pid, int wait_for_pid) {
 	int* node;
 
 	node = malloc(7 * 4);
