@@ -751,6 +751,7 @@ void initMemory(int bytes) {
 		memorySize = bytes;
 
 	memory = malloc(memorySize);
+	// free_list = memory;
 }
 
 // -----------------------------------------------------------------
@@ -4478,6 +4479,10 @@ void syscall_fork() {
 }
 
 // Not yet, sorry...
+// Grab the page table of the forking process, walk through it!
+// Look at the value, then call palloc, then copy the 4kB over (using storeMemory)
+// Insert into page table of forked process
+// Repeat for all other page table nodes of forking process
 void segment_copy(int* old_seg, int* new_seg) {
 	int* border;
 	int* cursor;
@@ -4608,10 +4613,12 @@ int tlb(int vaddr) {
 	// then return that value
 
 	// how does palloc work?
-	// look at pOffset, that's gonna be your value
+	// look at free_list, that's gonna be your value
 	// allocate 4kB with pOffset as offset
 	// but before you return with that:
 	// do pOffset = pOffset + 1024
+
+	// how does pFree work?
 
 	if (vaddr % 4 != 0)
 		exception_handler(EXCEPTION_ADDRESSERROR);
