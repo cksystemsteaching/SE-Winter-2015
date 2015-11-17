@@ -896,7 +896,7 @@ int* lookup_key_pt(int vaddr);
 
 int getPC(int* proc);
 int getRegisters(int* proc);
-int getSegment(int* proc);
+int getPageTable(int* proc);
 int getPrev(int* proc);
 int getNextProc(int* proc);
 int get_pid();
@@ -973,7 +973,7 @@ void create_process(int argc, int* argv) {
 	proc_count = proc_count + 1;
 
 	current_proc = last_created_proc;
-	current_page_table = (int*) getSegment(current_proc); // update this to current_page_table
+	current_page_table = (int*) getPageTable(current_proc); // update this to current_page_table
 	registers = (int*) getRegisters(current_proc);
 }
 
@@ -3916,7 +3916,7 @@ void syscall_exit() {
 					(int*) "Take that waiting process out of the WL and insert it into ready queue\n");
 			waiting_queue = remove(waitingProcess, waiting_queue);
 			proc_list = insert_process(getPC(waitingProcess),
-					getRegisters(waitingProcess), getSegment(waitingProcess), 0,
+					getRegisters(waitingProcess), getPageTable(waitingProcess), 0,
 					proc_list, getPIDProc(waitingProcess));
 		} else {
 			// If you are a child exiting here and there's no parent waiting for you
@@ -3924,7 +3924,7 @@ void syscall_exit() {
 			print(
 					(int*) "Oy, there is no process waiting for me! Does that mean I'm a zombie now?\n");
 			zombie_queue = insert_process(getPC(current_proc),
-					getRegisters(current_proc), getSegment(current_proc), 0,
+					getRegisters(current_proc), getPageTable(current_proc), 0,
 					zombie_queue, getPIDProc(current_proc));
 		}
 	}
@@ -4274,7 +4274,7 @@ void make_blocking() {
 
 	proc_list = remove(locked_process, proc_list);
 	blocked_queue = insert_process(getPC(locked_process), getRegisters(locked_process),
-			getSegment(locked_process), 0, blocked_queue, getPIDProc(locked_process));
+			getPageTable(locked_process), 0, blocked_queue, getPIDProc(locked_process));
 
 	triggerContextSwitch = 1;
 }
@@ -4296,7 +4296,7 @@ void sched_block_proc() {
 
 	if ((int) next_unblocked_process != 0)
 		proc_list = insert_process(getPC(next_unblocked_process),
-				getRegisters(next_unblocked_process), getSegment(next_unblocked_process), 0,
+				getRegisters(next_unblocked_process), getPageTable(next_unblocked_process), 0,
 				proc_list, getPIDProc(next_unblocked_process));
 
 }
@@ -4313,7 +4313,7 @@ int getRegisters(int* proc) {
 	return *(proc + PROC_OFF_REG);
 }
 
-int getSegment(int* proc) {
+int getPageTable(int* proc) {
 	return *(proc + PROC_OFF_PT);
 }
 
@@ -4437,7 +4437,7 @@ void syscall_fork() {
 
 	// Replace this segment copying business (see segment_copy for more comments)
 	print((int*) "Copying segments...\n");
-	segment_copy(getSegment(current_proc), new_proc_seg);
+	segment_copy(getPageTable(current_proc), new_proc_seg);
 
 	// ... copy pc too
 	new_proc_pc = *(reg_current + REG_RA);
@@ -4545,7 +4545,7 @@ void syscall_wait() {
 	if ((int) process_wait != 0) {
 		// If so, insert yourself into the waiting queue (with that process pid <argument> as condition)
 		waiting_queue = insert_process_wait(*(process_reg + REG_RA),
-				getRegisters(current_proc), getSegment(current_proc), 0,
+				getRegisters(current_proc), getPageTable(current_proc), 0,
 				waiting_queue, getPIDProc(current_proc), pid_wait);
 
 		print(
