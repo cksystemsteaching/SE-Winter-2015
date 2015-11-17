@@ -733,16 +733,23 @@ int tlb(int vaddr);
 int loadMemory(int vaddr);
 void storeMemory(int vaddr, int data);
 
+int* palloc();
+void pfree(int* frame);
+
 int MEGABYTE = 1048576;
+int PAGE_FRAME_SIZE = 4096; // 4 KB
 
 // ------------------------ GLOBAL VARIABLES -----------------------
 
 int memorySize = 0;
 int *memory = (int*) 0;
+int *free_list; // List of free page frames
 
 // ------------------------- INITIALIZATION ------------------------
 
 void initMemory(int bytes) {
+	int* cursor;
+
 	if (bytes < 0)
 		memorySize = 64 * MEGABYTE;
 	else if (bytes > 1024 * MEGABYTE)
@@ -751,7 +758,15 @@ void initMemory(int bytes) {
 		memorySize = bytes;
 
 	memory = malloc(memorySize);
-	// free_list = memory;
+
+	free_list = memory;
+
+	cursor = memory;
+
+	while ((int) cursor < (int) memory + memorySize) {
+		*cursor = 0;
+		cursor = cursor + 1;
+	}
 }
 
 // -----------------------------------------------------------------
@@ -869,12 +884,15 @@ int* get_next_proc();
 int* insert_process(int pc, int* reg, int* seg, int* prev, int* next, int pid);
 int* insert_process_wait(int pc, int* reg, int* seg, int* prev, int* next,
 		int pid, int wait_for_pid);
+int* insert_pt_node(int key, int* value, int* prev, int* next);
 int* get_proc_by_pid(int* list, int pid, int next_offset, int pid_offset);
 void segment_copy(int* old_seg, int* new_seg);
 void reg_copy(int* old_reg, int* new_reg);
 int* insert_segment(int* begin, int size, int* prev, int* next, int seg_id);
 int* remove(int* node, int* list);
 void iter_list(int* list);
+int* page_fault_handler();
+int* lookup_key_pt(int vaddr);
 
 int getPC(int* proc);
 int getRegisters(int* proc);
@@ -899,15 +917,14 @@ int *last_created_proc;
 
 int proc_limit = 10;
 int npid = 0;
+int random_counter = 0;
 int number_of_proc = 1;
 int proc_count;
 int instr_count;
 int instr_cycles = 3;
 int triggerContextSwitch;
 
-int *segment_table;
-int *current_seg;
-int *last_created_segment;
+int* current_page_table;
 int seg_count;
 int seg_size;
 
@@ -921,7 +938,7 @@ int* zombie_queue = (int*) 0; // zombie list
 // ------------------------ OUR Constants -----------------------------
 int PROC_OFF_PC = 0;
 int PROC_OFF_REG = 1;
-int PROC_OFF_SEG = 2;
+int PROC_OFF_PT = 2;
 int PROC_OFF_PREV = 3;
 int PROC_OFF_NEXT = 4;
 int PROC_OFF_PID = 5;
@@ -941,52 +958,23 @@ void create_process(int argc, int* argv) {
 	// Initalize Registers
 	registers = malloc(32 * 4);
 
-	// Remove this
-	while (seg_size % 4 != 0)
-		seg_size = seg_size - 1;
-
 	// This one will be 4*1024*1024 - 4
-	*(registers + REG_SP) = seg_size - 4;
-
-	// Create a new segment in the segment_table, no longer necessary
-	if (seg_count == 0) {
-		segment_table = insert_segment(memory, seg_size, 0, 0, seg_count);
-		last_created_segment = segment_table;
-	}
-
-	// Not necessary
-	seg_count = seg_count + 1;
+	*(registers + REG_SP) = 4194300;
 
 	// Build page table
-	// Not yet, it's just gonna be zero
-	// Format: KEY - VALUE - PREV - NEXT
-	// Also, save a global variable (=: pOffset), that documents where above info can be found, i.e. 0
+	current_page_table = (int*) 0;
 
 	// Create process, replace segment with page table of course
 	if (proc_count == 0) {
-		proc_list = insert_process(pc, registers, last_created_segment, 0, 0,
-				proc_count);
+		proc_list = insert_process(pc, registers, current_page_table, 0, 0, proc_count);
 		last_created_proc = proc_list;
 	}
 
 	proc_count = proc_count + 1;
 
 	current_proc = last_created_proc;
-	current_seg = (int*) getSegment(current_proc); // update this to current_page_table
+	current_page_table = (int*) getSegment(current_proc); // update this to current_page_table
 	registers = (int*) getRegisters(current_proc);
-}
-
-// Remove this method
-void pop_seg_tbl(int argc, int* argv) {
-	// Create a new segment in the segment_table
-	if (seg_count == 0) {
-		segment_table = insert_segment(memory, seg_size, 0, 0, seg_count);
-	} else {
-		segment_table = insert_segment(*segment_table + seg_size, seg_size, 0,
-				segment_table, seg_count);
-	}
-
-	seg_count = seg_count + 1;
 }
 
 // ------------------------- INITIALIZATION ------------------------
@@ -4034,7 +4022,7 @@ void syscall_write() {
 	vaddr = *(registers + REG_A1);
 	fd = *(registers + REG_A0);
 
-	buffer = (int*) *current_seg + tlb(vaddr);
+	buffer = (int*) tlb(vaddr);  // was: + *current_seg
 
 	size = write(fd, buffer, size);
 
@@ -4326,7 +4314,7 @@ int getRegisters(int* proc) {
 }
 
 int getSegment(int* proc) {
-	return *(proc + PROC_OFF_SEG);
+	return *(proc + PROC_OFF_PT);
 }
 
 int getPrev(int* proc) {
@@ -4354,7 +4342,7 @@ void setRegisters(int* proc, int* reg) {
 }
 
 void setSegment(int* proc, int* seg) {
-	*(proc + PROC_OFF_SEG) = seg;
+	*(proc + PROC_OFF_PT) = seg;
 }
 
 void setPrev(int* proc, int* prev) {
@@ -4428,10 +4416,6 @@ void syscall_fork() {
 
 	reg_current = (int*) getRegisters(current_proc);
 
-	// Remove the next two lines of code
-	next_seg = (int*) *(last_created_segment + SEG_OFF_PREV);
-	next_seg_id = *(next_seg + SEG_OFF_SEGID);
-
 	number_of_proc = number_of_proc + 1;
 	npid = npid + 1;
 
@@ -4446,8 +4430,6 @@ void syscall_fork() {
 	// Allocate space for new memory and new registers for new process
 	new_proc_seg = next_seg; // remove this line
 	new_proc_reg = malloc(32 * 4);
-
-	last_created_segment = new_proc_seg; // remove this line
 
 	// ... same for registers
 	print((int*) "Copying registers...\n");
@@ -4603,47 +4585,169 @@ void syscall_wait() {
 // ---------------------------- MEMORY -----------------------------
 // -----------------------------------------------------------------
 
+void print_page_table() {
+
+	int* cursor;
+
+	cursor = current_page_table;
+
+	print((int*)" ---- Page Table: ---- \n");
+	while ((int) cursor != 0) {
+		print(itoa(*(cursor+0), string_buffer, 10, 0, 0));
+		print((int*)" -> ");
+		print(itoa(*(cursor+1), string_buffer, 10, 0, 0));
+		println();
+
+		cursor = *(cursor + 3);
+	}
+	print((int*)" --------------------- \n");
+
+}
+
 int tlb(int vaddr) {
+	int tvaddr;
+	int offset;
+	int difference;
+	int* value;
 
-	// vaddr = vaddr - (vaddr % (4*1024));
-	// look up in page table (KeySet)
-	// if a match has been found, return the value
-	// if no match has been found, however make a new page table node with vaddr as key (--> page_fault_handler!!)
-	// the value will be the frame that palloc returns
-	// then return that value
-
-	// how does palloc work?
-	// look at free_list, that's gonna be your value
-	// allocate 4kB with pOffset as offset
-	// but before you return with that:
-	// do pOffset = pOffset + 1024
-
-	// how does pFree work?
+	if ( vaddr < 0  ) {
+		exception_handler(EXCEPTION_ADDRESSERROR);
+	}
+	if ( vaddr >= 67108863 ) { // 0x3FFFFFF
+		exception_handler(EXCEPTION_ADDRESSERROR);
+	}
 
 	if (vaddr % 4 != 0)
 		exception_handler(EXCEPTION_ADDRESSERROR);
 
-	// physical memory is word-addressed for lack of byte-sized data type
-	return vaddr / 4;
+	tvaddr = vaddr - (vaddr % (4*1024));
+	offset = vaddr % (4*1024);
+
+	print((int*) "Tvaddr is: ");
+	print(itoa(tvaddr, string_buffer, 10, 0, 0));
+	println();
+	print((int*) "Offset is: ");
+	print(itoa(offset, string_buffer, 10, 0, 0));
+	println();
+
+	// look up in page table (KeySet)
+	print_page_table();
+	value = lookup_key_pt(tvaddr);
+
+	// if a match has been found, return the value
+	if ((int) value != -1) {
+		print((int*) "Hey, I found something!\n");
+		return (int) value + offset;
+	} else {
+			// if no match has been found, however make a new page table node with vaddr as key (--> page_fault_handler!!)
+			// the value will be the frame that palloc returns
+			// then return that value
+			print((int*) "I couldn't find anything!");
+			value = page_fault_handler();
+
+			// tvaddr (key), value(value), prev (= 0), next (= current_page_table)
+			current_page_table = insert_pt_node(tvaddr, value, (int*) 0, current_page_table);
+
+			return (int) value + offset;
+	}
+}
+
+int* insert_pt_node (int key, int* value, int* prev, int* next) {
+	int* pt_node;
+
+	pt_node = malloc(4*4);
+
+	*(pt_node + 0) = key;
+	*(pt_node + 1) = value;
+	*(pt_node + 2) = prev;
+	*(pt_node + 3) = next;
+
+	return pt_node;
+}
+
+int* page_fault_handler () {
+	return palloc();
+}
+
+int* lookup_key_pt(int vaddr) {
+	int* cursor;
+
+	random_counter = random_counter + 1;
+	cursor = current_page_table;
+
+	while ((int) cursor != 0) {
+
+		print((int*) "Is ");
+		print(itoa(*cursor, string_buffer, 10, 0, 0));
+		print((int*) " equal to ");
+		print(itoa(vaddr, string_buffer, 10, 0, 0));
+		print((int*) "?");
+		println();
+
+		if (*(cursor + 0) == vaddr) {
+			return (int*)*(cursor + 1);
+		}
+
+		cursor = *(cursor + 3);
+	}
+
+	return -1;
 }
 
 // Here, look at vaddr, save remainder when dividing by 4*1024
 // return *(tlb(vaddr) + remainder);
 // similar in storeMemory
 int loadMemory(int vaddr) {
-	int* physical_mem_addr;
+	int* addr;
 
-	physical_mem_addr = (int*) *current_seg;
+	addr = (int*) tlb(vaddr) + 1;
 
-	return *(physical_mem_addr + tlb(vaddr));
+	print((int*) "\nI'm returning physical address: ");
+	print(itoa(addr, string_buffer, 10, 0, 0));
+	println();
+
+	return *addr;
 }
 
 void storeMemory(int vaddr, int data) {
-	int *physical_mem_addr;
+	int* addr;
 
-	physical_mem_addr = (int*) *current_seg;
+	addr = (int*) tlb(vaddr) + 1;
 
-	*(physical_mem_addr + tlb(vaddr)) = data;
+	print((int*) "\nI'm returning physical address: ");
+	print(itoa(addr, string_buffer, 10, 0, 0));
+	println();
+
+	*addr = data;
+}
+
+
+// Returns a free page frame from the physical memory
+int* palloc() {
+	int* free_page;
+
+	free_page = free_list;
+
+	if( *free_list == 0) {
+		print((int*) "Next Pointer is 0. Let's increment it by PAGE_FRAME_SIZE\n");
+		free_list = free_list + (PAGE_FRAME_SIZE/4);
+	}
+	else {
+		print((int*) "Next Pointer is NOT 0. Get address and use it as free_list.\n");
+		free_list = (int*) *free_list;
+	}
+
+	return free_page;
+
+}
+
+// Add the given page frame to the free list
+void pfree(int* frame) {
+
+	print((int*) "Add used frame to free_list.\n");
+  *frame = free_list;
+	free_list = frame;
+
 }
 
 // -----------------------------------------------------------------
@@ -5417,6 +5521,9 @@ void execute() {
 }
 
 void run() {
+	int ins;
+
+	ins = 0;
 	instr_count = 0;
 
 	while (1) {
@@ -5429,6 +5536,7 @@ void run() {
 				execute();
 			}
 
+			ins = ins + 1;
 			instr_count = instr_count + 1;
 		}
 
@@ -5445,6 +5553,7 @@ void context_switch() {
 
 void save_context() {
 	*current_proc = pc; // Save old program counter
+	*(current_proc + 2) = current_page_table;
 }
 
 void schedule_next_proc() {
@@ -5459,7 +5568,7 @@ void restore_context() {
 	triggerContextSwitch = 0;
 
 	registers = (int*) *(current_proc + 1);
-	current_seg = (int*) *(current_proc + 2);
+	current_page_table = (int*) *(current_proc + 2);
 	pc = *current_proc;
 
 	instr_count = 0;
@@ -5683,11 +5792,6 @@ void emulate(int argc, int *argv) {
 
 	proc_count = 0;
 
-	// This will no longer be necessary
-	seg_count = 0;
-	seg_size = memorySize / proc_limit;
-	// --------------------------------
-
 	interpret = 1;
 
 	while (proc_count < 1) {
@@ -5697,19 +5801,13 @@ void emulate(int argc, int *argv) {
 
 		copyBinaryToMemory();
 
-		*(registers + REG_SP) = seg_size - 4;
 		*(registers + REG_GP) = binaryLength;
 		*(registers + REG_K1) = *(registers + REG_GP);
 
 		up_copyArguments(argc, argv);
-	}
 
-	// Get rid of this while loop
-	while (seg_count < proc_limit) {
-		pop_seg_tbl(argv, argv);
 	}
-	// -----------------------
-
+  	print_page_table();
 	run();
 
 	print(selfieName);
@@ -5996,4 +6094,3 @@ int main(int argc, int *argv) {
 		println();
 	}
 }
-
