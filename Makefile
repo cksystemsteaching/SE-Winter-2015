@@ -48,3 +48,4 @@ clean:
 	rm -f out
 	rm -f $(TEST_BINARY)
 	rm -f *~
+	rm -f out.txt

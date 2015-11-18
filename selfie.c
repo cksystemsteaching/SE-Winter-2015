@@ -133,8 +133,8 @@ int INT_MAX; // maximum numerical value of an integer
 int INT_MIN; // minimum numerical value of an integer
 
 int *character_buffer; // buffer for reading and writing characters
-
-int *string_buffer; // buffer for printing
+int *string_buffer;    // buffer for string output
+int *io_buffer;        // buffer for binary I/O
 
 // 0 = O_RDONLY (0x0000)
 int O_RDONLY = 0;
@@ -173,8 +173,10 @@ void initLibrary() {
 
 	character_buffer = malloc(1);
 
-	// accommodate 32-bit numbers for itoa
-	string_buffer = malloc(33);
+    // accommodate at least 32-bit numbers for itoa
+    string_buffer = malloc(33);
+
+    io_buffer = malloc(4);
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -825,8 +827,6 @@ void emulate(int argc, int *argv);
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
-int debug_load = 0;
-
 int debug_read = 0;
 int debug_write = 0;
 int debug_open = 0;
@@ -845,7 +845,7 @@ int *EXCEPTIONS; // array of strings representing exceptions
 
 int *registers; // general purpose registers
 
-int pc = 4; // program counter
+int pc = 0; // program counter
 int ir = 0; // instruction record
 
 int reg_hi = 0; // hi register for multiplication/division
@@ -993,7 +993,7 @@ void initInterpreter() {
 }
 
 void resetInterpreter() {
-	pc = 4;
+	pc = 0;
 
 	reg_hi = 0;
 	reg_lo = 0;
@@ -3464,9 +3464,7 @@ void compile() {
 	// parser
 	gr_cstar();
 
-	// set and store code length in first "instruction"
 	codeLength = binaryLength;
-	*binary = codeLength;
 
 	// emit global variables and strings
 	emitGlobalsStrings();
@@ -3810,7 +3808,13 @@ void emit() {
 	print(binaryName);
 	println();
 
-	write(fd, binary, binaryLength);
+    *io_buffer = codeLength;
+
+    // first write code length
+    write(fd, io_buffer, 4);
+
+    // then write binary
+    write(fd, binary, binaryLength);
 }
 
 void load() {
@@ -3835,30 +3839,33 @@ void load() {
 
 	sourceLineNumber = (int*) 0;
 
-	numberOfReadBytes = 4;
+ print(selfieName);
+print((int*) ": loading code from input file ");
+    print(binaryName);
+    println();
 
-	print(selfieName);
-	print((int*) ": loading code from input file ");
-	print(binaryName);
-	println();
+    // read code length first
+    numberOfReadBytes = read(fd, io_buffer, 4);
 
-	while (numberOfReadBytes == 4) {
-		numberOfReadBytes = read(fd, binary + binaryLength / 4, 4);
+    if (numberOfReadBytes == 4) {
+        codeLength = *io_buffer;
+        
+        // now read binary
+        numberOfReadBytes = read(fd, binary, maxBinaryLength);
 
-		if (debug_load) {
-			print(binaryName);
-			print((int*) ": ");
-			print(itoa(binaryLength, string_buffer, 16, 8, 0));
-			print((int*) ": ");
-			print(itoa(loadBinary(binaryLength), string_buffer, 16, 8, 0));
-			println();
-		}
+        if (numberOfReadBytes > 0) {
+            binaryLength = numberOfReadBytes;
 
-		if (numberOfReadBytes == 4)
-			binaryLength = binaryLength + 4;
-	}
+            return;
+        }
+    }
 
-	codeLength = *binary;
+    print(selfieName);
+    print((int*) ": failed to load code from input file ");
+    print(binaryName);
+    println();
+
+    exit(-1);
 }
 
 // -----------------------------------------------------------------
@@ -4046,8 +4053,8 @@ void emitOpen() {
 
 	emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
 
-	emitIFormat(OP_ADDIU, REG_SP, REG_A2, 0); // mode
-	emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+    emitIFormat(OP_LW, REG_SP, REG_A2, 0); // mode
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
 	emitIFormat(OP_LW, REG_SP, REG_A1, 0); // flags
 	emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
@@ -4588,6 +4595,8 @@ void syscall_wait() {
 void print_page_table() {
 
 	int* cursor;
+
+	return;
 
 	cursor = current_page_table;
 
