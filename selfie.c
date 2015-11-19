@@ -3943,10 +3943,9 @@ void syscall_exit() {
 	print((int*) "-------------------------\n");
 
 	// Free all page frames of the page table. We don't need them...
-	//free_page_table(getPageTable(current_proc));
+	free_page_table(getPageTable(current_proc));
 
 	proc_list = remove(current_proc, proc_list);
-
 
 	triggerContextSwitch = 1;
 
@@ -4454,7 +4453,7 @@ void syscall_fork() {
 	new_proc_pc = *(reg_current + REG_RA);
 
 	// Insert new process node into ready queue (pid corresponds to segment, pid is the only difference here!)
-	print((int*) "Inserting process\n");
+	print((int*) "Inserting new process...\n");
 	proc_list = insert_process(new_proc_pc, new_proc_reg, new_proc_page_table, 0, last_created_proc, npid);
 
 	print((int*) "Page table of new process...\n");
@@ -4489,7 +4488,7 @@ int* duplicate_page_table(int* old_page_table) {
 
 		// Look at the value, then call palloc, then copy the 4kB over
 		new_frame = palloc();
-		frame_copy( *(cursor+1), new_frame );
+		frame_copy (*(cursor+1), new_frame);
 
 		new_page_table = insert_pt_node( *cursor, new_frame, (int*) 0, new_page_table);
 
@@ -4603,8 +4602,7 @@ void syscall_wait() {
 				getRegisters(current_proc), getPageTable(current_proc), 0,
 				waiting_queue, getPIDProc(current_proc), pid_wait);
 
-		print(
-				(int*) "I'm going to the waiting queue and will remove myself from the ready processes!\n");
+		print((int*) "I'm going to the waiting queue and will remove myself from the ready processes!\n");
 
 		// ... and don't forget to take yourself out of the run/ready queue for the mean time
 		proc_list = remove(current_proc, proc_list);
@@ -4706,6 +4704,7 @@ int tlb(int vaddr) {
 
 			// tvaddr (key), value(value), prev (= 0), next (= current_page_table)
 			current_page_table = insert_pt_node(tvaddr, value, (int*) 0, current_page_table);
+			*(current_proc + 2) = current_page_table;
 
 			return (int) value + offset;
 	}
@@ -5615,7 +5614,6 @@ void context_switch() {
 
 void save_context() {
 	*current_proc = pc; // Save old program counter
-	*(current_proc + 2) = current_page_table;
 }
 
 void schedule_next_proc() {
@@ -6156,3 +6154,4 @@ int main(int argc, int *argv) {
 		println();
 	}
 }
+
