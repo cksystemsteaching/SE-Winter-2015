@@ -828,8 +828,8 @@ void emulate(int argc, int *argv);
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int debug_load = 0;
-
 int debug_read = 0;
+
 int debug_write = 0;
 int debug_open = 0;
 int debug_malloc = 0;
@@ -1622,6 +1622,7 @@ int getSymbol() {
 		else if (character == CHAR_EOF) {
 			syntaxErrorCharacter(CHAR_SINGLEQUOTE);
 
+			syntaxErrorMessage((int*) "Error 1\n");
 			exit(-1);
 		} else
 			syntaxErrorCharacter(CHAR_SINGLEQUOTE);
@@ -2371,8 +2372,10 @@ int gr_factor() {
 	while (lookForFactor()) {
 		syntaxErrorUnexpected();
 
-		if (symbol == SYM_EOF)
-			exit(-1);
+		if (symbol == SYM_EOF) {
+			syntaxErrorMessage((int*) "Error 2\n");
+						exit(-1);
+		}
 		else
 			getSymbol();
 	}
@@ -2927,8 +2930,10 @@ void gr_statement() {
 	while (lookForStatement()) {
 		syntaxErrorUnexpected();
 
-		if (symbol == SYM_EOF)
-			exit(-1);
+		if (symbol == SYM_EOF) {
+				syntaxErrorMessage((int*) "error 3\n");
+				exit(-1);
+		}
 		else
 			getSymbol();
 	}
@@ -3325,9 +3330,10 @@ void gr_cstar() {
 		while (lookForType()) {
 			syntaxErrorUnexpected();
 
-			if (symbol == SYM_EOF)
+			if (symbol == SYM_EOF) {
+				syntaxErrorMessage((int*) "error 4\n");
 				exit(-1);
-			else
+			} else
 				getSymbol();
 		}
 
@@ -3937,7 +3943,7 @@ void syscall_exit() {
 	print((int*) "-------------------------\n");
 
 	// Free all page frames of the page table. We don't need them...
-	free_page_table(getPageTable(current_proc));
+	//free_page_table(getPageTable(current_proc));
 
 	proc_list = remove(current_proc, proc_list);
 
@@ -3980,7 +3986,7 @@ void syscall_read() {
 	vaddr = *(registers + REG_A1);
 	fd = *(registers + REG_A0);
 
-	buffer = memory + tlb(vaddr);
+	buffer = tlb(vaddr);
 
 	size = read(fd, buffer, count);
 
@@ -4029,7 +4035,7 @@ void syscall_write() {
 	vaddr = *(registers + REG_A1);
 	fd = *(registers + REG_A0);
 
-	buffer = (int*) tlb(vaddr);  // was: + *current_seg
+	buffer = tlb(vaddr);  // was: + *current_seg
 
 	size = write(fd, buffer, size);
 
@@ -4079,7 +4085,7 @@ void syscall_open() {
 	flags = *(registers + REG_A1);
 	vaddr = *(registers + REG_A0);
 
-	filename = memory + tlb(vaddr);
+	filename = tlb(vaddr);
 
 	fd = open(filename, flags, mode);
 
@@ -4521,7 +4527,7 @@ void free_page_table(int* page_table) {
 
 	cursor = page_table;
 
-	print((int*) "Free the givenpage table...\n");
+	print((int*) "Free the given page table...\n");
 
 	while ( cursor != 0 ) {
 
@@ -4673,25 +4679,29 @@ int tlb(int vaddr) {
 	tvaddr = vaddr - (vaddr % (4*1024));
 	offset = vaddr % (4*1024);
 
-	print((int*) "Tvaddr is: ");
-	print(itoa(tvaddr, string_buffer, 10, 0, 0));
-	println();
-	print((int*) "Offset is: ");
-	print(itoa(offset, string_buffer, 10, 0, 0));
-	println();
+//	print((int*) "Tvaddr is: ");
+//	print(itoa(tvaddr, string_buffer, 10, 0, 0));
+//	println();
+//	print((int*) "Offset is: ");
+//	print(itoa(offset, string_buffer, 10, 0, 0));
+//	println();
 
 	// look up in page table (KeySet)
 	value = lookup_key_pt(tvaddr);
 
 	// if a match has been found, return the value
 	if ((int) value != -1) {
-		print((int*) "Hey, I found something!\n");
+		//print((int*) "Hey, I found something!\n");
+//		print((int*) "Free List ");
+//		print(itoa(*free_list, string_buffer, 10, 0, 0));
+//		println();
+
 		return (int) value + offset;
 	} else {
 			// if no match has been found, however make a new page table node with vaddr as key (--> page_fault_handler!!)
 			// the value will be the frame that palloc returns
 			// then return that value
-			print((int*) "I couldn't find anything!");
+	//		print((int*) "I couldn't find anything!\n");
 			value = page_fault_handler();
 
 			// tvaddr (key), value(value), prev (= 0), next (= current_page_table)
@@ -4726,12 +4736,12 @@ int* lookup_key_pt(int vaddr) {
 
 	while ((int) cursor != 0) {
 
-		print((int*) "Is ");
-		print(itoa(*cursor, string_buffer, 10, 0, 0));
-		print((int*) " equal to ");
-		print(itoa(vaddr, string_buffer, 10, 0, 0));
-		print((int*) "?");
-		println();
+	//	print((int*) "Is ");
+	//	print(itoa(*cursor, string_buffer, 10, 0, 0));
+	//	print((int*) " equal to ");
+	//	print(itoa(vaddr, string_buffer, 10, 0, 0));
+	//	print((int*) "?");
+	//	println();
 
 		if (*(cursor + 0) == vaddr) {
 			return (int*)*(cursor + 1);
@@ -4749,11 +4759,11 @@ int* lookup_key_pt(int vaddr) {
 int loadMemory(int vaddr) {
 	int* addr;
 
-	addr = (int*) tlb(vaddr) + 1;
+	addr = tlb(vaddr);
 
-	print((int*) "\nI'm returning physical address: ");
-	print(itoa(addr, string_buffer, 10, 0, 0));
-	println();
+	//print((int*) "\nI'm returning physical address: ");
+	//print(itoa(addr, string_buffer, 10, 0, 0));
+	//println();
 
 	return *addr;
 }
@@ -4761,11 +4771,11 @@ int loadMemory(int vaddr) {
 void storeMemory(int vaddr, int data) {
 	int* addr;
 
-	addr = (int*) tlb(vaddr) + 1;
+	addr = tlb(vaddr);
 
-	print((int*) "\nI'm returning physical address: ");
-	print(itoa(addr, string_buffer, 10, 0, 0));
-	println();
+//	print((int*) "\nI'm returning physical address: ");
+//	print(itoa(addr, string_buffer, 10, 0, 0));
+//	println();
 
 	*addr = data;
 }
@@ -4777,12 +4787,15 @@ int* palloc() {
 
 	free_page = free_list;
 
+//	print((int*) "Free list points to address...");
+//	print(itoa(free_list, string_buffer, 10, 0, 0));
+//	println();
+
 	if( *free_list == 0) {
-		print((int*) "Next Pointer is 0. Let's increment it by PAGE_FRAME_SIZE\n");
+//		print((int*) "Next Pointer is 0. Let's increment it by PAGE_FRAME_SIZE\n");
 		free_list = free_list + (PAGE_FRAME_SIZE/4);
-	}
-	else {
-		print((int*) "Next Pointer is NOT 0. Get address and use it as free_list.\n");
+	} else {
+//		print((int*) "Next Pointer is NOT 0. Get address and use it as free_list.\n");
 		free_list = (int*) *free_list;
 	}
 
@@ -4793,7 +4806,7 @@ int* palloc() {
 // Add the given page frame to the free list
 void pfree(int* frame) {
 
-	print((int*) "Add used frame to free_list.\n");
+	//print((int*) "Add used frame to free_list.\n");
   *frame = free_list;
 	free_list = frame;
 
@@ -5704,6 +5717,7 @@ void copyBinaryToMemory() {
 
 		a = a + 4;
 	}
+
 }
 
 int addressWithMaxCounter(int *counters, int max) {
