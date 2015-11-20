@@ -740,6 +740,7 @@ void print_page_table(int* page_table);
 
 int MEGABYTE = 1048576;
 int PAGE_FRAME_SIZE = 4096; // 4 KB
+int PAGE_TABLE_SIZE = 1700;
 
 // ------------------------ GLOBAL VARIABLES -----------------------
 
@@ -750,6 +751,7 @@ int *free_list; // List of free page frames
 // ------------------------- INITIALIZATION ------------------------
 
 void initMemory(int bytes) {
+
 	int* cursor;
 
 	if (bytes < 0)
@@ -769,6 +771,7 @@ void initMemory(int bytes) {
 		*cursor = 0;
 		cursor = cursor + 1;
 	}
+
 }
 
 // -----------------------------------------------------------------
@@ -857,7 +860,7 @@ int halt = 0; // flag for halting mipster
 
 int interpret = 1;
 
-int debug = 0;
+int debug = 1;
 
 int calls = 0;
 int *callsPerAddress = (int*) 0;
@@ -886,7 +889,6 @@ int* get_next_proc();
 int* insert_process(int pc, int* reg, int* seg, int* prev, int* next, int pid);
 int* insert_process_wait(int pc, int* reg, int* seg, int* prev, int* next,
 		int pid, int wait_for_pid);
-int* insert_pt_node(int key, int* value, int* prev, int* next);
 int* get_proc_by_pid(int* list, int pid, int next_offset, int pid_offset);
 int* duplicate_page_table(int* old_page_frame);
 void free_page_table(int* page_table);
@@ -896,7 +898,6 @@ int* insert_segment(int* begin, int size, int* prev, int* next, int seg_id);
 int* remove(int* node, int* list);
 void iter_list(int* list);
 int* page_fault_handler();
-int* lookup_key_pt(int vaddr);
 
 int getPC(int* proc);
 int getRegisters(int* proc);
@@ -955,9 +956,12 @@ int SEG_OFF_NEXT = 3;
 int SEG_OFF_SEGID = 4;
 
 int INIT_0_PID = 0;
+
 // --------------------------- PROCESS -----------------------------
 
 void create_process(int argc, int* argv) {
+
+	int index;
 
 	// Initalize Registers
 	registers = malloc(32 * 4);
@@ -966,7 +970,13 @@ void create_process(int argc, int* argv) {
 	*(registers + REG_SP) = 4194300;
 
 	// Build page table
-	current_page_table = (int*) 0;
+	current_page_table = (int*) malloc( PAGE_TABLE_SIZE * 4);
+
+	index = 0;
+	while (index < PAGE_TABLE_SIZE) {
+		*(current_page_table + index) = -1;
+		index = index + 1;
+	}
 
 	// Create process, replace segment with page table of course
 	if (proc_count == 0) {
@@ -4474,25 +4484,26 @@ void syscall_fork() {
 
 int* duplicate_page_table(int* old_page_table) {
 
-	int* new_frame;
+	int index;
 	int* new_page_table;
-	int* cursor;
 
-	new_page_table = 0;
-
-	cursor = old_page_table;
+	index = 0;
 
 	print((int*) "Duplicate the page table...\n");
-	// Grab the page table of the forking process, walk through it!
-	while ( cursor != 0 ) {
 
-		// Look at the value, then call palloc, then copy the 4kB over
-		new_frame = palloc();
-		frame_copy (*(cursor+1), new_frame);
+	new_page_table = (int*) malloc( PAGE_TABLE_SIZE * 4 );
 
-		new_page_table = insert_pt_node( *cursor, new_frame, (int*) 0, new_page_table);
+	while ( index < PAGE_TABLE_SIZE ) {
 
-		cursor = *(cursor + 3);
+		if( *(old_page_table+index) != -1 ) {
+			*(new_page_table+index) = palloc();
+			frame_copy (*(old_page_table+index), *(new_page_table+index));
+		}
+		else {
+			*(new_page_table+index) = -1;
+		}
+
+		index = index + 1;
 
 	}
 
@@ -4501,6 +4512,7 @@ int* duplicate_page_table(int* old_page_table) {
 	return new_page_table;
 
 }
+
 
 // Copies a single page frame
 void frame_copy(int* old_frame, int* new_frame) {
@@ -4522,17 +4534,19 @@ void frame_copy(int* old_frame, int* new_frame) {
 
 void free_page_table(int* page_table) {
 
-	int* cursor;
+	int index;
 
-	cursor = page_table;
+	index = 0;
 
 	print((int*) "Free the given page table...\n");
 
-	while ( cursor != 0 ) {
+	while ( index < PAGE_TABLE_SIZE ) {
 
-		pfree(*(cursor+1));
-		cursor = *(cursor + 3);
+		if( *(page_table+index) != -1 ) {
+			pfree(*(page_table+index));
+		}
 
+		index = index + 1;
 	}
 
 	print((int*) "Page table cleared ...\n");
@@ -4641,28 +4655,31 @@ void syscall_wait() {
 
 void print_page_table(int* page_table) {
 
-	int* cursor;
+	int index;
 
-	cursor = page_table;
+	index = 0;
 
 	print((int*)" ---- Page Table: ---- \n");
-	while ((int) cursor != 0) {
-		print(itoa(*(cursor+0), string_buffer, 10, 0, 0));
-		print((int*)" -> ");
-		print(itoa(*(cursor+1), string_buffer, 10, 0, 0));
-		println();
+	while ( index < PAGE_TABLE_SIZE ) {
 
-		cursor = *(cursor + 3);
+		if ( *(page_table+index) != -1 ) {
+			print(itoa(index, string_buffer, 10, 0, 0));
+			print((int*)" -> ");
+			print(itoa(*(page_table+index), string_buffer, 10, 0, 0));
+			println();
+		}
+
+		index = index + 1;
+
 	}
 	print((int*)" --------------------- \n");
 
 }
 
 int tlb(int vaddr) {
-	int tvaddr;
 	int offset;
-	int difference;
-	int* value;
+	int index;
+	int phy_page_addr;
 
 	if ( vaddr < 0  ) {
 		exception_handler(EXCEPTION_ADDRESSERROR);
@@ -4674,82 +4691,46 @@ int tlb(int vaddr) {
 	if (vaddr % 4 != 0)
 		exception_handler(EXCEPTION_ADDRESSERROR);
 
-	tvaddr = vaddr - (vaddr % (4*1024));
 	offset = vaddr % (4*1024);
+	index = vaddr / (4*1024);
 
-//	print((int*) "Tvaddr is: ");
-//	print(itoa(tvaddr, string_buffer, 10, 0, 0));
-//	println();
-//	print((int*) "Offset is: ");
+	//print((int*) "Offset: \n");
 //	print(itoa(offset, string_buffer, 10, 0, 0));
-//	println();
+//	print((int*) "\n");
 
-	// look up in page table (KeySet)
-	value = lookup_key_pt(tvaddr);
+//	print((int*) "Index: \n");
+//	print(itoa(index, string_buffer, 10, 0, 0));
+//	print((int*) "\n");
+
+	phy_page_addr = *(current_page_table+index);
+
+//	print((int*) "paddr: \n");
+//	print(itoa(phy_page_addr, string_buffer, 10, 0, 0));
+//	print((int*) "\n");
+
 
 	// if a match has been found, return the value
-	if ((int) value != -1) {
-		//print((int*) "Hey, I found something!\n");
-//		print((int*) "Free List ");
-//		print(itoa(*free_list, string_buffer, 10, 0, 0));
-//		println();
+	if ( (int) phy_page_addr != -1) {
+	//	print((int*) "Hey, I found something!\n");
 
-		return (int) value + offset;
+		return (int) phy_page_addr + offset;
+
 	} else {
 			// if no match has been found, however make a new page table node with vaddr as key (--> page_fault_handler!!)
 			// the value will be the frame that palloc returns
 			// then return that value
-	//		print((int*) "I couldn't find anything!\n");
-			value = page_fault_handler();
+			//print((int*) "I couldn't find anything!\n");
+			phy_page_addr = page_fault_handler();
 
-			// tvaddr (key), value(value), prev (= 0), next (= current_page_table)
-			current_page_table = insert_pt_node(tvaddr, value, (int*) 0, current_page_table);
+			*(current_page_table+index) = phy_page_addr;
 			*(current_proc + 2) = current_page_table;
 
-			return (int) value + offset;
+			return (int) phy_page_addr + offset;
 	}
-}
-
-int* insert_pt_node (int key, int* value, int* prev, int* next) {
-	int* pt_node;
-
-	pt_node = malloc(4*4);
-
-	*(pt_node + 0) = key;
-	*(pt_node + 1) = value;
-	*(pt_node + 2) = prev;
-	*(pt_node + 3) = next;
-
-	return pt_node;
 }
 
 int* page_fault_handler () {
 	return palloc();
-}
-
-int* lookup_key_pt(int vaddr) {
-	int* cursor;
-
-	random_counter = random_counter + 1;
-	cursor = current_page_table;
-
-	while ((int) cursor != 0) {
-
-	//	print((int*) "Is ");
-	//	print(itoa(*cursor, string_buffer, 10, 0, 0));
-	//	print((int*) " equal to ");
-	//	print(itoa(vaddr, string_buffer, 10, 0, 0));
-	//	print((int*) "?");
-	//	println();
-
-		if (*(cursor + 0) == vaddr) {
-			return (int*)*(cursor + 1);
-		}
-
-		cursor = *(cursor + 3);
-	}
-
-	return -1;
 }
 
 // Here, look at vaddr, save remainder when dividing by 4*1024
@@ -4790,7 +4771,7 @@ int* palloc() {
 //	print(itoa(free_list, string_buffer, 10, 0, 0));
 //	println();
 
-	if( *free_list == 0) {
+	if( (int) *free_list == 0) {
 //		print((int*) "Next Pointer is 0. Let's increment it by PAGE_FRAME_SIZE\n");
 		free_list = free_list + (PAGE_FRAME_SIZE/4);
 	} else {
@@ -6154,4 +6135,3 @@ int main(int argc, int *argv) {
 		println();
 	}
 }
-

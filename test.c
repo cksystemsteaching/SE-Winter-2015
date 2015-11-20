@@ -44,35 +44,15 @@ int main() {
 			putchar('d');
 			putchar('d');
 			putchar('d');
-			putchar('d');
-			putchar('d');
-			putchar('d');
-			putchar('d');
-			putchar('d');
-			unlock();
+
 		} else if (pid > 0) {
 			putchar('e');
-			putchar('e');
-			putchar('e');
-			putchar('e');
-			unlock();
-			wait(pid);
-			putchar('f');
+
 		} else {
 			exit(1);
 		}
 
-		exit(5);
 
-	} else if (pid > 0) {
-		putchar('b');
-		putchar('b');
-		putchar('b');
-		putchar('b');
-		putchar(' ');
-		wait(pid);
-		putchar('c');
-		exit(3);
 	} else {
 		exit(1);
 	}
