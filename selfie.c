@@ -656,64 +656,58 @@ int maxNrProcesses = 5;	// maximum number of processes;
 int counterInstr = 0;	// currently processed instruction counter
 int maxInstr = 500;		// syscall_yield should be invoked every 'maxInstr'
 
-
+int processFinished = 0;
 // ---------------------    methods   ---------------------
 
 // print methods
-void printList(int *list, int type, int verbose);
-
-void printSegmentationTableEntryVerbose(int *element);
-void printSegmentationTableEntry(int *element);
-void printSegmentationTable(int *list);
-void printSegmentationTableVerbose(int *list);
-
+void printList(int *list, int verbose);
 void printProcessVerbose(int *element);
 void printProcess(int *element);
 void printProcessList(int *list);
 void printProcessListVerbose(int *list);
+void printProcessEntry(int *process, int verbose);
 
-// list operations
 void appendListElement(int *element, int *list);
-void insertListElementAtBeginning(int *element, int *list);
 int* initList();
 int* removeFirst(int *list);
-int* findElementByPID(int pid, int *list);
-int* pollListHead(int *list);
-int* pollListTail(int *list);
-void sortList(int *list);
-void swap(int *curr, int *next, int *list);
 int  getListSize(int *list);
-int* getNextListElement(int *process);
 
-// process operations
 int* createProcess();
-int  getProcessID(int *process);
 void saveProcessState();
 void setProcessState();
-void switchProcess(int finished);
-void switchFromFinishedProcess();
-void switchFromUnfinishedProcess();
 int* getSegmentEntry(int *process);
 void setSegmentEntry(int *process, int *entry);
 int* getRegisters(int *process);
 int  getPC(int *process);
+int* getPrevProcess(int *process);
+int* getNextProcess(int *process);
+int* getChildren(int *process);
+void setWaitStatus(int *process, int status);
+void addChild(int *process, int pid);
+int* findElementInList(int *list, int pid);
+int* findElementInLists(int pid);
+int* getNextNotWaitingProcess();
+int* removeListElementByPID(int *list, int pid);
+int  getProcessID(int *process);
+int* getPageTable(int *process);
+void setPageTable(int *process, int *pageTable);
+int* getVMemory(int *process);
+void setVMemory(int *process, int *vmemory);
+int  getPPID(int *process);
+void setPPID(int *process, int pid);
+int  getChildListSize(int *process);
+int  getWaitStatus(int *process);
 
 int* duplicateProcess();
 void copyRegisters(int *copyTo, int *copyFrom);
 void copyMemory(int *copyTo, int *copyFrom, int memorySize);
-void setParentPID(int *process, int data);
-int  getParentPID(int *process);
 void setPC(int *process, int data);
 void setRegisters(int *process, int *registers);
 
 int  isProcessWaiting(int *process);
-void setProcessWaitingStatus(int *process);
 void unsetProcessWaitingStatus(int *process);
 
 int* createChild(int pid);
-int* getChildQueue(int *process);
-
-int* getNextWantedProcess(int pid, int *primaryQueue, int *secondaryQueue, int *tertiaryQueue);
 
 // segmentation table entry operations
 int* createSegmentationTableEntry(int pid, int segmentSize);
@@ -724,10 +718,11 @@ int  getMemorySegmentSize(int *segment);
 
 void continueExecuting();
 void releaseLock();
-
-
-
-
+int* removeListElement(int *list, int *process);
+int  isListEmpty(int *list);
+int  listContainsElement(int pid, int *list);
+int  hasLock(int *process);
+int* createChild(int pid);
 // -----------------------------------------------------------------
 // ---------------------------- BINARY -----------------------------
 // ----------------------------- CODE ------------------------------
@@ -3867,14 +3862,14 @@ void syscall_exit() {
     *(registers+REG_V0) = exitCode;
 
 	syscall_unlock();
-
+	processFinished = 1;
 	print((int*)"process with id [");
 	print(itoa(getProcessID(currProcess), string_buffer, 10,0, 0));
    	print((int*)"] terminates");println();
 
-	if(getParentPID(currProcess) > -1){
-		counterInstr = 0;
-		switchProcess(1);
+	if(getPPID(currProcess) > -1){
+//	print((int*)"syscall_exit");println();
+		syscall_yield();
 	} else {
 		print(binaryName);
 		print((int*) ": exiting with error code ");
@@ -4113,7 +4108,54 @@ void emitYield(){
 }
 
 void syscall_yield() {
-	switchProcess(0);
+	int *parent;
+	int *parentChildList;
+	parentChildList = (int*)0;
+	parent = findElementInLists(getPPID(currProcess));
+	if((int)parent != 0)
+		parentChildList = getChildren(parent);
+
+	if(getWaitStatus(currProcess)){
+		appendListElement(currProcess, blockedQueue);
+	} else if(processFinished == 0){
+		if(lock == 1){
+			if(lockID == getProcessID(currProcess)){
+				appendListElement(currProcess, readyQueue);
+			} else {
+				appendListElement(currProcess, blockedQueue);
+			}
+		} else {
+			appendListElement(currProcess, readyQueue);
+		}
+	} else {
+		removeListElement(parentChildList, currProcess);
+		if(isListEmpty(parentChildList)){	// if current process finished remove it from parent's childlist
+			parent = removeListElement(blockedQueue, parent); // and add parent to readyqueue
+			appendListElement(parent, readyQueue);
+			setWaitStatus(parent, 0);
+		}
+	}
+
+	if(hasLock(currProcess)){
+		if(processFinished){
+			releaseLock();
+			currProcess = getNextNotWaitingProcess();
+		} else if(getWaitStatus(currProcess)){
+			releaseLock();
+			currProcess = getNextNotWaitingProcess();
+		} else
+			currProcess = removeFirst(readyQueue);
+	} else {
+		currProcess = removeFirst(readyQueue);
+	}
+	if((int)currProcess != 0){
+		setProcessState();
+	} else {
+		println((int*)"no ready process");
+		exit(-1);
+	}
+	processFinished = 0;
+	counterInstr = 0;
 }
 
 void emitUnlock(){
@@ -4162,7 +4204,7 @@ void syscall_lock(){
 		lockCounter = 1;
 	} else if(lock == 1){
 		if(lockID != getProcessID(currProcess)){
-			switchProcess(0);
+			syscall_yield();			
 		} else 
 			lockCounter = lockCounter + 1;
 	}
@@ -4234,23 +4276,19 @@ void emitWait(){
 }
 
 void syscall_wait(){
-	int *child;
-	int *childListOfParent;
-	int waitForPID;
-	waitForPID = *(registers+REG_A0);
+	int waitPID; // currProcess must wait for process with 'waitPID'
+	waitPID = *(registers+REG_A0);
 
-	if(waitForPID != getParentPID(currProcess)){
-		waitForPID = *(registers+REG_A0);
+	if(waitPID == getProcessID(currProcess)) // process cannot wait for itself
+		return;
+	if(waitPID == getPPID(currProcess))	// process cannot wait for its parent
+		return;
 
-		childListOfParent = getChildQueue(currProcess);
-		child = createChild(waitForPID);
-		if(child != (int*)0){ // if child == (int*)0 then no process with PID 'waitForPID' exists
-			appendListElement(child, childListOfParent);
-			releaseLock();
-			setProcessWaitingStatus(currProcess);
-			switchProcess(0);
-		}
-	}
+	addChild(currProcess, waitPID);
+
+	releaseLock();
+	setWaitStatus(currProcess, 1);
+	syscall_yield();
 }
 
 
@@ -4259,13 +4297,12 @@ void syscall_wait(){
 // ---------------------    Operating System   ---------------------
 // -----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
-
 // a process has following structure:
 //
 // 0 +-----+
-//   |prev | pointer to previous element in list, 0 if non-existent
+//   |prev | pointer to previous element in list
 // 1 +-----+  
-//   |next | pointer to next element in list, 0 if non-existent
+//   |next | pointer to next element in list
 // 2 +-----+  
 //   |pid  | process ID
 // 3 +-----+  
@@ -4273,480 +4310,313 @@ void syscall_wait(){
 // 4 +-----+  
 //   |reg  | pointer to registers
 // 5 +-----+  
-//   |mem  | pointer to  entry in segmentation table
+//   | PT  | pointer to page table
 // 6 +-----+ 
-//   |PPID | parent process ID
+//   |vmem | pointer to virtual memory
 // 7 +-----+ 
+//   |PPID | parent process ID
+// 8 +-----+ 
+//   |child| list of children
+//   |list | 
+// 9 +-----+ 
+//   |wait | status of process, 1 if waiting, 0 otherwise
+// 9 +-----+ 
 
-// print segmentation table entry
-void printSegmentationTableEntryVerbose(int *element){
-	int *prev;
-	int *next;
-	prev = (int*)*element;
-	next = (int*)*(element+1);
-
-	print((int*)"pre ");
-	if(prev != (int*)0)
-		print(itoa(getProcessID(prev), string_buffer, 10, 0, 0));
-	println();
-
-	print((int*)"pid ");
-	if(element != (int*)0)
-		print(itoa(getProcessID(element), string_buffer, 10, 0, 0));
-	println();
-
-	print((int*)"next ");
-	if(next != (int*)0)
-		print(itoa(getProcessID(next), string_buffer, 10, 0, 0));
-	println();
-
-	print((int*)"segPos ");
-	if(element != (int*)0)
-		print(itoa(*(element+3), string_buffer, 10, 0, 0));
-	println();
-
-	print((int*)"segSize ");
-	if(element != (int*)0)
-		print(itoa(*(element+4), string_buffer, 10, 0, 0));
-	println();
-
-}
-
-void printSegmentationTableEntry(int *element){
-if(0){
-	print((int*)"owning pid ");
-	if(element != (int*)0)
-		print(itoa(getProcessID(element), string_buffer, 10, 0, 0));
-	println();
-	}
-	print((int*)"segPos ");
-	if(element != (int*)0)
-		print(itoa(*(element+3), string_buffer, 10, 0, 0));
-	println();
-
-	print((int*)"segSize ");
-	if(element != (int*)0)
-		print(itoa(*(element+4), string_buffer, 10, 0, 0));
-	println();
-}
-
-void printProcess(int *element){
-	print((int*)"pid ");
-	if(element != (int*)0)
-		print(itoa(getProcessID(element), string_buffer, 10, 0, 0));
-	println();
-	print((int*)"isWaiting ");
-	if(element != (int*)0)
-		print(itoa(isProcessWaiting(element), string_buffer, 10, 0, 0));
-	println();
-	print((int*)"counterchildren ");
-	if(element != (int*)0)
-		print(itoa(getListSize(getChildQueue(element)), string_buffer, 10, 0, 0));
-	println();
+int* createProcess(){
+	int *process;
+	int pid;
+	pid = nextValidPID;
+	nextValidPID = nextValidPID+1;
+	process = malloc (10*4);
+	*(process+0) = 0;	// prev process
+	*(process+1) = 0;	// next process
+	*(process+2) = pid;	// PID
+	*(process+3) = 0;	// PC
+	*(process+4) = (int)malloc(32*4);	// registers
+	*(process+5) = 0; // pointer to pageTable
+	*(process+6) = 0; // pointer to virtual memory
+	*(process+7) = -1; // PPID
+	*(process+8) = (int)initList(); // list for child processes
+	*(process+9) = 0; // wait status
 	
+	return process;
 }
-
-void printProcessVerbose(int *element){
+int* initList(){
+	int *list;
+	list = malloc(2*4);
+	*list = 0;
+	*(list+1) = 0;
+	return list;
+}
+void appendListElement(int *element, int *list){
+	int *tail;
+	tail = (int*)*(list+1);
+	if(isListEmpty(list)){
+		*list = (int)element;
+	} else {
+		*element = *(list+1);
+		*(tail+1) = (int)element;
+	}
+	*(list+1) = (int)element;
+	*(element+1) = 0;
+}
+int* findElementInList(int *list, int pid){ // search for element with pid 'pid' in list 'list'
+	int *curr;
+	curr = (int*)*list;
+	while((int)curr != 0){
+		if(getProcessID(curr) == pid){
+			return curr;
+		}
+		curr = getNextProcess(curr);
+	}
+	return (int*)0;
+}
+int* findElementInLists(int pid){ // search for element with pid 'pid' in all lists
+	int *find;
+	find = findElementInList(readyQueue, pid);
+	if((int)find==0)
+		find = findElementInList(blockedQueue, pid);
+	if((int)find==0)
+		find = findElementInList(zombieQueue, pid);
+	return find;
+}
+int* removeFirst(int *list){
+	return removeListElement(list, (int*)*list);
+}
+int* removeListElementByPID(int *list, int pid){
+	int *process;
+	process = findElementInList(list, pid);
+	if((int)process == 0)
+		return (int*)0;
+	return removeListElement(list, process);
+}
+int* removeListElement(int *list, int *process){
 	int *prev;
 	int *next;
-	int *segEntry;
-	prev = (int*)*element;
-	next = (int*)*(element+1);
-	segEntry = (int*)*(element+5);
-
-	print((int*)"pre ");
-	if(prev != (int*)0)
-		print(itoa(getProcessID(prev), string_buffer, 10, 0, 0));
-	println();
-
-	print((int*)"pid ");
-	if(element != (int*)0)
-		print(itoa(getProcessID(element), string_buffer, 10, 0, 0));
-	println();
-
-	print((int*)"next ");
-	if(next != (int*)0)
-		print(itoa(getProcessID(next), string_buffer, 10, 0, 0));
-	println();
-
-	print((int*)"pc ");
-	if(element != (int*)0)
-		print(itoa(getPC(element), string_buffer, 10, 0, 0));
-	println();
-
-	printSegmentationTableEntry(segEntry);
-
+	if(*list == 0)
+		return (int*)0;
+	if((int)process == 0)
+		return (int*)0;
+	if(getProcessID(process) == getProcessID((int*)*list)){		// process is first element
+		next = getNextProcess(process);
+		if((int)next == 0){			// process is first and last element
+			*list = 0;
+			*(list+1) = 0;
+		} else {					// process is first element but not last element
+			*next = 0;
+			*list = (int)next;
+		}
+	} else if(getProcessID(process) == getProcessID((int*)*(list+1))){ // process is not first but last element
+		prev = getPrevProcess(process);
+		*(prev+1) = 0;
+		*(list+1) = (int)prev;
+	} else {						// process is in middle of list
+		prev = getPrevProcess(process);
+		next = getNextProcess(process);
+		*(prev+1) = (int)next;
+		*next = (int)prev;
+	}
+	return process;	
 }
-
-void printProcessList(int *list){
-	printList(list, 0, 0);
+int* getPrevProcess(int *process){
+	return (int*)*process; 
 }
-void printProcessListVerbose(int *list){
-	printList(list, 0, 1);
+int* getNextProcess(int *process){
+	return (int*)*(process+1); 
 }
-void printSegmentationTable(int *list){
-	printList(list, 1, 0);
+int getProcessID(int *process){
+	return *(process+2); 
 }
-void printSegmentationTableVerbose(int *list){
-	printList(list, 1, 1);
+int getPC(int *process){
+	return *(process+3);
 }
-
-// print the list
-// if type == 0: print list of processes
-// if type == 1: print list of segmentation table entries
-void printList(int *list, int type, int verbose){
-	int *pToHead;
-	int *pToTail;
+void setPC(int *process, int pc){
+	*(process+3) = pc;
+}
+int* getRegisters(int *process){
+	return (int*)*(process+4); 
+}
+void setRegisters(int *process, int *regs){
+	*(process+4) = (int)regs;
+}
+int* getPageTable(int *process){
+	return (int*)*(process+5); 
+}
+void setPageTable(int *process, int *pageTable){
+	*(process+5) = (int)pageTable;
+}
+int* getVMemory(int *process){
+	return (int*)*(process+6);
+}
+void setVMemory(int *process, int *vmemory){
+	*(process+6) = (int)vmemory;
+}
+int getPPID(int *process){
+	return *(process+7);
+}
+void setPPID(int *process, int pid){
+	*(process+7) = pid;
+}
+int* getChildren(int *process){
+	return (int*)*(process+8);
+}
+int getChildListSize(int *process){
+	return getListSize(getChildren(process));
+}
+int getWaitStatus(int *process){
+	return *(process+9);
+}
+void setWaitStatus(int *process, int status){
+	*(process+9) = status;
+}
+int isProcessWaiting(int *process){
+	return getWaitStatus(process);
+}
+int isListEmpty(int *list){
+	if(*list == 0)
+		return 1;
+	return 0;
+}
+int listContainsElement(int pid, int *list){
+	int *el;
+	el = findElementInList(list, pid);
+	if((int)el == 0)
+		return 0;
+	return 1;
+}
+int getListSize(int *list){
+	int size;
 	int *curr;
+	size = 0;
+	curr = (int*)*list;
+	while((int)curr != 0){
+		size = size+1;
+		curr = getNextProcess(curr);
+	}
+	return size;
+}
+int hasLock(int *process){
+	if(lock == 1){
+		if(lockID == getProcessID(process))
+			return 1;
+	}
+	return 0;
+}
+void printProcessEntry(int *process, int verbose){
+	int *prev;
+	int *next;
+	prev = (int*)*process;
+	next = (int*)*(process+1);
 
-	pToHead = pollListHead(list);
-	pToTail = pollListTail(list);
+	if(verbose){
+		print((int*)"pre ");
+		if(prev != (int*)0)
+			print(itoa(getProcessID(prev), string_buffer, 10, 0, 0));
+		println();
+	}
+	print((int*)"pid ");
+	if(process != (int*)0)
+		print(itoa(getProcessID(process), string_buffer, 10, 0, 0));
+	println();
 
+	if(verbose){
+		print((int*)"next ");
+		if(next != (int*)0)
+			print(itoa(getProcessID(next), string_buffer, 10, 0, 0));
+		println();
+		print((int*)"pc ");
+		if(process != (int*)0)
+			print(itoa(getPC(process), string_buffer, 10, 0, 0));
+		println();
+		print((int*)"pos pageTable ");
+		if(process != (int*)0)
+			print(itoa((int)getPageTable(currProcess), string_buffer, 10, 0, 0));
+		println();
+		print((int*)"pos vmem ");
+		if(process != (int*)0)
+			print(itoa((int)getVMemory(currProcess), string_buffer, 10, 0, 0));
+		println();
+		print((int*)"PPID ");
+		if(process != (int*)0)
+			print(itoa(getPPID(process), string_buffer, 10, 0, 0));
+		println();
+		print((int*)"child list size ");
+		if(process != (int*)0)
+			print(itoa(getListSize(getChildren(process)), string_buffer, 10, 0, 0));
+		println();
+		print((int*)"is waiting ");
+		if(process != (int*)0)
+			print(itoa(getWaitStatus(process), string_buffer, 10, 0, 0));
+		println();
+	}
+}
+void printProcess(int *process){
+	printProcessEntry(process, 0);
+}
+void printProcessVerbose(int *process){
+	printProcessEntry(process, 1);
+}
+void printList(int *list, int verbose){
+	int *curr;
 	println();
 	print((int*)"print list start");
-	println();
-	println();
-
-	if(isListEmpty(list)==0){	// if list not empty
-		curr = (int*)*pToHead;
+	println();println();
+	if(isListEmpty(list) == 0){
+		curr = (int*)*list;
 		while((int)curr != 0){
 			if(verbose == 0){
-				if(type == 0)
-					printProcess(curr);
-				else if(type == 1)
-					printSegmentationTableEntry(curr);
+				printProcess(curr);
 			} else if (verbose == 1){
-				if(type == 0)
-					printProcessVerbose(curr);
-				else if(type == 1)
-					printSegmentationTableEntryVerbose(curr);
+				printProcessVerbose(curr);
 			}
-			curr = (int*)*(curr+1);
+			curr = getNextProcess(curr);
 			println();
 		}
 	} else println();
 	print((int*)"print list end");
 	println();
 }
-
-//initialize head and tail
-//@return: initialized list
-int* initList(){
-	int *list;
-	int *head;
-	int *tail;
-	// borders are head and tail of the list
-	// head and tail point to its allocated memory that contain the address of head and tail
-	list = malloc (2*4);
-	head = malloc(4);
-	tail = malloc(4);
-	*head = 0;
-	*tail = 0;
-	*list = (int)head;
-	*(list+1) = (int)tail;
-	return list;
+void printProcessList(int *list){
+	printList(list, 0);
 }
-
-// @return: entry in segmentation table for "pid"
-int* getSegmentationTableEntry(int pid, int *list){
-	int *entry;
-	
-	entry = findElementByPID(pid, list);
-	if((int)entry != 0)
-		return entry;
+void printProcessListVerbose(int *list){
+	printList(list, 1);
 }
-
-// create list element
-// @return: new list element
-int* createProcess(){
-	int *newElement;
-	int pid;
-	pid = nextValidPID;
-	nextValidPID = nextValidPID+1;
-	newElement = malloc (9*4);
-	*(newElement+0) = 0;	// prev
-	*(newElement+1) = 0;	// next
-	*(newElement+2) = pid;	// process ID
-	*(newElement+3) = 0;	// pc
-	*(newElement+4) = (int)malloc(32*4);	// registers
-	*(newElement+5) = 0; // pointer to entry in segmentation table
-	*(newElement+6) = -1; // parentPID
-	*(newElement+7) = (int)initList(); // list for child processes
-	*(newElement+8) = 0; // status isWaiting: 1 if waiting, 0 otherwise
-	return newElement;
+void addChild(int *process, int pid){
+	int *childList;
+	int *child;
+	childList = getChildren(process);
+	child = createChild(pid);
+	if((int)child != 0) // if child == 0 the process with pid 'pid' already terminated
+		appendListElement(child, childList);
 }
-
-int isProcessWaiting(int *process){
-	return *(process+8);
-}
-
-void setProcessWaitingStatus(int *process){
-	*(process+8) = 1;
-}
-
-void unsetProcessWaitingStatus(int *process){
-	*(process+8) = 0;
-}
-
-// create child for childlist
 int* createChild(int pid){
 	int *child;
-	int *findProcess;
-	findProcess = getNextWantedProcess(pid, readyQueue, blockedQueue, zombieQueue);
-	if((int)findProcess != 0){ 
+	int *find;
+	find = findElementInLists(pid);
+	if((int)find != 0){
 		child = malloc(3*4);
 		*(child+0) = 0;	// prev
 		*(child+1) = 0;	// next
-	
-		*(child+2) = pid;	// process ID of child
+		*(child+2) = pid;
+		*(child+3) = (int)find;	// pointer to the process
 		return child;
 	}
 	return (int*)0;
 }
-
-int* getNextWantedProcess(int pid, int *primaryQueue, int *secondaryQueue, int *tertiaryQueue){
-	int *findProcess;
-	findProcess = findElementByPID(pid, primaryQueue);
-	
-	if((int)findProcess == 0){
-		findProcess = findElementByPID(pid, secondaryQueue);
-		if((int)findProcess == 0){
-			findProcess = findElementByPID(pid, tertiaryQueue);
-		}		
-	}
-	return findProcess;
-}
-
-int* getChildQueue(int *process){
-	return (int*)*(process+7);
-}
-
-//@return: pid of current process
-int getProcessID(int *process){
-	return *(process+2);
-}
-// @return: pointer to first element of list
-int* pollListHead(int *list){
-	return (int*)*list;
-}
-
-// @return: pointer to last element of list
-int* pollListTail(int *list){
-	return (int*)*(list+1);
-}
-
-// @return: 1 if list is empty
-// 			0 otherwise
-int isListEmpty(int *list){
-	int *pToHead;
-	pToHead = pollListHead(list);
-	if(*pToHead == 0)
-		return 1;
-	return 0;
-}
-
-// add element at the end of the list
-void appendListElement(int *newElement, int *list){
-	int *pToHead;
-	int *pToTail;
-	int *tail;
-	pToHead = pollListHead(list);
-	pToTail = pollListTail(list);
-	if(isListEmpty(list)){	// if list is empty
-		*pToHead = (int)newElement;
-	} else {	// otherwise
-		*newElement = *pToTail;
-		tail = (int*)*pToTail;
-		*(tail+1) = (int)newElement;
-	}
-	*pToTail = (int)newElement;
-	*(newElement+1) = 0;
-}
-
-void insertListElementAtBeginning(int *newElement, int *list){
-	int *pToHead;
-	int *pToTail;
-	int *head;
-	pToHead = pollListHead(list);
-	pToTail = pollListTail(list);
-
-	if(isListEmpty(list)){	// if list is empty
-		*pToTail = (int)newElement;
-	} else {	// otherwise
-		*(newElement+1) = *pToHead;
-		head = (int*)*pToHead;
-		*head = (int)newElement;
-	}
-	*pToHead = (int)newElement;
-
-}
-
-// remove first element of the list
-// @return: pointer to the element
-//		    0 if list is empty
-int* removeFirst(int *list){
-	int *pToHead;
-	int *pToTail;
-	int *curr;
-	int *next;
-	int *head;
-	int *tail;
-
-	pToHead = pollListHead(list);
-	pToTail = pollListTail(list);
-	
-	if(isListEmpty(list)){ // list is empty
-		return (int*)0;
-	} else if(*pToHead == *pToTail){ // list contains only 1 element
-		curr = (int*)*pToHead;
-		head = malloc(4);
-		tail = malloc(4);
-		*head = 0;
-		*tail = 0;
-		*list = (int)head;
-		*(list+1) = (int)tail;
-	} else {	// otherwise
-		curr = (int*)*pToHead;
-		next = (int*)*(curr+1);
-		*(curr+1) = 0;
-		*next = 0;
-		*pToHead = (int)next;
-	}
-	return curr;
-}
-
-void sortList(int *list){
-	int *pToHead;
-	int *pToTail;
-	int *curr;
-	int *next;
-	int unsorted;
-	int changes;
-	int *tmp;
-	unsorted = 1;
-	pToHead = pollListHead(list);
-	pToTail = pollListTail(list);
-	
-	if(isListEmpty(list)){}	// list is empty, nothing to do 
-	else if(*pToHead == *pToTail){}	// list contains only one element, nothing to do
-	else {	//otherwise
-		
-		while(unsorted){
-			changes = 0;
-			next = (int*)*pToHead;
-			while(next != (int*)*pToTail){
-				curr = next;
-				next = (int*)*(curr+1);
-				if(*(curr+2) > *(next+2)){
-					swap(curr, next, list);
-					changes = 1;
-					//pToHead = pollListHead(list);
-					//pToTail = pollListTail(list);
-					//next = (int*)*pToTail;
-				}
-			}
-			if(changes == 0){
-				unsorted = 0;
-			}
-		}
-	}
-}
-
-void swap(int *curr, int *next, int *list){
-	int *prev;
-	int *nextButOne;
-	int *pToHead;
-	int *pToTail;
-	pToHead = pollListHead(list);
-	pToTail = pollListTail(list);
-	prev = (int*)0;
-	if(*curr != 0)
-		prev = (int*)*curr;
-	nextButOne = (int*)0;
-	if(*(next+1) != 0)
-		nextButOne = (int*)*(next+1);
-
-	*next = (int)prev;
-	*(next+1) = (int)curr;
-
-	if((int)nextButOne != 0)
-		*nextButOne = (int)curr;
-	else *pToTail = (int)curr;
-	if((int)prev != 0)
-		*(prev+1) = (int)next;
-	else *pToHead = (int)next;
-
-	*curr = (int)next;
-	*(curr+1) = (int)nextButOne;
-}
-
-// @return: list element with pid "pid"
-//			0 if not in list
-int* findElementByPID(int pid, int *list){
-	int *pToHead;
-	int *pToTail;
-	int *curr;
-	pToHead = pollListHead(list);
-	pToTail = pollListTail(list);
-
-	if(isListEmpty(list) == 0){
-		curr = (int*)*pToHead;
-		while(curr != (int*)*pToTail){
-			if(*(curr+2) == pid){
-				return curr;
-			}
-			curr = (int*)*(curr+1);
-		}
-		if(*(curr+2) == pid){
-			return curr;
-		}
-	}
-	return (int*)0;
-}
-
-int listContainsElement(int pid, int *list){
-	int *el;
-	el = findElementByPID(pid, list);
-	if((int)el == 0)
-		return 0;
-	return 1;
-}
-
-// save pc and registers of current process
 void saveProcessState(){
 	setPC(currProcess, pc);
 	setRegisters(currProcess, registers);
 }
-
-// set pc, registers and memory segment of current process
 void setProcessState(){
 	currSegment = getSegmentEntry(currProcess);
 	registers = getRegisters(currProcess);
 	pc = getPC(currProcess);
 	memory = getMemorySegmentStart(currSegment);
 }
-
-void setParentPID(int *process, int data){
-	*(process+6) = data;	
-}
-
-int getParentPID(int *process){
-	return *(process+6);
-}
-
 void setSegmentEntry(int *process, int *entry){
 	*(process+5) = (int)entry;
 }
-
-void setPC(int *process, int data){
-	*(process+3) = data;
-}
-
-void setRegisters(int *process, int *registers){
-	*(process+4) = (int)registers;
-}
-
-// create an entry in the segmentation table
 int* createSegmentationTableEntry(int pid, int segmentSize){
 	int *newSegmentationTableEntry;
 	usedMemorySize = usedMemorySize + segmentSize;
@@ -4774,126 +4644,6 @@ int* getMemorySegmentStart(int *segment){
 int getMemorySegmentSize(int *segment){
 	return *(segment+4);
 }
-int* getRegisters(int *process){
-	return (int*)*(process+4);
-}
-int getPC(int *process){
-	return *(process+3);
-}
-
-int getListSize(int *list){
-	int size;
-	int *pToHead;
-	int *currElement;
-	size = 0;
-	pToHead = pollListHead(list);
-	currElement = (int*)*pToHead;
-
-	while((int)currElement != 0){
-
-		size = size+1;
-		currElement = getNextListElement(currElement);
-	}
-	return size;
-}
-
-int* getNextListElement(int *process){
-	return (int*)*(process+1);
-}
-
-int allChildrenTerminated1(int *process){
-	int *childrenList;
-	int *current;
-	int currentID;
-	int containsCurrent;
-	int *currentZombie;
-	
-	childrenList = getChildQueue(process);
-	if(isListEmpty(childrenList))
-		return 0;
-	current = (int*)*childrenList;
-	while((int)current != 0){
-		containsCurrent = 0;
-		currentID = getProcessID(current);
-		currentZombie = (int*)*zombieQueue;
-		while((int)currentZombie != 0){
-			if(currentID == getProcessID(currentZombie)){
-				containsCurrent = 1;
-			}
-		}
-		if(containsCurrent == 0)
-			return 0;
-	}
-	return 1;
-}
-
-// @return: 1 if all children of process terminated 
-//			0 otherwise
-// children that are terminated are in the zombieQueue
-// if a child is in the zombieQueue it can be removed from the 
-// zombieQueue and the processes childQueue
-// the childQueue is only analyzed as long as the condition 'all children terminated' holds
-int allChildrenTerminated(int *process){
-	int *childQueue;
-	int childQueueSize;
-	int *currChild;
-	int *currZombie;
-	int zombieQueueSize;
-	int listContainsChild;
-	int i;
-	int j;
-	i=0;
-	listContainsChild=0;
-	childQueue = getChildQueue(process);
-	childQueueSize = getListSize(childQueue);
-	while(i < childQueueSize){	// check every child in the queue
-		currChild = removeFirst(childQueue);
-		zombieQueueSize = getListSize(zombieQueue);
-		j = 0;
-		while(j < zombieQueueSize){
-			currZombie = removeFirst(zombieQueue);
-			if(getProcessID(currChild) == getProcessID(currZombie)){
-				listContainsChild = 1;
-				j = zombieQueueSize; // for exiting while loop
-			} else { // if currZombie is not the zombie we are looking for it must be appended in the list again
-				appendListElement(currZombie, zombieQueue);
-			}
-			j = j+1;
-		}
-		if(listContainsChild == 0){ // if the current child is not in the zombie list
-			appendListElement(currChild, childQueue); // it has to be appended in the childQueue again
-			return 0;
-		}
-		i = i+1;
-	}
-	
-	return 1;
-}
-
-// wake up parent process, remove from blocked queue and add to readyQueue
-void notify(int *process){
-	int *findProcess;
-	int blockedListSize;
-	int i;
-	i = 0;
-	blockedListSize = getListSize(blockedQueue);
-	findProcess = removeFirst(blockedQueue);
-	// remove from blocked queue and add to readyQueue
-	while(i < blockedListSize){
-		if(findProcess != process){
-			appendListElement(findProcess, blockedQueue);
-			findProcess = removeFirst(blockedQueue);
-		} else {
-			i = blockedListSize;
-		}
-		i = i+1;
-	} 
-	if((int)findProcess != 0) {
-		unsetProcessWaitingStatus(process);
-		appendListElement(findProcess, readyQueue);
-	}
-}
-
 void releaseLock(){
 	lock = 0;
 	lockCounter = 0;
@@ -4903,124 +4653,14 @@ void releaseLock(){
 //			if such a process does not exist it returns the the first process from readyQueue
 int* getNextNotWaitingProcess(){
 	int *curr;
-	int blockedListSize;
-	int i;
-	i = 0;
-	blockedListSize = getListSize(blockedQueue);
 	curr = removeFirst(blockedQueue);
-	while(i < blockedListSize){
-		if(isProcessWaiting(curr)){ // process is waiting, get next
-			appendListElement(curr, blockedQueue);
-		} else {
-			return curr;
-		}
-		curr = removeFirst(blockedQueue);
-		
-		i = i+1;
+	while((int)curr != 0){
+		if(getWaitStatus(curr) == 0)
+			return removeListElement(blockedQueue, curr);
+		curr = getNextProcess(curr);
 	}
-	if((int)curr != 0)
-		appendListElement(curr, blockedQueue);
-	// if all processes from blocked queue are waiting
 	return removeFirst(readyQueue);
 
-}
-
-void switchFromFinishedProcess(){
-	int *parentProcess;
-	saveProcessState();
-	if(allChildrenTerminated(currProcess)){// if process waits for child it is in his childList
-	// a child is in the childQueue of a process when the process invokes wait on the childrens PID
-	// has child(ren) and all terminated --> all children are in zombieQueue or counterChildren is 0
-		if(getParentPID(currProcess) == -1) {
-			// --> there is no parent
-			// --> currProcess can terminate
-			// all other processes can be killed because all other (probably existing) processes are children
-			// of this master parent but there was no wait(PID) call
-//			continueExecuting();
-			exit(0);
-		} else {
-			// this currProcess has a parent --> currProcess is added to the zombieQueue
-			// wake up parent process --> if all children terminated of parentProcess --> add to readyQueue
-			//							remove child, remove child from parents childList
-
-			print((int*) "add process with id [");
-	   		print(itoa(getProcessID(currProcess), string_buffer, 10,0, 0));
-		   	print((int*)"] to zombieList");println();
-			appendListElement(currProcess, zombieQueue);
-			
-			parentProcess = findElementByPID(getParentPID(currProcess), readyQueue);
-			if((int)parentProcess == 0){
-				parentProcess = findElementByPID(getParentPID(currProcess), blockedQueue);
-			}
-			if((int)parentProcess != 0){
-				if(allChildrenTerminated(parentProcess)){ // if this is the last child the parent process was waiting
-					notify(parentProcess);		  // for then the parentProcess can be woken up 
-				}
-			}
-			
-		}
-	} else {
-		// not implemented yet, occurs when a parentProcess does not invoke wait(PID) on his child's PID
-		// children of this process are alive
-		// 2 possibilities: 1. invoke wait
-		//					2. kill all children (recursively)
-		//continueExecuting();
-		exit(-1);
-	}
-	if(lock){
-		// getNextProcess: if lock is hold by currProcess
-		if(lockID == getProcessID(currProcess)){ // if lock is hold by currProcess --> releaseLock
-			releaseLock();
-			currProcess = getNextNotWaitingProcess();	// get next (not waiting) process from blockedQueue
-		} else {
-			currProcess = removeFirst(readyQueue);
-		}
-	} else {
-		currProcess = getNextNotWaitingProcess();	// get next (not waiting) process from blockedQueue
-	}
-}
-
-void switchFromUnfinishedProcess(){
-	saveProcessState();
-	if(lock){
-		if(counterInstr < maxInstr){
-			appendListElement(currProcess, readyQueue);
-		} else if(lockID != getProcessID(currProcess)){ // if lock is hold by another process, 
-			appendListElement(currProcess, blockedQueue);	// switchProcess is invoked from syscall_lock()
-		} else if(isProcessWaiting(currProcess)) {
-			appendListElement(currProcess, blockedQueue);	// switchProcess is invoked from syscall_wait()
-		} else {
-			appendListElement(currProcess, readyQueue);
-		}
-	// if it is a cooperative switch --> waiting status == 0,
-	//otherwise waiting status == 1 and switchProcess was invoked from syscall_wait()
-	} else if(isProcessWaiting(currProcess)) {
-		appendListElement(currProcess, blockedQueue);
-	} else { // lock is not hold, cooperative switch
-			appendListElement(currProcess, readyQueue);
-	}
-	// if lock is hold by any process --> get next process from readyQueue
-	//		--> if there 
-	// else -->get next process from blockedQueue
-	if(lock){
-		// get next from readyQueue
-		currProcess = removeFirst(readyQueue);
-	} else {
-		currProcess = getNextNotWaitingProcess();	// get next (not waiting) process from blockedQueue
-	}
-}
-
-void switchProcess(int finished){
-	if(finished){
-		switchFromFinishedProcess();
-	} else if (finished == 0) {
-		switchFromUnfinishedProcess();
-	}
-	if((int)currProcess == 0){	// if there is no such process something went wrong
-		exit(-1);				
-	} else {
-		setProcessState();
-	}
 }
 
 int* duplicateProcess(){
@@ -5039,7 +4679,7 @@ int* duplicateProcess(){
 	appendListElement(currSegment, segmentationTable);
 
 	// set data of child
-	setParentPID(childProcess, getProcessID(currProcess));
+	setPPID(childProcess, getProcessID(currProcess));
 	setSegmentEntry(childProcess, childSegEntry);
 	saveProcessState();
 	setPC(childProcess, *(registers+REG_RA));
@@ -5060,7 +4700,6 @@ void copyRegisters(int *copyTo, int *copyFrom){
 		i = i+1;
 	}
 }
-
 void copyMemory(int *copyTo, int *copyFrom, int memorySize){
 	int i;
 	i = 0;
@@ -5890,7 +5529,6 @@ void execute() {
 }
 
 void run() {
-	int *listHead;
 	halt = 0;
 	currProcess = removeFirst(readyQueue);
 	setProcessState();
@@ -5898,9 +5536,8 @@ void run() {
  	    fetch();
 		continueExecuting();
 	 	if(counterInstr == maxInstr){
-			switchProcess(0);
+			syscall_yield();
 			counterInstr = 0;
-		
 		} else {
 		   	counterInstr = counterInstr + 1;
 	   	}
@@ -5912,8 +5549,12 @@ void run() {
 }
 
 void continueExecuting(){
+//	print((int*)"before decode");println();
 	decode();
+//	print((int*)"after decode");println();
+
 	execute();
+//	print((int*)"after execute");println();
 }
 
 void up_push(int value) {
@@ -6304,7 +5945,9 @@ int main(int argc, int *argv) {
     argc = argc - 1;
     argv = argv + 1;
 
-    if (selfie(argc, (int*) argv) != 0) {
+	if(0)
+	testlist();
+    else if (selfie(argc, (int*) argv) != 0) {
         print(selfieName);
         print((int*) ": usage: selfie { -c source | -o binary | -s assembly | -l binary } [ -m size ... | -d size ... | -k size ... ] ");
         println();
