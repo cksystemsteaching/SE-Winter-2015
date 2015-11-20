@@ -657,6 +657,7 @@ int counterInstr = 0;	// currently processed instruction counter
 int maxInstr = 500;		// syscall_yield should be invoked every 'maxInstr'
 
 int processFinished = 0;
+int yieldCaller = 0;	// 0...yield, 1...syscall_lock, 2...syscall_exit, 3...syscall_wait
 // ---------------------    methods   ---------------------
 
 // print methods
@@ -686,7 +687,7 @@ void setWaitStatus(int *process, int status);
 void addChild(int *process, int pid);
 int* findElementInList(int *list, int pid);
 int* findElementInLists(int pid);
-int* getNextNotWaitingProcess();
+int* removeFirstNotWaitingProcess();
 int* removeListElementByPID(int *list, int pid);
 int  getProcessID(int *process);
 int* getPageTable(int *process);
@@ -706,7 +707,7 @@ void setRegisters(int *process, int *registers);
 
 int  isProcessWaiting(int *process);
 void unsetProcessWaitingStatus(int *process);
-
+int  hasParent(int *process);
 int* createChild(int pid);
 
 // segmentation table entry operations
@@ -715,14 +716,19 @@ int* getSegmentatinTableEntry(int pid, int *list);
 int* getMemorySegmentStart(int *segment);
 int  getMemorySegmentSize(int *segment);
 
-
-void continueExecuting();
 void releaseLock();
 int* removeListElement(int *list, int *process);
 int  isListEmpty(int *list);
 int  listContainsElement(int pid, int *list);
 int  hasLock(int *process);
 int* createChild(int pid);
+void switchProcessFromYield();
+void switchProcessFromLock();
+void switchProcessFromExit();
+void switchProcessFromWait();
+void notify();
+void removeAllZombieChildren(int *childList);
+
 // -----------------------------------------------------------------
 // ---------------------------- BINARY -----------------------------
 // ----------------------------- CODE ------------------------------
@@ -3861,14 +3867,14 @@ void syscall_exit() {
     exitCode = *(registers+REG_A0);
     *(registers+REG_V0) = exitCode;
 
-	syscall_unlock();
-	processFinished = 1;
 	print((int*)"process with id [");
 	print(itoa(getProcessID(currProcess), string_buffer, 10,0, 0));
    	print((int*)"] terminates");println();
 
-	if(getPPID(currProcess) > -1){
-//	print((int*)"syscall_exit");println();
+
+	if(hasParent(currProcess)){
+		processFinished = 1;
+		yieldCaller = 2;
 		syscall_yield();
 	} else {
 		print(binaryName);
@@ -4107,55 +4113,73 @@ void emitYield(){
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);	
 }
 
-void syscall_yield() {
-	int *parent;
-	int *parentChildList;
-	parentChildList = (int*)0;
-	parent = findElementInLists(getPPID(currProcess));
-	if((int)parent != 0)
-		parentChildList = getChildren(parent);
-
-	if(getWaitStatus(currProcess)){
-		appendListElement(currProcess, blockedQueue);
-	} else if(processFinished == 0){
-		if(lock == 1){
-			if(lockID == getProcessID(currProcess)){
-				appendListElement(currProcess, readyQueue);
-			} else {
-				appendListElement(currProcess, blockedQueue);
-			}
-		} else {
-			appendListElement(currProcess, readyQueue);
-		}
-	} else {
-		removeListElement(parentChildList, currProcess);
-		if(isListEmpty(parentChildList)){	// if current process finished remove it from parent's childlist
-			parent = removeListElement(blockedQueue, parent); // and add parent to readyqueue
-			appendListElement(parent, readyQueue);
-			setWaitStatus(parent, 0);
-		}
+void syscall_yield(){
+	int debug_yield;
+	debug_yield = 0;
+	if(debug_yield)
+		print((int*)"switch process caller=");
+	
+	if(yieldCaller == 0){
+		switchProcessFromYield();
+		if(debug_yield)
+				print((int*)"syscall_yield");
+	} else if(yieldCaller == 1){
+		switchProcessFromLock();
+		if(debug_yield)
+				print((int*)"syscall_lock");
+	} else if(yieldCaller == 2){
+		switchProcessFromExit();
+		if(debug_yield)
+				print((int*)"syscall_exit");
+	} else if(yieldCaller == 3){
+		switchProcessFromWait();
+		if(debug_yield)
+				print((int*)"syscall_wait");
 	}
-
-	if(hasLock(currProcess)){
-		if(processFinished){
-			releaseLock();
-			currProcess = getNextNotWaitingProcess();
-		} else if(getWaitStatus(currProcess)){
-			releaseLock();
-			currProcess = getNextNotWaitingProcess();
-		} else
-			currProcess = removeFirst(readyQueue);
+	
+	if(debug_yield){
+		println();
+		print((int*)"switch from process [");
+		print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
+		print((int*)"]");println();
+		print((int*)"readyQueue");
+		printProcessListVerbose(readyQueue);
+		print((int*)"blockedQueue");
+		printProcessListVerbose(blockedQueue);
+		print((int*)"zombieQueue");
+		printProcessListVerbose(zombieQueue);
+	}
+	saveProcessState();
+	currProcess = (int*)0;
+	if(lock == 0){
+		currProcess = removeFirstNotWaitingProcess();
+	}
+	if((int)currProcess != 0){
+		setProcessState();	// has to be done before the syscall_lock!!
+		syscall_lock();
 	} else {
 		currProcess = removeFirst(readyQueue);
 	}
-	if((int)currProcess != 0){
-		setProcessState();
-	} else {
-		println((int*)"no ready process");
+
+	if((int)currProcess == 0){
+		if(debug_yield){
+			print((int*)"switch to process [NULL]");
+			println();
+		}
 		exit(-1);
 	}
+
+
+	setProcessState();	// in second case it is only down here
+	if(debug_yield){
+		print((int*)"switch to process [");
+		print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
+		print((int*)"]");println();
+	}
+	yieldCaller = 0;
 	processFinished = 0;
 	counterInstr = 0;
+	
 }
 
 void emitUnlock(){
@@ -4204,6 +4228,7 @@ void syscall_lock(){
 		lockCounter = 1;
 	} else if(lock == 1){
 		if(lockID != getProcessID(currProcess)){
+			yieldCaller = 1;
 			syscall_yield();			
 		} else 
 			lockCounter = lockCounter + 1;
@@ -4245,8 +4270,10 @@ void emitFork(){
 }
 
 void syscall_fork(){
+	int debug_fork;
 	int *childProcess;
 	int *childRegisters;
+	debug_fork = 0;
 	saveProcessState();
 	if (nextValidPID >= maxNrProcesses){
 		*(registers+REG_V0) = -1;
@@ -4255,8 +4282,14 @@ void syscall_fork(){
 		childRegisters = getRegisters(childProcess);
 		*(registers+REG_V0) = getProcessID(childProcess); //return value for parent is childID
 		*(childRegisters+REG_V0) = 0;	//return value for child is 0
+		if(debug_fork){
+			print((int*)"parent reg: "); print(itoa(*(registers+REG_V0), string_buffer, 10, 0, 0));
+			println();
+			print((int*)"child reg: "); print(itoa(*(childRegisters+REG_V0), string_buffer, 10, 0, 0));
+			println();
+		}
+		saveProcessState();
 	}
-	saveProcessState();
 }
 
 void emitWait(){
@@ -4276,19 +4309,36 @@ void emitWait(){
 }
 
 void syscall_wait(){
+	int debug_wait;
 	int waitPID; // currProcess must wait for process with 'waitPID'
+	debug_wait = 0;
 	waitPID = *(registers+REG_A0);
+	
+	if(debug_wait){
+		print((int*)"syscall_wait");
+		println();
+		print((int*)"waitPID ");
+		print(itoa(waitPID, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"getPPID(currProcess) ");
+		print(itoa(getPPID(currProcess), string_buffer, 10, 0, 0));
+		println();
+	}
+	if(waitPID != getPPID(currProcess)){	// process cannot wait for its parent
+		if(debug_wait){
+			print((int*)"call yield from wait");
+			println();
+		}
+		addChild(currProcess, waitPID);
+		setWaitStatus(currProcess, 1);
+		yieldCaller = 3;
+		syscall_yield();
+	} else
+		if(debug_wait){
+			print((int*)"no yield call from wait");
+			println();
+		}
 
-	if(waitPID == getProcessID(currProcess)) // process cannot wait for itself
-		return;
-	if(waitPID == getPPID(currProcess))	// process cannot wait for its parent
-		return;
-
-	addChild(currProcess, waitPID);
-
-	releaseLock();
-	setWaitStatus(currProcess, 1);
-	syscall_yield();
 }
 
 
@@ -4454,6 +4504,11 @@ void setVMemory(int *process, int *vmemory){
 int getPPID(int *process){
 	return *(process+7);
 }
+int hasParent(int *process){
+	if(getPPID(process) > -1)
+		return 1;
+	return 0;
+}
 void setPPID(int *process, int pid){
 	*(process+7) = pid;
 }
@@ -4587,19 +4642,21 @@ void addChild(int *process, int pid){
 	int *child;
 	childList = getChildren(process);
 	child = createChild(pid);
-	if((int)child != 0) // if child == 0 the process with pid 'pid' already terminated
+	if((int)child != 0){ // if child == 0 the process with pid 'pid' already terminated
+		releaseLock();
 		appendListElement(child, childList);
+	}
 }
 int* createChild(int pid){
 	int *child;
 	int *find;
 	find = findElementInLists(pid);
 	if((int)find != 0){
-		child = malloc(3*4);
+		child = malloc(3*4);//malloc(3*4);
 		*(child+0) = 0;	// prev
 		*(child+1) = 0;	// next
 		*(child+2) = pid;
-		*(child+3) = (int)find;	// pointer to the process
+//		*(child+3) = (int)find;	// pointer to the process
 		return child;
 	}
 	return (int*)0;
@@ -4645,21 +4702,74 @@ int getMemorySegmentSize(int *segment){
 	return *(segment+4);
 }
 void releaseLock(){
-	lock = 0;
-	lockCounter = 0;
+	if(lock==1){
+		if(lockID == getProcessID(currProcess)){
+			lock = 0;
+			lockCounter = 0;
+		}
+	}
 }
-
+void switchProcessFromYield(){
+	appendListElement(currProcess, readyQueue);
+}
+void switchProcessFromLock(){
+	appendListElement(currProcess, blockedQueue);
+}
+void switchProcessFromExit(){
+	if(hasParent(currProcess)){
+		appendListElement(currProcess, zombieQueue);
+		notify();
+	}
+	releaseLock();
+}
+void switchProcessFromWait(){
+	appendListElement(currProcess, blockedQueue);
+	releaseLock();
+}
+void notify(){
+	int *parent;
+	int *parentChildList;
+	parent = findElementInList(blockedQueue, getPPID(currProcess));
+	if((int)parent != 0){
+		parentChildList = getChildren(parent);
+		removeAllZombieChildren(parentChildList);
+		if(getListSize(parentChildList)==0){
+			setWaitStatus(parent, 0);
+			removeListElement(blockedQueue, parent);
+			appendListElement(parent, readyQueue);
+		}
+	}
+}
+void removeAllZombieChildren(int *childList){
+	int *zombie;
+	int *child;
+	zombie = (int*)*zombieQueue;
+	while((int)zombie != 0){
+		child = (int*)*childList;
+		while((int)child != 0){
+			if(getProcessID(zombie) == getProcessID(child)){
+				removeListElement(childList, child);
+				removeListElement(zombieQueue, zombie);
+			}
+			child = getNextProcess(child);
+		}
+		zombie = getNextProcess(zombie);
+	}
+}
 //@return: first "not waiting" process in blockedQueue
 //			if such a process does not exist it returns the the first process from readyQueue
-int* getNextNotWaitingProcess(){
+int* removeFirstNotWaitingProcess(){
 	int *curr;
-	curr = removeFirst(blockedQueue);
+	curr = (int*)*blockedQueue;
 	while((int)curr != 0){
-		if(getWaitStatus(curr) == 0)
+		if(getWaitStatus(curr) == 0){
+			setProcessState();
+//			syscall_lock();
 			return removeListElement(blockedQueue, curr);
+		}
 		curr = getNextProcess(curr);
 	}
-	return removeFirst(readyQueue);
+	return (int*)0;
 
 }
 
@@ -5534,7 +5644,8 @@ void run() {
 	setProcessState();
 	while(halt==0){
  	    fetch();
-		continueExecuting();
+		decode();
+		execute();
 	 	if(counterInstr == maxInstr){
 			syscall_yield();
 			counterInstr = 0;
@@ -5548,14 +5659,6 @@ void run() {
     debug     = 0;
 }
 
-void continueExecuting(){
-//	print((int*)"before decode");println();
-	decode();
-//	print((int*)"after decode");println();
-
-	execute();
-//	print((int*)"after execute");println();
-}
 
 void up_push(int value) {
     int vaddr;
