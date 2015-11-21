@@ -926,7 +926,7 @@ int random_counter = 0;
 int number_of_proc = 1;
 int proc_count;
 int instr_count;
-int instr_cycles = 4;
+int instr_cycles = 3;
 int triggerContextSwitch;
 
 int* current_page_table;
@@ -3984,6 +3984,7 @@ void emitRead() {
 	emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
+// TODO: Paging in syscall_read
 void syscall_read() {
 	int count;
 	int vaddr;
@@ -4035,25 +4036,49 @@ void emitWrite() {
 }
 
 void syscall_write() {
-	int size;
+
 	int vaddr;
 	int fd;
 	int *buffer;
+	int bytes_to_write;
+	int bytes_to_next_page;
+	int written_bytes;
+	int size;
 
 	size = *(registers + REG_A2);
 	vaddr = *(registers + REG_A1);
 	fd = *(registers + REG_A0);
 
-	buffer = tlb(vaddr);  // was: + *current_seg
+	bytes_to_write = size;
+	written_bytes = 0;
 
-	size = write(fd, buffer, size);
+	while ( bytes_to_write > 0 ) {
+		bytes_to_next_page = PAGE_FRAME_SIZE - (vaddr%PAGE_FRAME_SIZE);
+		buffer = tlb(vaddr);
 
-	*(registers + REG_V0) = size;
+		if ( bytes_to_write > bytes_to_next_page ) {
+			written_bytes = write(fd, buffer, bytes_to_next_page);
+
+			if( written_bytes < bytes_to_next_page ) {
+				// Something went wrong, we need to stop writing
+				bytes_to_write = -1;
+			}
+
+			bytes_to_write = bytes_to_write - bytes_to_next_page;
+			vaddr = vaddr + bytes_to_next_page;
+		}
+		else {
+			written_bytes = write(fd, buffer, bytes_to_write);
+			bytes_to_write = 0;
+		}
+	}
+
+	*(registers + REG_V0) = written_bytes;
 
 	if (debug_write) {
 		print(binaryName);
 		print((int*) ": wrote ");
-		print(itoa(size, string_buffer, 10, 0, 0));
+		print(itoa(written_bytes, string_buffer, 10, 0, 0));
 		print((int*) " bytes from buffer at address ");
 		print(itoa((int) buffer, string_buffer, 16, 8, 0));
 		print((int*) " into file with descriptor ");
@@ -4691,8 +4716,8 @@ int tlb(int vaddr) {
 	if (vaddr % 4 != 0)
 		exception_handler(EXCEPTION_ADDRESSERROR);
 
-	offset = vaddr % (4*1024);
-	index = vaddr / (4*1024);
+	offset = vaddr % 4096;
+	index = vaddr / 4096;
 
 	//print((int*) "Offset: \n");
 //	print(itoa(offset, string_buffer, 10, 0, 0));
@@ -4710,7 +4735,7 @@ int tlb(int vaddr) {
 
 
 	// if a match has been found, return the value
-	if ( (int) phy_page_addr != -1) {
+	if ( (int) phy_page_addr != (-1)) {
 	//	print((int*) "Hey, I found something!\n");
 
 		return (int) phy_page_addr + offset;
@@ -4719,7 +4744,7 @@ int tlb(int vaddr) {
 			// if no match has been found, however make a new page table node with vaddr as key (--> page_fault_handler!!)
 			// the value will be the frame that palloc returns
 			// then return that value
-			//print((int*) "I couldn't find anything!\n");
+		  //print((int*) "I couldn't find anything!\n");
 			phy_page_addr = page_fault_handler();
 
 			*(current_page_table+index) = phy_page_addr;
