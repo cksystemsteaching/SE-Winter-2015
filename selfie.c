@@ -4080,8 +4080,6 @@ void emitFork()
     emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
     emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
     
-    // remove the argument from the stack
-    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
     
     // load the correct syscall number and invoke syscall
     emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_FORK);
@@ -5702,9 +5700,9 @@ int main(int argc, int* argv)
 // +---------------+
 // | Pr Prev 0     |
 // +---------------+
-// | Data 	   |
+// | Data 	       |
 // +---------------+
-// | ...	   |
+// | ...	       |
 // +---------------+
 
 int* os_createLList(int size)
@@ -5900,6 +5898,7 @@ void os_prepare()
 //We Assume that createProcess only get called
 //on emulator start, so we set the pc and reg
 //in this function new for our convenience
+
 void os_createProcess()
 {
     int* newP;
