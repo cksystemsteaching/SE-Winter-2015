@@ -692,6 +692,9 @@ void syscall_getpid();
 void emitFork();
 void syscall_fork();
 
+void emitWait();
+void syscall_wait();
+
 void emitExit();
 void syscall_exit();
 
@@ -721,6 +724,7 @@ int SYSCALL_LOCK = 5004;
 int SYSCALL_UNLOCK = 5005;
 int SYSCALL_GETPID = 5006;
 int SYSCALL_FORK = 5007;
+int SYSCALL_WAIT = 5008;
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -3519,6 +3523,7 @@ void compile()
     emitUnlock();
     emitGetpid();
     emitFork();
+    emitWait();
     // parser
     gr_cstar();
     
@@ -4115,6 +4120,28 @@ void syscall_fork()
     }
 }
 
+
+void emitWait()
+{
+    createSymbolTableEntry(GLOBAL_TABLE, (int*)"wait", binaryLength, FUNCTION, INT_T, 0);
+    
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+    
+    
+    // load the correct syscall number and invoke syscall
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_WAIT);
+    emitRFormat(0, 0, 0, 0, FCT_SYSCALL);
+    
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_wait()
+{
+
+}
 void emitExit()
 {
     createSymbolTableEntry(GLOBAL_TABLE, (int*)"exit", binaryLength, FUNCTION, INT_T, 0);
@@ -4141,6 +4168,9 @@ void syscall_exit()
     int exitCode;
     int* node;
     int pId;
+    int childCntr;
+    childCntr = os_getListEntry(6,os_readyQ);
+    childCntr
     pId = os_getListEntry(4, os_readyQ);
     exitCode = *(registers + REG_A0);
     
@@ -4460,6 +4490,9 @@ void fct_syscall()
         }
         else if (*(registers + REG_V0) == SYSCALL_FORK) {
             syscall_fork();
+        }
+        else if (*(registers + REG_V0) == SYSCALL_WAIT) {
+            syscall_wait();
         }
         else {
             exception_handler(EXCEPTION_UNKNOWNSYSCALL);
@@ -5894,6 +5927,8 @@ void os_prepare()
 //		+----------------+
 //		|   parent id    | //If 0 OS is the parent else we are a child
 //		+----------------+
+//		|   has child    | //Check if there are any childs for this process, so we do not need a zombieQ
+//		+----------------+ 
 //-----------------------------------------------------//
 //We Assume that createProcess only get called
 //on emulator start, so we set the pc and reg
@@ -5907,12 +5942,12 @@ void os_createProcess()
     seg = os_kmalloc(os_segSize);
     os_readyCtr = os_readyCtr + 1;
     if (os_readyQ == 0) {
-        newP = os_createLList(5);
+        newP = os_createLList(6);
         os_readyQ = newP;
         os_pId = 1;
     }
     else {
-        newP = os_addNodeToLList(5, os_readyQ);
+        newP = os_addNodeToLList(6, os_readyQ);
         os_pId = os_pId + 1;
     }
     dRegister = malloc(32 * 4);
@@ -5921,6 +5956,7 @@ void os_createProcess()
     os_setListEntry(3, seg, newP);
     os_setListEntry(4, os_pId, newP);
     os_setListEntry(5, 0, newP);
+    os_setListEntry(6, 0, newP);
 }
 
 int os_createFork()
@@ -5929,10 +5965,14 @@ int os_createFork()
     int* dregisters;
     int i;
     int j;
+    int childCntr;
     int* newPr;
     int par_pId;
     int vaddr;
     par_pId = os_getListEntry(4, os_readyQ);
+    childCntr = os_getListEntry(6, os_readyQ);
+    childCntr = childCntr + 1;
+    os_setListEntry(6, childCntr, os_readyQ);
     segStart = os_kmalloc(os_segSize);
     dregisters = malloc(32 * 4);
     //Copy Registers
