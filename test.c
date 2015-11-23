@@ -1,79 +1,39 @@
+void alloc_and_access(int* space) {
+	int size;
+	int counter;
+
+	counter = 0;
+
+	size = 1024*1024*4;
+	space = malloc(size);
+
+	while (counter < 128) {
+		*((int) space + size*(counter/128)) = 42;
+		counter = counter + 1;
+	}
+}
+
 int main() {
 	int pid;
-	int a;
+	int* space;
 
 	pid = fork();
 
 	if (pid == 0) {
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar('a');
-		putchar(' ');
+		alloc_and_access(space);
 
 		pid = fork();
 
-		lock();
-
 		if (pid == 0) {
-			putchar('d');
-			putchar('d');
-			putchar('d');
-			putchar('d');
-			putchar('d');
-			putchar('d');
-			putchar('d');
-			putchar('d');
-			putchar('d');
-			putchar('d');
-			putchar('d');
-			putchar('d');
-			putchar('d');
-			unlock();
+			alloc_and_access(space);
 		} else if (pid > 0) {
-			putchar('e');
-			putchar('e');
-			putchar('e');
-			putchar('e');
-			unlock();
-			wait(pid);
-			putchar('f');
+			alloc_and_access(space);
 		} else {
-			exit(1);
+			exit(-1);
 		}
-
-		exit(5);
-
 	} else if (pid > 0) {
-		putchar('b');
-		putchar('b');
-		putchar('b');
-		putchar('b');
-		putchar(' ');
-		wait(pid);
-		putchar('c');
-		exit(3);
+		alloc_and_access(space);
 	} else {
-		exit(1);
+		exit(-1);
 	}
 }
