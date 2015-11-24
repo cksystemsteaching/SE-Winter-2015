@@ -4681,8 +4681,10 @@ void syscall_wait() {
 void print_page_table(int* page_table) {
 
 	int index;
+	int alloc_ctr;
 
 	index = 0;
+	alloc_ctr = 0;
 
 	print((int*)" ---- Page Table: ---- \n");
 	while ( index < PAGE_TABLE_SIZE ) {
@@ -4692,6 +4694,7 @@ void print_page_table(int* page_table) {
 			print((int*)" -> ");
 			print(itoa(*(page_table+index), string_buffer, 10, 0, 0));
 			println();
+			alloc_ctr = alloc_ctr + 1;
 		}
 
 		index = index + 1;
@@ -4699,6 +4702,9 @@ void print_page_table(int* page_table) {
 	}
 	print((int*)" --------------------- \n");
 
+	print((int*) "There are ");
+	print(itoa(alloc_ctr, string_buffer, 10, 0, 0));
+	print((int*) " allocated frames.\n");
 }
 
 int tlb(int vaddr) {
@@ -4744,7 +4750,7 @@ int tlb(int vaddr) {
 			// if no match has been found, however make a new page table node with vaddr as key (--> page_fault_handler!!)
 			// the value will be the frame that palloc returns
 			// then return that value
-		  //print((int*) "I couldn't find anything!\n");
+			// print((int*) "I couldn't find anything!\n");
 			phy_page_addr = page_fault_handler();
 
 			*(current_page_table+index) = phy_page_addr;
@@ -5837,6 +5843,11 @@ void disassemble() {
 
 	interpret = 0;
 	debug = 1;
+
+	current_page_table = (int*) malloc(PAGE_FRAME_SIZE);
+
+	print((int*) "s\n");
+	println();
 
 	copyBinaryToMemory();
 

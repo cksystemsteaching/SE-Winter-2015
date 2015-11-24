@@ -4,11 +4,11 @@ void alloc_and_access(int* space) {
 
 	counter = 0;
 
-	size = 1024*1024*4;
-	space = malloc(size);
+	size = 1024*4;
+	space = malloc(size * 128);
 
 	while (counter < 128) {
-		*((int) space + size*(counter/128)) = 42;
+		*((int) space + size*counter) = 42;
 		counter = counter + 1;
 	}
 }
@@ -26,14 +26,19 @@ int main() {
 
 		if (pid == 0) {
 			alloc_and_access(space);
+			exit(2);
 		} else if (pid > 0) {
 			alloc_and_access(space);
+			exit(3);
 		} else {
 			exit(-1);
 		}
 	} else if (pid > 0) {
 		alloc_and_access(space);
+		exit(4);
 	} else {
 		exit(-1);
 	}
+
+	exit(42);
 }
