@@ -637,8 +637,6 @@ int *zombieQueue;			// processes that are childs but parent is not waiting yet
 
 int *currProcess;			// currently operating process 
 
-int  isEmulating = 0;		// needed for range checks
-
 int  lock = 0;				// if 1 lock is hold by a process
 int  lockID = 0;			// id of process holding the lock
 int  lockCounter = 0;		// counts syscall_lock calls of process that holds lock, lock increases, unlock decreases
@@ -647,7 +645,7 @@ int  nextValidPID = 0;		// unique id for next process
 int  maxNrProcesses = 5;	// maximum number of processes;
 
 int  counterInstr = 0;		// currently processed instruction counter
-int  maxInstr = 500;		// syscall_yield should be invoked every 'maxInstr'
+int  maxInstr = 100;		// syscall_yield should be invoked every 'maxInstr'
 
 int  processFinished = 0;	// if process calls syscall_exit...1
 int  yieldCaller = 0;		// 0...yield, 1...syscall_lock, 2...syscall_exit, 3...syscall_wait
@@ -716,6 +714,8 @@ int* createChild(int pid);
 void addChild(int *process, int pid);
 void copyRegisters(int *copyTo, int *copyFrom);
 void copyMemory(int *copyTo, int *copyFrom, int memorySize);
+void duplicatePageTable(int *copyTo, int *copyFrom);
+void duplicatePageFrame(int *copyTo, int *copyFrom);
 
 void releaseLock();
 int  hasLock(int *process);
@@ -858,7 +858,8 @@ int *pmemory = (int*) 0; // mipster memory
 // ------------------------- INITIALIZATION ------------------------
 
 void initMemory(int bytes) {
-	int debug_initMemory = 0;
+	int debug_initMemory;
+	debug_initMemory = 0;
     if (bytes < 0)
         memorySize = 64 * MEGABYTE;
     else if (bytes > 1024 * MEGABYTE)
@@ -3628,7 +3629,8 @@ void printFunction(int function) {
 }
 
 void decode() {
-	int debug_decode = 0;
+	int debug_decode;
+	debug_decode = 0;
 	if(debug_decode){
 	 	print((int*)"ir: ");
 		print(itoa(ir, string_buffer, 10, 0, 0));
@@ -3638,10 +3640,16 @@ void decode() {
 		println();
 	}
     opcode = getOpcode(ir);
-	if(debug_decode){
-	  	print((int*)"rs: ");
-		printRegister(rs);
+    if(0){
+		print((int*)"ir: ");
+		print(itoa(ir, string_buffer, 10, 0, 0));
 		println();
+		print((int*)"pc: ");
+		print(itoa(pc, string_buffer, 10, 0, 0));
+		println();
+    
+    }
+	if(debug_decode){
 
 		print((int*)"opcode: ");
 		print(itoa(opcode, string_buffer, 10, 0, 0));
@@ -4208,22 +4216,23 @@ void syscall_yield(){
 	if(debug_yield)
 		print((int*)"switch process caller=");
 	
+	saveProcessState();
 	if(yieldCaller == 0){
-		switchProcessFromYield();
 		if(debug_yield)
 				print((int*)"syscall_yield");
+		switchProcessFromYield();
 	} else if(yieldCaller == 1){
-		switchProcessFromLock();
 		if(debug_yield)
 				print((int*)"syscall_lock");
+		switchProcessFromLock();
 	} else if(yieldCaller == 2){
-		switchProcessFromExit();
 		if(debug_yield)
 				print((int*)"syscall_exit");
+		switchProcessFromExit();
 	} else if(yieldCaller == 3){
-		switchProcessFromWait();
 		if(debug_yield)
 				print((int*)"syscall_wait");
+		switchProcessFromWait();
 	}
 	
 	if(debug_yield){
@@ -4248,18 +4257,16 @@ void syscall_yield(){
 		syscall_lock();
 	} else {
 		currProcess = removeFirst(readyQueue);
-	}
-
-	if((int)currProcess == 0){
-		if(debug_yield){
-			print((int*)"switch to process [NULL]");
-			println();
+		if((int)currProcess == 0){
+			if(debug_yield){
+				print((int*)"switch to process [NULL]");
+				println();
+			}
+			exit(-1);
 		}
-		exit(-1);
+		setProcessState();
 	}
 
-
-	setProcessState();	// in second case it is only down here
 	if(debug_yield){
 		print((int*)"switch to process [");
 		print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
@@ -4419,6 +4426,7 @@ void syscall_wait(){
 			println();
 		}
 		addChild(currProcess, waitPID);
+		
 		setWaitStatus(currProcess, 1);
 		yieldCaller = 3;
 		syscall_yield();
@@ -4665,10 +4673,6 @@ void printProcessEntry(int *process, int verbose){
 		if(process != (int*)0)
 			print(itoa(getPC(process), string_buffer, 10, 0, 0));
 		println();
-		print((int*)"pos pageTable ");
-		if(process != (int*)0)
-			print(itoa((int)getPageTable(currProcess), string_buffer, 10, 0, 0));
-		println();
 		print((int*)"PPID ");
 		if(process != (int*)0)
 			print(itoa(getPPID(process), string_buffer, 10, 0, 0));
@@ -4750,12 +4754,13 @@ void setProcessState(){
 	currPageTable = getPageTable(currProcess);
 }
 int* createPageTable(){
-	int debug_createPageTable = 0;
+	int debug_createPageTable;
 	int pageTableEntries;
 	int pageTableSize;
 	int *pageTable;
 	int *curr;
 	int i;
+	debug_createPageTable = 0;
 	i=0;
 	pageTableEntries = vmemorySize / pageSize;
 	pageTableSize = pageTableEntries * 4; 
@@ -4798,7 +4803,7 @@ void printPageTable(int *pageTable){
 	println();
 
 	while(i< pageTableSize){
-		if((int)*pageTable != 0){
+		if((int)pageTable != 0){
 			print((int*)"pageTableEntry [");
 			print(itoa(i, string_buffer, 10 , 0,0));
 			print((int*)"] mapped to ");
@@ -4885,32 +4890,40 @@ int* removeFirstNotWaitingProcess(){
 }
 
 int* duplicateProcess(){
-	int *parentSegEntry;
-	int parentMemorySize;
+	int debug_duplicateProcess;
+	int *parentPageTable;
+	int *childPageTable;
 	int *childProcess;
-	int *childSegEntry;
-	// TODO copy pages
+	debug_duplicateProcess = 0;
+	parentPageTable = getPageTable(currProcess);
 	
-	//get data of parent
-//	parentSegEntry = getSegmentEntry(currProcess);	
-//	parentMemorySize = getMemorySegmentSize(parentSegEntry);
-
-	// create child process and segmentation table entry
 	childProcess = createProcess();
-//	childSegEntry = createSegmentationTableEntry(getProcessID(childProcess), parentMemorySize);
-//	appendListElement(currSegment, segmentationTable);
-
+	childPageTable = getPageTable(childProcess);
+	
 	// set data of child
 	setPPID(childProcess, getProcessID(currProcess));
-//	setSegmentEntry(childProcess, childSegEntry);
-	saveProcessState();
 	setPC(childProcess, *(registers+REG_RA));
 	copyRegisters(getRegisters(childProcess), registers);
-//	copyMemory(getMemorySegmentStart(childSegEntry), getMemorySegmentStart(parentSegEntry), parentMemorySize);
+	duplicatePageTable(childPageTable, parentPageTable);
 
 	// add to process list
+
 	appendListElement(childProcess, readyQueue);
 	
+	if(debug_duplicateProcess){
+		print((int*)"*(registers+REG_RA)");
+		print(itoa(*(registers+REG_RA) , string_buffer, 10, 0, 0));println();
+
+		printProcessVerbose(currProcess);
+		printPageTable(getPageTable(currProcess));
+		println();
+		printProcessVerbose(childProcess);
+		print((int*)"parent pt");
+		printPageTable(getPageTable(currProcess));
+		println();
+		print((int*)"child pt");
+		printPageTable(getPageTable(childProcess));
+	}
 	return childProcess;
 }
 
@@ -4920,6 +4933,39 @@ void copyRegisters(int *copyTo, int *copyFrom){
 	while(i < 32){
 		*(copyTo+i) = *(copyFrom+i);
 		i = i+1;
+	}
+}
+void duplicatePageTable(int *copyTo, int *copyFrom){
+	int pageTableSize;
+	int i;
+	i=0;
+	pageTableSize = vmemorySize / pageSize;
+
+	while(i < pageTableSize){
+		if((int)*copyFrom != 0){
+			print((int*)"copy page [");
+			print(itoa(i , string_buffer, 10, 0, 0));
+			print((int*)"] from process [");
+			print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
+			print((int*)"] in pageTable");
+			println();
+		
+			*copyTo = (int)pmalloc();
+			duplicatePageFrame(copyTo, copyFrom);
+		}
+		copyTo = copyTo + 1;
+		copyFrom = copyFrom + 1;
+		i = i+4;
+	}
+}
+void duplicatePageFrame(int *copyTo, int *copyFrom){
+	int i;
+	i = 0;
+	while(i < pageFrameSize){
+		*copyTo = *copyFrom;
+		copyTo = copyTo + 1;
+		copyFrom = copyFrom + 1;
+		i = i + 1;
 	}
 }
 void copyMemory(int *copyTo, int *copyFrom, int memorySize){
@@ -4956,47 +5002,103 @@ void pfree(int *page){
 // ---------------------------- MEMORY -----------------------------
 // -----------------------------------------------------------------
 int tlb(int vaddr) {
-	int debug_tlb = 0;
+	int debug_tlb;
 	int paddr;
 	int pmemOffset;
 	int ptOffset;
-	
-    if (vaddr % 4 != 0)
-        exception_handler(EXCEPTION_ADDRESSERROR);
-    if (vaddr < 0)
-        exception_handler(EXCEPTION_ADDRESSERROR);
-    if (vaddr > maxVMemoryAddress)
-        exception_handler(EXCEPTION_ADDRESSERROR);
+	debug_tlb = 0;
+	if (vaddr % 4 != 0){
+		print((int*)"tlb 1: ");
+		exception_handler(EXCEPTION_ADDRESSERROR);
+	}
+	if (vaddr < 0){
+		print((int*)"tlb 2: ");
+		exception_handler(EXCEPTION_ADDRESSERROR);
+	}
+	if (vaddr > maxVMemoryAddress){
+		print((int*)"tlb 3: ");
+		exception_handler(EXCEPTION_ADDRESSERROR);
+	}
 
 	ptOffset = vaddr / pageSize;
 	pmemOffset = vaddr % pageSize;
-	
+
 	if((int)*(currPageTable+ptOffset) == 0){
 		exception_handler(EXCEPTION_PAGEFAULT);
 		*(currPageTable+ptOffset) = (int)pmalloc();
+		
 		if(debug_tlb){
-			print((int*)"allocate new page: ");
-			print(itoa(*(currPageTable+ptOffset), string_buffer, 10, 0, 0));
+		
+			print((int*)"(currPageTable+ptOffset): ");
+			print(itoa((int)(currPageTable+ptOffset), string_buffer, 10, 0, 0));
+			println();
+			print((int*)"currPageTable: ");
+			print(itoa((int)currPageTable, string_buffer, 10, 0, 0));
+			println();
+			print((int*)"getPageTable(currProcess): ");
+			print(itoa((int)getPageTable(currProcess), string_buffer, 10, 0, 0));
+			println();
+			print((int*)"vaddr: ");
+			print(itoa(vaddr, string_buffer, 10, 0, 0));
+			println();
+			print((int*)"paddr: ");
+			print(itoa(paddr, string_buffer, 10, 0, 0));
+			println();
+			print((int*)"pmemOffset: ");
+			print(itoa(pmemOffset, string_buffer, 10, 0, 0));
+			println();
+			print((int*)"ptOffset: ");
+			print(itoa(ptOffset, string_buffer, 10, 0, 0));
+			println();
+			print((int*)"allocate new page for process [");
+			print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
+			print((int*)"] at position [");
+			print(itoa(ptOffset, string_buffer, 10, 0, 0));
+			print((int*)"] in pageTable");
 			println();
 		}
 	}
-
+	
 	paddr = (int)*(currPageTable + ptOffset) + pmemOffset;
 
-    if (paddr % 4 != 0)
-        exception_handler(EXCEPTION_ADDRESSERROR);
-    if (paddr < (int)pmemory)
-        exception_handler(EXCEPTION_ADDRESSERROR);
-    if (paddr >= (int)pmemory+memorySize)
-        exception_handler(EXCEPTION_ADDRESSERROR);
+	if(debug_tlb){
+		print((int*)"vaddr: ");
+		print(itoa(vaddr, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"paddr: ");
+		print(itoa(paddr, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"pmemOffset: ");
+		print(itoa(pmemOffset, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"ptOffset: ");
+		print(itoa(ptOffset, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"pc: ");
+		print(itoa(pc, string_buffer, 10, 0, 0));
+		println();
+//		printProcessVerbose(currProcess);	
+	}
 	
+	if (paddr % 4 != 0){
+		print((int*)"tlb 4: ");
+		exception_handler(EXCEPTION_ADDRESSERROR);
+	}
+	if (paddr < (int)pmemory){
+		print((int*)"tlb 5: ");
+		exception_handler(EXCEPTION_ADDRESSERROR);
+	}
+	if (paddr >= (int)pmemory+memorySize){
+		print((int*)"tlb 6: ");
+		exception_handler(EXCEPTION_ADDRESSERROR);
+	}
+
 	return paddr;
 }
 
 int loadMemory(int vaddr) {
     int *paddr;
     paddr = (int*)tlb(vaddr);
- 
     return *paddr;
 }
 
@@ -5703,7 +5805,8 @@ void fetch() {
 }
 
 void execute() {
-	int debug_execute = 0;
+	int debug_execute;
+	debug_execute = 0;
     if (debug)
         if (sourceLineNumber != (int*) 0) {
             print(binaryName);
@@ -5724,6 +5827,15 @@ void execute() {
         print((int*) ": ");
     }
     if(debug_execute){
+		print((int*)"ir: ");
+		print(itoa(ir, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"opcode: ");
+		print(itoa(opcode, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"function: ");
+		print(itoa(function, string_buffer, 10, 0, 0));
+		println();
 		print((int*)"opcode: ");
 		print(itoa(opcode, string_buffer, 10, 0, 0));
 		println();
@@ -5755,6 +5867,7 @@ void execute() {
         } else if (function == FCT_TEQ) {
             fct_teq();
         } else {
+        
             exception_handler(EXCEPTION_UNKNOWNINSTRUCTION);
         }
     } else if (opcode == OP_ADDIU) {
@@ -5793,7 +5906,7 @@ void run() {
 		execute();
 	 	if(counterInstr == maxInstr){
 			syscall_yield();
-			counterInstr = 0;
+			//counterInstr = 0;
 		} else {
 		   	counterInstr = counterInstr + 1;
 	   	}
@@ -6013,8 +6126,10 @@ void disassemble() {
 }
 
 void emulate(int argc, int *argv) {
-	isEmulating = 1;
     interpret = 1;
+ 	readyQueue = initList();
+	blockedQueue = initList();
+	zombieQueue = initList();
 
     print(selfieName);
     print((int*) ": this is selfie's mipster executing ");
@@ -6026,9 +6141,6 @@ void emulate(int argc, int *argv) {
 
     resetInterpreter();
 
- 	readyQueue = initList();
-	blockedQueue = initList();
-	zombieQueue = initList();
 	
 	currProcess = createProcess();
 	appendListElement(currProcess, readyQueue);
@@ -6036,13 +6148,10 @@ void emulate(int argc, int *argv) {
 	setProcessState();
 
 
-	*(registers+REG_SP) = vmemorySize-4;
+	*(registers+REG_SP) = 4194300;//vmemorySize-4;
 	copyBinaryToMemory();
 	*(registers+REG_GP) = binaryLength;
 	*(registers+REG_K1) = *(registers+REG_GP);
-
-	
-
  
 	up_copyArguments(argc, argv);
 		
