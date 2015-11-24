@@ -4432,14 +4432,6 @@ void copyMemSpace(int* from, int* to, int size) {
 }
 
 int* kmalloc(int size) {
-
-	print(itoa(size, string_buffer, 10, 0, 0));
-	println();
-	print(itoa(memorySize, string_buffer, 10, 0, 0));
-	println();
-	print(itoa(segmentBumpPointer, string_buffer, 10, 0, 0));
-	println();
-
 	if (size % 4 != 0)
         size = size + 4 - size % 4;
 
@@ -4544,7 +4536,7 @@ int tlb(int vaddr) {
     if (vaddr % 4 != 0)
         exception_handler(EXCEPTION_ADDRESSERROR);
 
-	if ((int) registers == 0)
+	if (interpret == 0)
 		return vaddr / 4;
 	
 	segmentEntry = (int*) *(registers + REG_K0);
@@ -5746,7 +5738,7 @@ int selfie(int argc, int* argv) {
                 }
             } else if (stringCompare((int*) *argv, (int*) "-s")) {
                 assemblyName = (int*) *(argv+1);
-
+				numberOfInstructions = codeLength;//hahahahahahahahahahahaha
                 argc = argc - 2;
                 argv = argv + 2;
 
@@ -5818,7 +5810,7 @@ int selfie(int argc, int* argv) {
 
                 return 0;
             } else if (stringCompare((int*) *argv, (int*) "-a")) {
-				initMemory(atoi((int*) *(argv+1)));
+				initMemory(atoi((int*) *(argv+1)) * MEGABYTE);
 
 				//numberOfProcesses = atoi((int*) *(argv+2));
         		numberOfInstructions = atoi((int*) *(argv+2));
@@ -5890,7 +5882,8 @@ int main(int argc, int *argv) {
 
     if (selfie(argc, (int*) argv) != 0) {
         print(selfieName);
-        print((int*) ": usage: selfie { -c source | -o binary | -s assembly | -l binary } [ -m size ... | -d size ... | -k size ... | -a assignment] ");
+        print((int*) ": usage: selfie { -c source | -o binary | -s assembly | -l binary } ");
+        print((int*) "[ -m size ... | -d size ... | -k size ... | -a size numberOfInstructions] ");
         println();
     }
 }
