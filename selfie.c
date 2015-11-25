@@ -645,7 +645,7 @@ int  nextValidPID = 0;		// unique id for next process
 int  maxNrProcesses = 3;	// maximum number of processes;
 
 int  counterInstr = 0;		// currently processed instruction counter
-int  maxInstr = 100;		// syscall_yield should be invoked every 'maxInstr'
+int  maxInstr = 1000;		// syscall_yield should be invoked every 'maxInstr'
 
 int  processFinished = 0;	// if process calls syscall_exit...1
 int  yieldCaller = 0;		// 0...yield, 1...syscall_lock, 2...syscall_exit, 3...syscall_wait
@@ -711,10 +711,8 @@ void setWaitStatus(int *process, int status);
 int  isProcessWaiting(int *process);
 
 int* duplicateProcess();
-int* createChild(int pid);
-void addChild(int *process, int pid);
+int* createChildProcess(int pid);
 void copyRegisters(int *copyTo, int *copyFrom);
-void copyMemory(int *copyTo, int *copyFrom, int memorySize);
 void duplicatePageTable(int *copyTo, int *copyFrom);
 void duplicatePageFrame(int *copyTo, int *copyFrom);
 
@@ -3943,8 +3941,11 @@ void syscall_exit() {
 	print(itoa(getProcessID(currProcess), string_buffer, 10,0, 0));
    	print((int*)"] terminates");println();
 
-
+//	printProcessList(blockedQueue);
 	if(hasParent(currProcess)){
+//		print((int*)"process with id [");
+//		print(itoa(getProcessID(currProcess), string_buffer, 10,0, 0));
+//	   	print((int*)"] has parent\n");println();
 		processFinished = 1;
 		yieldCaller = 2;
 		syscall_yield();
@@ -4228,6 +4229,7 @@ void syscall_yield(){
 		currProcess = removeFirst(readyQueue);
 		if((int)currProcess == 0){
 			if(debug_yield){
+				printProcessList(blockedQueue);
 				print((int*)"switch to process [NULL]\n");
 			}
 			exit(-1);
@@ -4365,15 +4367,28 @@ void syscall_fork(){
 	int debug_fork;
 	int *childProcess;
 	int *childRegisters;
+	int *child;
 	debug_fork = 0;
 	saveProcessState();
-	if (nextValidPID >= maxNrProcesses){
-		*(registers+REG_V0) = -1;
-	} else if (nextValidPID < maxNrProcesses){
-		childProcess = duplicateProcess();
-		childRegisters = getRegisters(childProcess);
-		*(registers+REG_V0) = getProcessID(childProcess); //return value for parent is childID
-		*(childRegisters+REG_V0) = 0;	//return value for child is 0
+	
+	*(registers+REG_V0) = -1;
+	if (nextValidPID < maxNrProcesses){
+		childProcess = createProcess();
+		if((int)childProcess != 0){
+			setPC(childProcess, pc);
+			child = createChildProcess(getProcessID(childProcess));
+			if((int)child != 0){
+				copyRegisters(getRegisters(childProcess), registers);
+				duplicatePageTable(getPageTable(childProcess), currPageTable),
+				childRegisters = getRegisters(childProcess);
+				setPPID(childProcess, getProcessID(currProcess));
+				*(registers+REG_V0) = getProcessID(childProcess); //return value for parent is childID
+				*(childRegisters+REG_V0) = 0;	//return value for child is 0
+				appendListElement(child, getChildren(currProcess));
+				appendListElement(childProcess, readyQueue);
+
+			}
+		}
 		if(debug_fork){
 			print((int*)"*(registers+REG_V0): ");
 			print(itoa(*(registers+REG_V0), string_buffer, 10, 0, 0));
@@ -4382,7 +4397,6 @@ void syscall_fork(){
 			print(itoa(*(childRegisters+REG_V0), string_buffer, 10, 0, 0));
 			println();
 		}
-		saveProcessState();
 	}
 }
 
@@ -4410,29 +4424,29 @@ void syscall_wait(){
 	if(debug_wait){
 		print((int*)"syscall_wait");
 		println();
+		print((int*)"currPID ");
+		print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
+		println();
 		print((int*)"waitPID ");
 		print(itoa(waitPID, string_buffer, 10, 0, 0));
 		println();
-		print((int*)"getPPID(currProcess) ");
-		print(itoa(getPPID(currProcess), string_buffer, 10, 0, 0));
+		print((int*)"wait pid is in childrenlist ");
+		print(itoa(listContainsElement(waitPID, getChildren(currProcess)), string_buffer, 10, 0, 0));
 		println();
 	}
-	if(waitPID != getPPID(currProcess)){	// process cannot wait for its parent
+	
+	if(listContainsElement(waitPID, getChildren(currProcess))){
 		if(debug_wait){
-			print((int*)"call yield from wait");
-			println();
+			print((int*)"call yield from wait\n\n");
 		}
-		addChild(currProcess, waitPID);
-		
 		setWaitStatus(currProcess, 1);
+		
 		yieldCaller = 3;
 		syscall_yield();
 	} else
 		if(debug_wait){
-			print((int*)"no yield call from wait");
-			println();
+			print((int*)"no yield call from wait\n\n");
 		}
-
 }
 
 
@@ -4712,29 +4726,14 @@ void printProcessList(int *list){
 void printProcessListVerbose(int *list){
 	printList(list, 1);
 }
-void addChild(int *process, int pid){
-	int *childList;
+int* createChildProcess(int pid){
 	int *child;
-	childList = getChildren(process);
-	child = createChild(pid);
-	if((int)child != 0){ // if child == 0 the process with pid 'pid' already terminated
-		releaseLock();
-		appendListElement(child, childList);
-	}
-}
-int* createChild(int pid){
-	int *child;
-	int *find;
-	find = findElementInLists(pid);
-	if((int)find != 0){
-		child = malloc(3*4);//malloc(3*4);
-		*(child+0) = 0;	// prev
-		*(child+1) = 0;	// next
-		*(child+2) = pid;
-//		*(child+3) = (int)find;	// pointer to the process
-		return child;
-	}
-	return (int*)0;
+	child = malloc(3*4);
+	*(child+0) = 0;	// prev
+	*(child+1) = 0;	// next
+	*(child+2) = pid;
+	return child;
+
 }
 void saveProcessState(){
 	setPC(currProcess, pc);
@@ -4911,7 +4910,7 @@ void duplicatePageTable(int *copyTo, int *copyFrom){
 	pageTableSize = vmemorySize / pageSize;
 	while(i < pageTableSize){
 		if((int)*copyFrom != 0){
-			print((int*)"copy page [");
+			print((int*)"copy pageframe [");
 			print(itoa(i , string_buffer, 10, 0, 0));
 			print((int*)"] from process [");
 			print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
@@ -4934,14 +4933,6 @@ void duplicatePageFrame(int *copyTo, int *copyFrom){
 		copyTo = copyTo + 1;
 		copyFrom = copyFrom + 1;
 		i = i + 1;
-	}
-}
-void copyMemory(int *copyTo, int *copyFrom, int memorySize){
-	int i;
-	i = 0;
-	while(i < memorySize){
-		*(copyTo+i) = *(copyFrom+i);
-		i = i+1;
 	}
 }
 int* pmalloc(){
@@ -5768,7 +5759,7 @@ void exception_handler(int enumber) {
 
 	if(enumber != EXCEPTION_PAGEFAULT)
 		if(enumber != EXCEPTION_OUTOFMEMORY)
-	    exit(enumber);
+	   		exit(enumber);
 	
 }
 
