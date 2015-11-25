@@ -740,6 +740,10 @@ int SYSCALL_WAIT	= 5008;
 
 void initMemory(int bytes);
 
+int* palloc();
+void pfree(int* page);
+void freePageTable(int* pagetable);  
+
 int tlb(int vaddr);
 
 int  loadMemory(int vaddr);
@@ -748,6 +752,7 @@ void storeMemory(int vaddr, int data);
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int MEGABYTE = 1048576;
+int KILOBYTE = 1024;
 
 // ------------------------ GLOBAL VARIABLES -----------------------
 
@@ -757,9 +762,13 @@ int *memory = (int*) 0; // mipster memory
 
 int* segmentBumpPointer;
 
+int* freelist = 0;
+
 // ------------------------- INITIALIZATION ------------------------
 
 void initMemory(int bytes) {
+    int i;
+	int next;
     if (bytes < 0)
         memorySize = 64 * MEGABYTE;
     else if (bytes > 1024 * MEGABYTE)
@@ -769,7 +778,21 @@ void initMemory(int bytes) {
 
     memory = malloc(memorySize);
 
-	segmentBumpPointer = (int*) 0;
+    freelist = memory;
+
+    //segmentBumpPointer = (int*) 0;
+    
+	i = 0;
+	next = (int) memory + 4096;
+	
+	while (i < memorySize) {
+		*(memory + i / 4) = next;
+		next = next + 4096;
+		i = i + 4096;
+	}
+	
+	*(memory + (i - 4096) / 4) = 0; 
+
 }
 
 // -----------------------------------------------------------------
@@ -3817,6 +3840,9 @@ void syscall_exit() {
 	} else {
 		enqueue(zombieQueue, currentProcess);
 	}
+
+	freePageTable(*(registers + REG_K0));
+	*(registers + REG_K0) = 0;
 }
 
 void emitRead() {
@@ -3894,13 +3920,18 @@ void syscall_write() {
     int vaddr;
     int fd;
     int *buffer;
-
+	int i;
     size  = *(registers+REG_A2);
     vaddr = *(registers+REG_A1);
     fd    = *(registers+REG_A0);
 
-    buffer = memory + tlb(vaddr);
-
+    //buffer = memory + tlb(vaddr);
+	buffer = malloc(size);
+	i = 0;
+	while(i<size/4){
+		*(buffer + i) = loadMemory(vaddr+i*4);
+		i = i + 1;
+	}
     size = write(fd, buffer, size);
 
     *(registers+REG_V0) = size;
@@ -4436,7 +4467,6 @@ int* kmalloc(int size) {
         size = size + 4 - size % 4;
 
     if ((int) (segmentBumpPointer + size / 4) >= memorySize) {
-		print(itoa(123456789, string_buffer, 10, 0, 0));
         //print((int*) "out of memory");
 		return -1;
 	}
@@ -4530,8 +4560,80 @@ void createThreads(int* process) {
 // ---------------------------- MEMORY -----------------------------
 // -----------------------------------------------------------------
 
+int* palloc() {
+	int* newPage;
+	int i;
+
+	if (freelist == 0) {
+//print((int*) "freelist == 0\n");
+		print((int*) "Physical memory full. Process with pid ");
+		print(itoa(*(currentProcess + 4), string_buffer, 10, 0, 0));
+		print((int*) " killed.");
+		println();
+		exit(1234);
+		//syscall_exit();
+		//return 0;
+	}
+	newPage = freelist;
+
+//print((int*) "vor freelist = *freelist\n");
+//println();
+//print(itoa((int) freelist - (int) memory, string_buffer, 10, 0, 0));
+
+	freelist = *freelist;
+
+	//print((int*) "nach freelist = *freelist\n");
+//println();
+//print(itoa((int) freelist - (int) memory, string_buffer, 10, 0, 0));
+
+	i = 0;
+
+	while (i < 1024) {
+		*(newPage + i) = 0;		
+		i = i + 1;
+	} 
+
+	//print((int*) "stelle 4:");
+	 	//print(itoa(*(memory + 4096) - (int) memory, string_buffer, 10, 0, 0));
+//println();
+
+	return newPage;
+}
+
+void pfree(int* page) {
+	int remainder;
+	if (page > memory + memorySize / 4) {
+		print((int*) "Tried to free nonexistent pageframe.");		
+		return;
+	}
+
+	// get beginning of the page
+	remainder = (int) (page - memory) % (4 * KILOBYTE);
+	page = page - remainder / 4;
+
+	*page = freelist;
+	freelist = page;
+}
+
+void freePageTable(int* pagetable) {
+	int i;	
+
+	i = 0;
+
+	while (i < 4 * KILOBYTE / 4) {
+		if (*(pagetable + i) != 0) {
+			pfree(*(pagetable + i));
+		}
+		
+		i = i + 1;
+	}	
+
+	pfree(pagetable);
+}
+
 int tlb(int vaddr) {
-	int* segmentEntry;
+	int* pagetable;
+	int* pageTableEntry;
 
     if (vaddr % 4 != 0)
         exception_handler(EXCEPTION_ADDRESSERROR);
@@ -4539,24 +4641,51 @@ int tlb(int vaddr) {
 	if (interpret == 0)
 		return vaddr / 4;
 	
-	segmentEntry = (int*) *(registers + REG_K0);
+	pagetable = (int*) *(registers + REG_K0);
 
-	if (vaddr < 0) {
+	if (vaddr < 0) { //TODO kill only one process
 		print((int*) "Segmentation fault");
 		exit(-1);
-	} else if (vaddr >= *(segmentEntry + 2)) {
+	} else if (vaddr >= 4 * MEGABYTE) {
 		print((int*) "Segmentation fault");
 		exit(-1);
 	}
 
+	pageTableEntry = pagetable + vaddr / (4 * KILOBYTE);
+
+	if (*pageTableEntry == 0) {
+		// page fault
+		*pageTableEntry = palloc();
+	//print((int*) "alfred\n");
+//print((int*) "stelle 4:");
+	// 	print(itoa(*(memory + 4096) - (int) memory, string_buffer, 10, 0, 0));
+//println();
+//print(itoa(*pageTableEntry, string_buffer, 10, 0, 0));
+//println();
+	}
+//print((int*) "pTE:");
+	// 	print(itoa(*pageTableEntry, string_buffer, 10, 0, 0));
+//println();
+//print((int*) "offset:");
+	// 	print(itoa(vaddr % (4 * KILOBYTE), string_buffer, 10, 0, 0));
+//println();
+//print((int*) "return:");
+	// 	print(itoa(*pageTableEntry + vaddr % (4 * KILOBYTE) - (int) memory, string_buffer, 10, 0, 0));
+//println();
+	return (*pageTableEntry + vaddr % (4 * KILOBYTE) - (int) memory) / 4;
+
     // physical memory is word-addressed for lack of byte-sized data type
-    return ((int) ((int*) *(segmentEntry + 3) + (vaddr / 4))) / 4;
+    //return ((int) ((int*) *(segmentEntry + 3) + (vaddr / 4))) / 4;
 }
 
 int loadMemory(int vaddr) {
     int paddr;
 
+//	print((int*) "in loadMemory\n");
+
     paddr = tlb(vaddr);
+
+//	print((int*) "aus loadMemory\n");	
 
     return *(memory + paddr);
 }
@@ -4564,9 +4693,24 @@ int loadMemory(int vaddr) {
 void storeMemory(int vaddr, int data) {
     int paddr;
 
+	//print((int*) "in storeMemory\n");
+	//print((int*) "aus tlb\n");
+//print((int*) "stelle 4:");
+	// 	print(itoa(*(memory + 4096) - (int) memory, string_buffer, 10, 0, 0));
+//println();
+	
     paddr = tlb(vaddr);
 
     *(memory + paddr) = data;
+
+	//print((int*) "aus storeMemory\n");
+
+//print((int*) "stelle 4:");
+	// 	print(itoa(*(memory + 4096) - (int) memory, string_buffer, 10, 0, 0));
+//println();
+
+//print(itoa(vaddr, string_buffer, 10, 0, 0));
+//println();
 }
 
 // -----------------------------------------------------------------
@@ -5473,34 +5617,35 @@ void initFirstProcess() {
 	*listEntry = 0;
 	*(listEntry + 1) = 0;
 
-	segmentEntry = malloc(4 * 4);
+	//segmentEntry = malloc(4 * 4);
 
-	*segmentEntry = 0;
-	*(segmentEntry + 1) = 0;
-	*(segmentEntry + 2) = 4 * 1024 * 1024;
-	*(segmentEntry + 3) = (int) kmalloc(4 * 1024 * 1024); // 2 MB per process
+	//*segmentEntry = 0;
+	//*(segmentEntry + 1) = 0;
+	//*(segmentEntry + 2) = 4 * 1024 * 1024;
+	//*(segmentEntry + 3) = (int) kmalloc(4 * 1024 * 1024); // 2 MB per process
 	
-	if (*(segmentEntry + 3) == -1) {
-		print((int*) "not enough memory for first process");
-		exit(-1);	
-	}
+	//if (*(segmentEntry + 3) == -1) {
+	//	print((int*) "not enough memory for first process");
+	//	exit(-1);	
+	//}
 
-	*(registers + REG_K0) = (int) segmentEntry; // R26 used as segment register
+	*(registers + REG_K0) = (int) palloc(); // R26 used as page table register
 	
 	enqueue(readyQueue, process);
-	enqueue(segmentTable, segmentEntry);
+	//enqueue(segmentTable, segmentEntry);
 }
 
 void copyBinaryToMemory() {
     int a;
-
+	print((int*) "in cp\n");
     a = 0;
 
     while (a < binaryLength) {
         storeMemory(a, loadBinary(a));
-
+	
         a = a + 4;
     }
+	print((int*) "aus cp\n");
 }
 
 int addressWithMaxCounter(int *counters, int max) {
@@ -5636,7 +5781,7 @@ void disassemble() {
 
 void emulate(int argc, int *argv) {
 	int* process;
-	int* segmentEntry;
+	//int* segmentEntry;
 	
 	print(selfieName);
     print((int*) ": this is selfie's mipster executing ");
@@ -5651,10 +5796,14 @@ void emulate(int argc, int *argv) {
 	resetInterpreter();
     //initInterpreter();
     //parse_args(argc, argv);
+
+	
 	initFirstProcess();
 
-	segmentEntry = (int*) *(segmentTable);
-	*(registers+REG_SP) = *(segmentEntry + 2) - 4;
+	//segmentEntry = (int*) *(segmentTable);
+	//*(registers+REG_SP) = *(segmentEntry + 2) - 4;
+
+	*(registers + REG_SP) = 4 * MEGABYTE - 4; // 4 KB pagetable can handle 4 MB of memory
 
 	copyBinaryToMemory();
     //loadBinary();
