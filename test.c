@@ -29,6 +29,21 @@ int main() {
 			exit(2);
 		} else if (pid > 0) {
 			alloc_and_access(space);
+
+			putchar('e');
+			putchar('e');
+			putchar('e');
+			putchar('e');
+			putchar('e');
+			putchar('e');
+			putchar('e');
+			putchar('e');
+			putchar('e');
+			putchar('e');
+			putchar('e');
+			putchar('e');
+			putchar('e');
+
 			wait(pid);
 			exit(3);
 		} else {

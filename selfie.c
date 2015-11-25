@@ -926,7 +926,7 @@ int random_counter = 0;
 int number_of_proc = 1;
 int proc_count;
 int instr_count;
-int instr_cycles = 300;
+int instr_cycles = 100;
 int triggerContextSwitch;
 
 int* current_page_table;
@@ -4463,7 +4463,7 @@ void syscall_fork() {
 	int* reg_current;
 
 	print((int*) "\n-------------------------\n");
-	print((int*) "forkin yo\n");
+	print((int*) "Forking new process... \n");
 
 	reg_current = (int*) getRegisters(current_proc);
 
@@ -4518,13 +4518,12 @@ int* duplicate_page_table(int* old_page_table) {
 
 	new_page_table = (int*) malloc( PAGE_TABLE_SIZE * 4 );
 
-	while ( index < PAGE_TABLE_SIZE ) {
+	while (index < PAGE_TABLE_SIZE) {
 
-		if( *(old_page_table+index) != -1 ) {
+		if (*(old_page_table+index) != -1) {
 			*(new_page_table+index) = palloc();
 			frame_copy (*(old_page_table+index), *(new_page_table+index));
-		}
-		else {
+		} else {
 			*(new_page_table+index) = -1;
 		}
 
@@ -4546,7 +4545,6 @@ void frame_copy(int* old_frame, int* new_frame) {
 
 	cursor = new_frame;
 
-	print((int*) "Copying page frames...\n");
 	while ((int) cursor < (new_frame + PAGE_FRAME_SIZE/4)) {
 
 		*cursor = *old_frame;
@@ -4802,12 +4800,22 @@ int* palloc() {
 //	print(itoa(free_list, string_buffer, 10, 0, 0));
 //	println();
 
-	if( (int) *free_list == 0) {
-//		print((int*) "Next Pointer is 0. Let's increment it by PAGE_FRAME_SIZE: ");
-		free_list = free_list + (PAGE_FRAME_SIZE/4);
+	if (free_list > (int) memory + memorySize) {
+		print((int*) "No physical page frames left... exit! (As process: ");
+		print(itoa(get_pid(), string_buffer, 10, 0, 0));
+		print((int*) ")");
+		println();
+
+		*(registers + REG_A0) = -1;
+		syscall_exit();
 	} else {
-//		print((int*) "Next Pointer is NOT 0. Get address and use it as free_list: ");
-		free_list = (int*) *free_list;
+        	if ((int) *free_list == 0) {
+//              	print((int*) "Next Pointer is 0. Let's increment it by PAGE_FRAME_SIZE: ");
+                	free_list = free_list + (PAGE_FRAME_SIZE/4);
+       		} else {
+//     	                print((int*) "Next Pointer is NOT 0. Get address and use it as free_list: ");
+			free_list = (int*) *free_list;
+		}
 	}
 
 //	print(itoa(free_list, string_buffer, 10, 0, 0));
@@ -4819,6 +4827,15 @@ int* palloc() {
 
 // Add the given page frame to the free list
 void pfree(int* frame) {
+
+	int* cursor;
+
+	cursor = frame;
+
+	while ((int) cursor != (int) frame + PAGE_FRAME_SIZE) {
+		*cursor = 0;
+		cursor = cursor + 1;
+	}
 
 	//print((int*) "Add used frame to free_list.\n");
   	*frame = free_list;
