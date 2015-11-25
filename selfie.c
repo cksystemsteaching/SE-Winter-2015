@@ -926,7 +926,7 @@ int random_counter = 0;
 int number_of_proc = 1;
 int proc_count;
 int instr_count;
-int instr_cycles = 3;
+int instr_cycles = 300;
 int triggerContextSwitch;
 
 int* current_page_table;
@@ -3957,6 +3957,12 @@ void syscall_exit() {
 
 	proc_list = remove(current_proc, proc_list);
 
+//	print((int*) "Page Table of Process ");
+//	print(itoa(get_pid(), string_buffer, 10, 0, 0));
+//	print((int*) " as it exited: \n");
+
+//	print_page_table(current_page_table);
+
 	triggerContextSwitch = 1;
 
 	if ((int) proc_list == 0)
@@ -4477,9 +4483,6 @@ void syscall_fork() {
 	print((int*) "Copying registers...\n");
 	reg_copy(getRegisters(current_proc), new_proc_reg);
 
-	print((int*) "Page table of old process...\n");
-	print_page_table(getPageTable(current_proc));
-
 	// New let's duplicate the page table
 	print((int*) "Copying page table...\n");
 	new_proc_page_table = duplicate_page_table(getPageTable(current_proc));
@@ -4490,9 +4493,6 @@ void syscall_fork() {
 	// Insert new process node into ready queue (pid corresponds to segment, pid is the only difference here!)
 	print((int*) "Inserting new process...\n");
 	proc_list = insert_process(new_proc_pc, new_proc_reg, new_proc_page_table, 0, last_created_proc, npid);
-
-	print((int*) "Page table of new process...\n");
-	print_page_table(getPageTable(proc_list));
 
 	last_created_proc = proc_list;
 
@@ -4803,12 +4803,15 @@ int* palloc() {
 //	println();
 
 	if( (int) *free_list == 0) {
-//		print((int*) "Next Pointer is 0. Let's increment it by PAGE_FRAME_SIZE\n");
+//		print((int*) "Next Pointer is 0. Let's increment it by PAGE_FRAME_SIZE: ");
 		free_list = free_list + (PAGE_FRAME_SIZE/4);
 	} else {
-//		print((int*) "Next Pointer is NOT 0. Get address and use it as free_list.\n");
+//		print((int*) "Next Pointer is NOT 0. Get address and use it as free_list: ");
 		free_list = (int*) *free_list;
 	}
+
+//	print(itoa(free_list, string_buffer, 10, 0, 0));
+//	println();
 
 	return free_page;
 
@@ -4818,7 +4821,7 @@ int* palloc() {
 void pfree(int* frame) {
 
 	//print((int*) "Add used frame to free_list.\n");
-  *frame = free_list;
+  	*frame = free_list;
 	free_list = frame;
 
 }

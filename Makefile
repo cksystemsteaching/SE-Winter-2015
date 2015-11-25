@@ -14,6 +14,7 @@ clena: clean
 clan: clean
 clane: clean
 claen: clean
+cean: clean
 calen: clean
 clea: clean
 cclean: clean
@@ -47,5 +48,6 @@ clean:
 	rm -f $(EXEC)
 	rm -f out
 	rm -f $(TEST_BINARY)
+	rm -f out.txt
 	rm -f *~
 	rm -f *.s
