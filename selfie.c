@@ -642,7 +642,7 @@ int  lockID = 0;			// id of process holding the lock
 int  lockCounter = 0;		// counts syscall_lock calls of process that holds lock, lock increases, unlock decreases
 
 int  nextValidPID = 0;		// unique id for next process
-int  maxNrProcesses = 5;	// maximum number of processes;
+int  maxNrProcesses = 3;	// maximum number of processes;
 
 int  counterInstr = 0;		// currently processed instruction counter
 int  maxInstr = 100;		// syscall_yield should be invoked every 'maxInstr'
@@ -665,7 +665,8 @@ void printProcess(int *element);
 void printProcessList(int *list);
 void printProcessListVerbose(int *list);
 void printProcessEntry(int *process, int verbose);
-void printPageTable(int *pageTable);
+void printPageTable(int *pageTable, int pid);
+void printFreeList();
 
 int* initList();
 void appendListElement(int *element, int *list);
@@ -676,16 +677,17 @@ int  isListEmpty(int *list);
 int  getListSize(int *list);
 
 int* removeFirst(int *list);
-int* removeFirstNotWaitingProcess();
+int* removeFirstNotWaitingProcessFromBlockedQueue();
 int* removeListElementByPID(int *list, int pid);
 int* removeListElement(int *list, int *process);
+void removeFromList(int *process);
 void removeAllZombieChildren(int *childList);
 
 void switchProcessFromYield();
 void switchProcessFromLock();
 void switchProcessFromExit();
 void switchProcessFromWait();
-void notify();
+void notify(int ppid);
 
 int* createProcess();
 void saveProcessState();
@@ -704,7 +706,6 @@ void setPageTable(int *process, int *pageTable);
 int  getPPID(int *process);
 void setPPID(int *process, int pid);
 int* getChildren(int *process);
-int  getChildListSize(int *process);
 int  getWaitStatus(int *process);
 void setWaitStatus(int *process, int status);
 int  isProcessWaiting(int *process);
@@ -717,17 +718,17 @@ void copyMemory(int *copyTo, int *copyFrom, int memorySize);
 void duplicatePageTable(int *copyTo, int *copyFrom);
 void duplicatePageFrame(int *copyTo, int *copyFrom);
 
+void killProcess(int *process);
+void killChildren(int *children);
+
 void releaseLock();
-int  hasLock(int *process);
 
 int* initFreeList();
 int* pmalloc();
 void pfree(int *page);
-int* getPageTableEntry(int addr);
+void freePages(int *process);
 
 int* createPageTable();
-
-void zeroMemory();
 
 
 // -----------------------------------------------------------------
@@ -840,7 +841,7 @@ int SYSCALL_WAIT    = 6005;
 
 void initMemory(int bytes);
 
-int tlb(int vaddr);
+int* tlb(int vaddr);
 
 int  loadMemory(int vaddr);
 void storeMemory(int vaddr, int data);
@@ -858,8 +859,6 @@ int *pmemory = (int*) 0; // mipster memory
 // ------------------------- INITIALIZATION ------------------------
 
 void initMemory(int bytes) {
-	int debug_initMemory;
-	debug_initMemory = 0;
     if (bytes < 0)
         memorySize = 64 * MEGABYTE;
     else if (bytes > 1024 * MEGABYTE)
@@ -868,51 +867,14 @@ void initMemory(int bytes) {
         memorySize = bytes;
 
     pmemory     = malloc(memorySize);
-    
-    if(debug_initMemory){
-		print((int*)"pmemory min pos: ");
-		print(itoa((int)pmemory, string_buffer, 10, 0, 0));
-		println();
-		print((int*)"pmemory max pos: ");
-		print(itoa((int)pmemory+memorySize, string_buffer, 10, 0, 0));
-		println();
-		print((int*)"memorySize: ");
-		print(itoa(memorySize, string_buffer, 10, 0, 0));
-		print((int*)" Byte");
-		println();
-		print((int*)"pageSize: ");
-		print(itoa(pageSize, string_buffer, 10, 0, 0));
-		print((int*)" Byte");
-		println();
-		print((int*)"pageFrameSize: ");
-		print(itoa(pageFrameSize, string_buffer, 10, 0, 0));
-		print((int*)" Byte");
-		println();
-		print((int*)"vmemorySize: ");
-		print(itoa(vmemorySize, string_buffer, 10, 0, 0));
-		print((int*)" Byte");
-		println();
-   }
-    
-    zeroMemory();
 	pfreeList = initFreeList();
+//	printFreeList();
 }
-void zeroMemory(){
-	int *curr;
-	curr = pmemory;
-	while((int)curr < (int)pmemory + memorySize){
-		*curr = 0;
-		curr = curr + 1;
-	}
-}
+
 int* initFreeList(){
 	int counterPages;
 	int *curr;
 	int i;
-	
-    print((int*)"initialize pfreeList");
-    println();
-	
 	i = 0;
 	counterPages = memorySize / pageFrameSize;
 	curr = pmemory;
@@ -925,13 +887,28 @@ int* initFreeList(){
 		curr = (int*)((int)curr + (pageFrameSize));
 		i = i + 1;
 	}
-    print(itoa(i, string_buffer, 10, 0, 0));
-    print((int*)" pages initialized in freeList");
-    println();
-	
 	return pmemory;
 }
-
+void printFreeList(){
+	int i;
+	int *curr;
+	i = 0;
+	curr = pfreeList;
+	print((int*)"freeList\n");
+	
+	while(curr != 0){
+		print((int*)"content of pageFrame [");
+		print(itoa(i, string_buffer, 10, 0, 0));
+		print((int*)"] at position [");
+		print(itoa((int)curr, string_buffer, 10, 0, 0));
+		print((int*)"]: [");
+		print(itoa(*curr, string_buffer, 10, 0, 0));
+		print((int*)"]\n");
+		i = i+1;
+		curr = (int*)*curr; 
+	}
+	print((int*)"freeList end\n");
+}
 
 // -----------------------------------------------------------------
 // ------------------------- INSTRUCTIONS --------------------------
@@ -3972,10 +3949,12 @@ void syscall_exit() {
 		yieldCaller = 2;
 		syscall_yield();
 	} else {
+		freePages(currProcess);
+		println();
+		println();
 		print(binaryName);
 		print((int*) ": exiting with error code ");
 		print(itoa(exitCode, string_buffer, 10, 0, 0));
-		println();
 
 		halt = 1;
 	}
@@ -4013,8 +3992,7 @@ void syscall_read() {
     count = *(registers+REG_A2);
     vaddr = *(registers+REG_A1);
     fd    = *(registers+REG_A0);
-//    buffer = pmemory + tlb(vaddr);
-    buffer = (int*)tlb(vaddr);
+    buffer = tlb(vaddr);
 
     size = read(fd, buffer, count);
 
@@ -4062,8 +4040,7 @@ void syscall_write() {
 	vaddr = *(registers+REG_A1);
 	fd    = *(registers+REG_A0);
 
-//	buffer = pmemory + tlb(vaddr);
-	buffer = (int*)tlb(vaddr);
+	buffer = tlb(vaddr);
 
 	size = write(fd, buffer, size);
 
@@ -4114,8 +4091,7 @@ void syscall_open() {
     flags = *(registers+REG_A1);
     vaddr = *(registers+REG_A0);
 
-//    filename = pmemory + tlb(vaddr);
-    filename = (int*)tlb(vaddr);
+    filename = tlb(vaddr);
 
     fd = open(filename, flags, mode);
 
@@ -4214,7 +4190,7 @@ void syscall_yield(){
 	int debug_yield;
 	debug_yield = 0;
 	if(debug_yield)
-		print((int*)"switch process caller=");
+		print((int*)"\nswitch process caller=");
 	
 	saveProcessState();
 	if(yieldCaller == 0){
@@ -4240,37 +4216,31 @@ void syscall_yield(){
 		print((int*)"switch from process [");
 		print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
 		print((int*)"]");println();
-		print((int*)"readyQueue");
-		printProcessListVerbose(readyQueue);
-		print((int*)"blockedQueue");
-		printProcessListVerbose(blockedQueue);
-		print((int*)"zombieQueue");
-		printProcessListVerbose(zombieQueue);
 	}
-	saveProcessState();
 	currProcess = (int*)0;
 	if(lock == 0){
-		currProcess = removeFirstNotWaitingProcess();
+		currProcess = removeFirstNotWaitingProcessFromBlockedQueue();
 	}
 	if((int)currProcess != 0){
-		setProcessState();	// has to be done before the syscall_lock!!
+		setProcessState();
 		syscall_lock();
 	} else {
 		currProcess = removeFirst(readyQueue);
 		if((int)currProcess == 0){
 			if(debug_yield){
-				print((int*)"switch to process [NULL]");
-				println();
+				print((int*)"switch to process [NULL]\n");
 			}
 			exit(-1);
 		}
 		setProcessState();
 	}
-
 	if(debug_yield){
 		print((int*)"switch to process [");
 		print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
-		print((int*)"]");println();
+		print((int*)"]\n");
+		print((int*)"*(registers + reg_v0): ");
+		print(itoa(*(registers+REG_V0), string_buffer, 10, 0, 0));
+		println();
 	}
 	yieldCaller = 0;
 	processFinished = 0;
@@ -4294,13 +4264,30 @@ void emitUnlock(){
 }
 
 void syscall_unlock(){
+	print((int*)"\nprocess [");
+	print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
 	if(lock == 1){
 		if(getProcessID(currProcess) == lockID){
 			lockCounter = lockCounter - 1;
-			if(lockCounter == 0)
+			
+			if(lockCounter == 0){
 				lock = 0;
+				print((int*)"] unlocks");
+			} else {
+				print((int*)"] decrements lockCounter to [");
+				print(itoa(lockCounter, string_buffer, 10, 0, 0));
+				print((int*)"]");
+			}
+			
+		} else {
+			print((int*)"] cannot unlock, lock hold by process [");
+			print(itoa(lockID, string_buffer, 10, 0, 0));
+			print((int*)"]");
 		}
-	}
+	} else 
+		print((int*)"] cannot unlock, lock not hold by any process");
+	
+	println();
 }
 
 void emitLock(){
@@ -4318,17 +4305,26 @@ void emitLock(){
 }
 
 void syscall_lock(){
+	print((int*)"\nprocess [");
+	print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
 	if(lock == 0){
 		lock = 1;
 		lockID = getProcessID(currProcess);
 		lockCounter = 1;
+		print((int*)"] locks");
 	} else if(lock == 1){
 		if(lockID != getProcessID(currProcess)){
+			print((int*)"] cannot lock, lock hold by process [");
+			print(itoa(lockID, string_buffer, 10, 0, 0));
+			print((int*)"]");
 			yieldCaller = 1;
 			syscall_yield();			
-		} else 
+		} else {
+			print((int*)"] already holds lock");
 			lockCounter = lockCounter + 1;
+		}
 	}
+	println();
 }
 
 void emitGetPID(){
@@ -4379,9 +4375,11 @@ void syscall_fork(){
 		*(registers+REG_V0) = getProcessID(childProcess); //return value for parent is childID
 		*(childRegisters+REG_V0) = 0;	//return value for child is 0
 		if(debug_fork){
-			print((int*)"parent reg: "); print(itoa(*(registers+REG_V0), string_buffer, 10, 0, 0));
+			print((int*)"*(registers+REG_V0): ");
+			print(itoa(*(registers+REG_V0), string_buffer, 10, 0, 0));
 			println();
-			print((int*)"child reg: "); print(itoa(*(childRegisters+REG_V0), string_buffer, 10, 0, 0));
+			print((int*)"*(childRegisters+REG_V0): ");
+			print(itoa(*(childRegisters+REG_V0), string_buffer, 10, 0, 0));
 			println();
 		}
 		saveProcessState();
@@ -4409,7 +4407,6 @@ void syscall_wait(){
 	int waitPID; // currProcess must wait for process with 'waitPID'
 	debug_wait = 0;
 	waitPID = *(registers+REG_A0);
-	
 	if(debug_wait){
 		print((int*)"syscall_wait");
 		println();
@@ -4564,6 +4561,15 @@ int* removeListElement(int *list, int *process){
 	}
 	return process;	
 }
+// remove a process from list w/o knowing in which list the process is
+void removeFromList(int *process){
+	int *remove;
+	remove = removeListElement(readyQueue, process);
+	if((int)remove == 0)
+		remove = removeListElement(blockedQueue, process);
+	if((int)remove == 0)
+		removeListElement(zombieQueue, process);
+}
 int* getPrevProcess(int *process){
 	return (int*)*process; 
 }
@@ -4605,9 +4611,6 @@ void setPPID(int *process, int pid){
 int* getChildren(int *process){
 	return (int*)*(process+7);
 }
-int getChildListSize(int *process){
-	return getListSize(getChildren(process));
-}
 int getWaitStatus(int *process){
 	return *(process+8);
 }
@@ -4639,13 +4642,6 @@ int getListSize(int *list){
 		curr = getNextProcess(curr);
 	}
 	return size;
-}
-int hasLock(int *process){
-	if(lock == 1){
-		if(lockID == getProcessID(process))
-			return 1;
-	}
-	return 0;
 }
 void printProcessEntry(int *process, int verbose){
 	int *prev;
@@ -4695,9 +4691,7 @@ void printProcessVerbose(int *process){
 }
 void printList(int *list, int verbose){
 	int *curr;
-	println();
-	print((int*)"print list start");
-	println();println();
+	print((int*)"\nprint list start\n\n");
 	if(isListEmpty(list) == 0){
 		curr = (int*)*list;
 		while((int)curr != 0){
@@ -4710,8 +4704,7 @@ void printList(int *list, int verbose){
 			println();
 		}
 	} else println();
-	print((int*)"print list end");
-	println();
+	print((int*)"print list end\n");
 }
 void printProcessList(int *list){
 	printList(list, 0);
@@ -4754,68 +4747,41 @@ void setProcessState(){
 	currPageTable = getPageTable(currProcess);
 }
 int* createPageTable(){
-	int debug_createPageTable;
 	int pageTableEntries;
-	int pageTableSize;
 	int *pageTable;
-	int *curr;
 	int i;
-	debug_createPageTable = 0;
 	i=0;
 	pageTableEntries = vmemorySize / pageSize;
-	pageTableSize = pageTableEntries * 4; 
-	pageTable = malloc(pageTableSize);
+	pageTable = malloc(pageTableEntries * 4);
 
-	if(debug_createPageTable){
-		print((int*)"vmemorySize: ");
-		print(itoa(vmemorySize, string_buffer, 10 , 0,0));
-		println();
-		print((int*)"pageSize: ");
-		print(itoa(pageSize, string_buffer, 10 , 0,0));
-		println();
-		print((int*)"vmemorySize / pageSize: ");
-		print(itoa(vmemorySize / pageSize, string_buffer, 10 , 0,0));
-		println();
-		print((int*)"pagetable entries: ");
-		print(itoa(pageTableEntries, string_buffer, 10 , 0,0));
-		println();
-		print((int*)"pagetable size ");
-		print(itoa(pageTableSize, string_buffer, 10 , 0,0));
-		println();
+	while(i < pageTableEntries * 4){
+		*(pageTable+i) = 0;
+		i = i + 4;
 	}
-	curr = pageTable;
-	while(i< pageTableSize){
-		*(curr+i) = 0;
-		i = i+4;
-	}
+	
 	return pageTable;
 }
-void printPageTable(int *pageTable){
+void printPageTable(int *pageTable, int pid){
 	int pageTableSize;
 	int i;
-	println();
-	print((int*)"print pagetable");
-	println();
 	i=0;
 	pageTableSize = vmemorySize / pageSize ;
-	print((int*)"pageTableSize: ");
-	print(itoa(pageTableSize, string_buffer, 10 , 0,0));
-	println();
+	print((int*)"\nprint pagetable of process [");
+	print(itoa(pid, string_buffer, 10, 0, 0));
+	print((int*)"]\n");
 
-	while(i< pageTableSize){
-		if((int)pageTable != 0){
+	while(i < pageTableSize){
+		if((int)*pageTable != 0){
 			print((int*)"pageTableEntry [");
-			print(itoa(i, string_buffer, 10 , 0,0));
-			print((int*)"] mapped to ");
-			print(itoa((int)*pageTable, string_buffer, 10 , 0,0));
-			print((int*)" in pmemory");
-			println();
+			print(itoa(i, string_buffer, 10 , 0, 0));
+			print((int*)"] mapped to pageFrame [");
+			print(itoa((int)*pageTable, string_buffer, 10 , 0, 0));
+			print((int*)"] in pmemory\n");
 		}
-		pageTable = pageTable + 1 ;
-		i= i+1;
+		pageTable = pageTable + 1;
+		i= i + 1;
 	}
-	print((int*)"print pagetable end");
-	println();
+	print((int*)"print pagetable end\n\n");
 }
 void releaseLock(){
 	if(lock==1){
@@ -4834,7 +4800,7 @@ void switchProcessFromLock(){
 void switchProcessFromExit(){
 	if(hasParent(currProcess)){
 		appendListElement(currProcess, zombieQueue);
-		notify();
+		notify(getPPID(currProcess));
 	}
 	releaseLock();
 }
@@ -4842,10 +4808,10 @@ void switchProcessFromWait(){
 	appendListElement(currProcess, blockedQueue);
 	releaseLock();
 }
-void notify(){
+void notify(int ppid){
 	int *parent;
 	int *parentChildList;
-	parent = findElementInList(blockedQueue, getPPID(currProcess));
+	parent = findElementInList(blockedQueue, ppid);
 	if((int)parent != 0){
 		parentChildList = getChildren(parent);
 		removeAllZombieChildren(parentChildList);
@@ -4872,21 +4838,37 @@ void removeAllZombieChildren(int *childList){
 		zombie = getNextProcess(zombie);
 	}
 }
+void killProcess(int *process){
+	
+	killChildren(getChildren(process));
+
+	notify(getPPID(process));
+	freePages(process);
+	removeFromList(process);
+}
+// child process has another structure
+// nevertheless it works because we remove a process by its id and the id of the process
+// in a childProcess is at the same position as in a normal process
+void killChildren(int *children){
+	int *curr;
+	curr = (int*)children;
+	while((int)curr != 0){
+		killProcess(curr);
+		curr = (int*)(curr+1);
+	}
+}
 //@return: first "not waiting" process in blockedQueue
 //			if such a process does not exist it returns the the first process from readyQueue
-int* removeFirstNotWaitingProcess(){
+int* removeFirstNotWaitingProcessFromBlockedQueue(){
 	int *curr;
 	curr = (int*)*blockedQueue;
 	while((int)curr != 0){
 		if(getWaitStatus(curr) == 0){
-			setProcessState();
-//			syscall_lock();
 			return removeListElement(blockedQueue, curr);
 		}
 		curr = getNextProcess(curr);
 	}
 	return (int*)0;
-
 }
 
 int* duplicateProcess(){
@@ -4895,6 +4877,7 @@ int* duplicateProcess(){
 	int *childPageTable;
 	int *childProcess;
 	debug_duplicateProcess = 0;
+	saveProcessState();
 	parentPageTable = getPageTable(currProcess);
 	
 	childProcess = createProcess();
@@ -4905,25 +4888,11 @@ int* duplicateProcess(){
 	setPC(childProcess, *(registers+REG_RA));
 	copyRegisters(getRegisters(childProcess), registers);
 	duplicatePageTable(childPageTable, parentPageTable);
+	printPageTable(childPageTable, getProcessID(childProcess));
 
 	// add to process list
-
 	appendListElement(childProcess, readyQueue);
 	
-	if(debug_duplicateProcess){
-		print((int*)"*(registers+REG_RA)");
-		print(itoa(*(registers+REG_RA) , string_buffer, 10, 0, 0));println();
-
-		printProcessVerbose(currProcess);
-		printPageTable(getPageTable(currProcess));
-		println();
-		printProcessVerbose(childProcess);
-		print((int*)"parent pt");
-		printPageTable(getPageTable(currProcess));
-		println();
-		print((int*)"child pt");
-		printPageTable(getPageTable(childProcess));
-	}
 	return childProcess;
 }
 
@@ -4940,14 +4909,13 @@ void duplicatePageTable(int *copyTo, int *copyFrom){
 	int i;
 	i=0;
 	pageTableSize = vmemorySize / pageSize;
-
 	while(i < pageTableSize){
 		if((int)*copyFrom != 0){
 			print((int*)"copy page [");
 			print(itoa(i , string_buffer, 10, 0, 0));
 			print((int*)"] from process [");
 			print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
-			print((int*)"] in pageTable");
+			print((int*)"]");
 			println();
 		
 			*copyTo = (int)pmalloc();
@@ -4955,7 +4923,7 @@ void duplicatePageTable(int *copyTo, int *copyFrom){
 		}
 		copyTo = copyTo + 1;
 		copyFrom = copyFrom + 1;
-		i = i+4;
+		i = i + 1;
 	}
 }
 void duplicatePageFrame(int *copyTo, int *copyFrom){
@@ -4979,13 +4947,31 @@ void copyMemory(int *copyTo, int *copyFrom, int memorySize){
 int* pmalloc(){
 	int *page;
 	
-	if((int)pfreeList == 0)
+	if((int)pfreeList == 0){
 		exception_handler(EXCEPTION_OUTOFMEMORY);
-	
+		yieldCaller = 2;
+		killProcess(currProcess);
+	}
 	page = pfreeList;
 	pfreeList = (int*)*pfreeList;
 	
 	return page;
+}
+void freePages(int *process){
+	int *pageTable;
+	int pageTableSize;
+	int i;
+	pageTable = getPageTable(process);
+	pageTableSize = vmemorySize / pageSize;
+	i = 0;
+	while(i < pageTableSize){
+		if(*pageTable != 0){
+			pfree((int*)*pageTable);
+			*pageTable = 0;
+		}
+		pageTable = pageTable + 1;
+		i = i + 1;
+	}
 }
 void pfree(int *page){
 	*page = (int)pfreeList;
@@ -5001,11 +4987,12 @@ void pfree(int *page){
 // -----------------------------------------------------------------
 // ---------------------------- MEMORY -----------------------------
 // -----------------------------------------------------------------
-int tlb(int vaddr) {
+int* tlb(int vaddr) {
 	int debug_tlb;
 	int paddr;
 	int pmemOffset;
 	int ptOffset;
+	int *newPage;
 	debug_tlb = 0;
 	if (vaddr % 4 != 0){
 		print((int*)"tlb 1: ");
@@ -5025,8 +5012,10 @@ int tlb(int vaddr) {
 
 	if((int)*(currPageTable+ptOffset) == 0){
 		exception_handler(EXCEPTION_PAGEFAULT);
-		*(currPageTable+ptOffset) = (int)pmalloc();
-		
+		newPage = pmalloc();
+		*(currPageTable+ptOffset) = (int)newPage;
+		printPageTable(currPageTable, getProcessID(currProcess));
+
 		if(debug_tlb){
 		
 			print((int*)"(currPageTable+ptOffset): ");
@@ -5061,25 +5050,6 @@ int tlb(int vaddr) {
 	
 	paddr = (int)*(currPageTable + ptOffset) + pmemOffset;
 
-	if(debug_tlb){
-		print((int*)"vaddr: ");
-		print(itoa(vaddr, string_buffer, 10, 0, 0));
-		println();
-		print((int*)"paddr: ");
-		print(itoa(paddr, string_buffer, 10, 0, 0));
-		println();
-		print((int*)"pmemOffset: ");
-		print(itoa(pmemOffset, string_buffer, 10, 0, 0));
-		println();
-		print((int*)"ptOffset: ");
-		print(itoa(ptOffset, string_buffer, 10, 0, 0));
-		println();
-		print((int*)"pc: ");
-		print(itoa(pc, string_buffer, 10, 0, 0));
-		println();
-//		printProcessVerbose(currProcess);	
-	}
-	
 	if (paddr % 4 != 0){
 		print((int*)"tlb 4: ");
 		exception_handler(EXCEPTION_ADDRESSERROR);
@@ -5093,18 +5063,18 @@ int tlb(int vaddr) {
 		exception_handler(EXCEPTION_ADDRESSERROR);
 	}
 
-	return paddr;
+	return (int*)paddr;
 }
 
 int loadMemory(int vaddr) {
     int *paddr;
-    paddr = (int*)tlb(vaddr);
+    paddr = tlb(vaddr);
     return *paddr;
 }
 
 void storeMemory(int vaddr, int data) {
     int *paddr;
-    paddr = (int*) tlb(vaddr);
+    paddr = tlb(vaddr);
 	*paddr = data;
 }
 
@@ -5797,7 +5767,9 @@ void exception_handler(int enumber) {
     println();
 
 	if(enumber != EXCEPTION_PAGEFAULT)
+		if(enumber != EXCEPTION_OUTOFMEMORY)
 	    exit(enumber);
+	
 }
 
 void fetch() {
@@ -6148,7 +6120,7 @@ void emulate(int argc, int *argv) {
 	setProcessState();
 
 
-	*(registers+REG_SP) = 4194300;//vmemorySize-4;
+	*(registers+REG_SP) = vmemorySize-4;
 	copyBinaryToMemory();
 	*(registers+REG_GP) = binaryLength;
 	*(registers+REG_K1) = *(registers+REG_GP);
