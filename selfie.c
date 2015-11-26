@@ -714,6 +714,9 @@ void syscall_wait();
 
 void emitPutchar();
 
+void emitGetNumberOfAllocatedPages();
+void syscall_getNumberOfAllocatedPages();
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int SYSCALL_EXIT    = 4001;
@@ -727,6 +730,7 @@ int SYSCALL_UNLOCK	= 5005;
 int SYSCALL_GETPID	= 5006;
 int SYSCALL_FORK	= 5007;
 int SYSCALL_WAIT	= 5008;
+int SYSCALL_GETNUMBEROFALLOCATEDPAGES	= 5009;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -761,6 +765,8 @@ int memorySize = 0; // size of memory in bytes
 int *memory = (int*) 0; // mipster memory
 
 int* freelist = 0;
+
+int numberOfAllocatedPages = 0;
 
 // ------------------------- INITIALIZATION ------------------------
 
@@ -3368,6 +3374,7 @@ void compile() {
 	emitGetpid();
 	emitFork();
 	emitWait();
+	emitGetNumberOfAllocatedPages();
 	
     // parser
     gr_cstar();
@@ -3821,16 +3828,21 @@ void syscall_exit() {
 	parent = search(blockingQueue, *(currentProcess + 4), 6);
 
 	if (parent != (int*) 0) {
+
 		*(parent + 6) = 0;
+
 		remove(*(parent + 5), *(currentProcess + 4), 2);
 		remove(blockingQueue, *(parent + 4), 4);
 		enqueue(readyQueue, parent);
+
 	} else {
 		enqueue(zombieQueue, currentProcess);
 	}
 
 	freePageTable(*(registers + REG_K0));
+
 	*(registers + REG_K0) = 0;
+								print((int*) "aus syscall exit\n");
 }
 
 void emitRead() {
@@ -3855,21 +3867,34 @@ void emitRead() {
 }
 
 void syscall_read() {
-    int count;
+    //int count;
     int vaddr;
     int fd;
     int *buffer;
     int size;
+    int newSize;
+    int i;
+    
+    i = 0;
+    newSize = 0;
 
-    count = *(registers+REG_A2);
+    size = *(registers+REG_A2);
     vaddr = *(registers+REG_A1);
     fd    = *(registers+REG_A0);
 
-    buffer = memory + tlb(vaddr);
 
-    size = read(fd, buffer, count);
+    while (i < size / 4){
+			newSize = newSize + read(fd, memory + tlb(vaddr + i * 4), 4);
+			i = i + 1;
+	}
+	
+    if (size % 4 != 0) {
+    	newSize = newSize + read(fd, memory + tlb(vaddr + i * 4), size % 4);
+    }
+		
+	
 
-    *(registers+REG_V0) = size;
+    *(registers+REG_V0) = newSize;
 
     if (debug_read) {
         print(binaryName);
@@ -3903,26 +3928,32 @@ void emitWrite() {
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
-void syscall_write() {
+void syscall_write() {//TODO handle invalid vaddr (tlb returns -1), also in open and read
     int size;
     int vaddr;
     int fd;
     int *buffer;
 	int i;
+	int newSize;
+	
     size  = *(registers+REG_A2);
     vaddr = *(registers+REG_A1);
     fd    = *(registers+REG_A0);
-
-    //buffer = memory + tlb(vaddr);
-	buffer = malloc(size);
+    
+	newSize = 0;
+	
 	i = 0;
-	while(i<size/4){
-		*(buffer + i) = loadMemory(vaddr+i*4);
+	
+	while (i < size / 4){
+		newSize = newSize + write(fd, memory + tlb(vaddr + i * 4), 4);
 		i = i + 1;
 	}
-    size = write(fd, buffer, size);
+	
+    if (size % 4 != 0) {
+    	newSize = newSize + write(fd, memory + tlb(vaddr + i * 4), size % 4);
+    }
 
-    *(registers+REG_V0) = size;
+    *(registers+REG_V0) = newSize;
 
     if (debug_write) {
         print(binaryName);
@@ -3956,7 +3987,7 @@ void emitOpen() {
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
-void syscall_open() {
+void syscall_open() {//TODO may cause problems with virtual memory
     int mode;
     int flags;
     int vaddr;
@@ -4141,7 +4172,7 @@ void syscall_fork() {
 	int* childRegisters;
 	int* childElement;
 	child = copyCurrentProcess();
-
+	
 	if (child == (int*) 0) {
     	*(registers+REG_V0) = -1;
 		return;
@@ -4221,6 +4252,24 @@ void emitPutchar() {
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
 
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void emitGetNumberOfAllocatedPages() {
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "getNumberOfAllocatedPages", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_GETNUMBEROFALLOCATEDPAGES);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_getNumberOfAllocatedPages() {
+    *(registers+REG_V0) = numberOfAllocatedPages;
 }
 
 // -----------------------------------------------------------------
@@ -4461,6 +4510,10 @@ int* copyCurrentProcess() {
 	int i;
 
 	newPagetable = palloc();
+	
+	if (newPagetable == 0) {
+		return 0;
+	}
 
 	pagetableToCopy = (int*) *(registers + REG_K0);
 	child = malloc(7 * 4);
@@ -4484,8 +4537,11 @@ int* copyCurrentProcess() {
 
 	while (i < 4 * KILOBYTE / 4) {
 		if (*(pagetableToCopy + i) != 0) {
-			print((int*) "im if\n");
 			*(newPagetable + i) = palloc();
+			if (*(newPagetable + i) == 0) {							
+				freePageTable(newPagetable);
+				return 0;
+			}
 			copyMemSpace(*(pagetableToCopy + i), *(newPagetable + i), 4 * KILOBYTE / 4);
 		}
 
@@ -4519,9 +4575,9 @@ int* palloc() {
 		print(itoa(*(currentProcess + 4), string_buffer, 10, 0, 0));
 		print((int*) " killed.");
 		println();
-		exit(1234);
+		//exit(1234);
 		//syscall_exit();
-		//return 0;
+		return 0;
 	}
 
 	newPage = freelist;
@@ -4534,7 +4590,9 @@ int* palloc() {
 		*(newPage + i) = 0;		
 		i = i + 1;
 	}
-
+	
+	numberOfAllocatedPages = numberOfAllocatedPages + 1;
+	
 	return newPage;
 }
 
@@ -4552,6 +4610,8 @@ void pfree(int* page) {
 
 	*page = freelist;
 	freelist = page;
+	
+	numberOfAllocatedPages = numberOfAllocatedPages - 1;
 }
 
 void freePageTable(int* pagetable) {
@@ -4582,12 +4642,16 @@ int tlb(int vaddr) {
 	
 	pagetable = (int*) *(registers + REG_K0);
 
-	if (vaddr < 0) { //TODO kill only one process
+	if (vaddr < 0) { 
 		print((int*) "Segmentation fault");
-		exit(-1);
+		syscall_exit();
+		return -1;
+		//exit(-1);
 	} else if (vaddr >= 4 * MEGABYTE) {
 		print((int*) "Segmentation fault");
-		exit(-1);
+		syscall_exit();
+		return -1;
+		//exit(-1);
 	}
 
 	pageTableEntry = pagetable + vaddr / (4 * KILOBYTE);
@@ -4595,6 +4659,8 @@ int tlb(int vaddr) {
 	if (*pageTableEntry == 0) {
 		// page fault
 		*pageTableEntry = palloc();
+		if(*pageTableEntry == 0)
+			syscall_exit();
 	}
 
 	// physical memory is word-addressed for lack of byte-sized data type
@@ -4604,11 +4670,11 @@ int tlb(int vaddr) {
 int loadMemory(int vaddr) {
     int paddr;
 
-//	print((int*) "in loadMemory\n");
-
     paddr = tlb(vaddr);
-
-//	print((int*) "aus loadMemory\n");	
+    
+    if (paddr == -1) {
+    	return -1;
+    }
 
     return *(memory + paddr);
 }
@@ -4617,6 +4683,10 @@ void storeMemory(int vaddr, int data) {
     int paddr;
 	
     paddr = tlb(vaddr);
+    
+    if (paddr == -1) {
+    	return;
+    }
 
     *(memory + paddr) = data;
 }
@@ -4654,6 +4724,8 @@ void fct_syscall() {
 			syscall_fork();
 		} else if (*(registers+REG_V0) == SYSCALL_WAIT) {
 			syscall_wait();
+		} else if (*(registers+REG_V0) == SYSCALL_GETNUMBEROFALLOCATEDPAGES) {
+			syscall_getNumberOfAllocatedPages();
 		} else {
 		    exception_handler(EXCEPTION_UNKNOWNSYSCALL);
 		}
@@ -5303,7 +5375,7 @@ void printException(int enumber) {
     print((int*) *(EXCEPTIONS + enumber));
 }
 
-void exception_handler(int enumber) {
+void exception_handler(int enumber) {//TODO only kill one process
     print(binaryName);
     print((int*) ": exception: ");
     printException(enumber);
@@ -5399,6 +5471,8 @@ void run() {
 
     while (nrOfInstr > 0) {
         fetch();
+        if(ir == -1)
+        	return;
         decode();
         execute();
         
@@ -5480,7 +5554,7 @@ int up_copyString(int *s) {
 
     while (a < w) {
         storeMemory(a, *s);
-
+        
         s = s + 1;
         a = a + 4;
     }
@@ -5499,7 +5573,7 @@ void up_copyArguments(int argc, int *argv) {
 
     while (argc > 0) {
         storeMemory(vaddr, up_copyString((int*) *argv));
-
+		
         vaddr = vaddr + 4;
 
         argv = argv + 1;
@@ -5525,6 +5599,12 @@ void initFirstProcess() {
 	*(listEntry + 1) = 0;
 
 	*(registers + REG_K0) = (int) palloc(); // R26 used as page table register
+	
+	if(*(registers + REG_K0) == 0) {
+		print((int*)"Not enough memory (even for one process)");
+		exit(-1);
+	}
+	
 	
 	enqueue(readyQueue, process);
 }
@@ -5744,7 +5824,7 @@ int selfie(int argc, int* argv) {
         return -1;
     else {
     	//numberOfProcesses = 1;
-        numberOfInstructions = 1;
+        numberOfInstructions = 1000;
     	
         while (argc >= 2) {
             if (stringCompare((int*) *argv, (int*) "-c")) {
