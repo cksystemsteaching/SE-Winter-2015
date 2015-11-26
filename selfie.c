@@ -865,7 +865,6 @@ void initMemory(int bytes) {
 
     pmemory     = malloc(memorySize);
 	pfreeList = initFreeList();
-//	printFreeList();
 }
 
 int* initFreeList(){
@@ -3941,8 +3940,8 @@ void syscall_exit() {
    	print((int*)"] terminates");println();
 
 
-//	killChildren(getChildren(currProcess));
-//	freePages(currProcess);
+	killChildren(getChildren(currProcess));
+	freePages(currProcess);
 	if(hasParent(currProcess)){
 		yieldCaller = 2;
 		syscall_yield();
@@ -4360,13 +4359,10 @@ void emitFork(){
 }
 
 void syscall_fork(){
-	int debug_fork;
 	int *childProcess;
 	int *childRegisters;
 	int *child;
-	debug_fork = 0;
 	saveProcessState();
-	
 	*(registers+REG_V0) = -1;
 	if (nextValidPID < maxNrProcesses){
 		childProcess = createProcess();
@@ -4374,24 +4370,19 @@ void syscall_fork(){
 			setPC(childProcess, pc);
 			child = createChildProcess(getProcessID(childProcess));
 			if((int)child != 0){
+
 				copyRegisters(getRegisters(childProcess), registers);
 				copyPageTable(getPageTable(childProcess), currPageTable),
+				
 				childRegisters = getRegisters(childProcess);
 				setPPID(childProcess, getProcessID(currProcess));
+				
 				*(registers+REG_V0) = getProcessID(childProcess); 	//return value for parent is childID
 				*(childRegisters+REG_V0) = 0;						//return value for child is 0
+				
 				appendListElement(child, getChildren(currProcess));
 				appendListElement(childProcess, readyQueue);
-//				printPageTable(getPageTable(childProcess), getProcessID(childProcess));
 			}
-		}
-		if(debug_fork){
-			print((int*)"*(registers+REG_V0): ");
-			print(itoa(*(registers+REG_V0), string_buffer, 10, 0, 0));
-			println();
-			print((int*)"*(childRegisters+REG_V0): ");
-			print(itoa(*(childRegisters+REG_V0), string_buffer, 10, 0, 0));
-			println();
 		}
 	}
 }
@@ -4834,7 +4825,7 @@ void removeAllZombieChildren(int *childList){
 }
 void killProcess(int *process){
 	
-	killChildren(getChildren(process));
+//	killChildren(getChildren(process));
 
 	notify(getPPID(process));
 //	freePages(process);
@@ -4847,7 +4838,7 @@ void killChildren(int *children){
 	int *curr;
 	curr = (int*)*children;
 	while((int)curr != 0){
-		killProcess(curr);
+//		killProcess(curr);
 		curr = (int*)(curr+1);
 	}
 	
@@ -4874,29 +4865,34 @@ void copyRegisters(int *copyTo, int *copyFrom){
 	}
 }
 void copyPageTable(int *copyTo, int *copyFrom){
+	int debug_copyPageTable;
 	int pageTableSize;
 	int i;
+	int *newPage;
+	debug_copyPageTable = 0;
 	i=0;
 	pageTableSize = vmemorySize / pageSize;
 	while(i < pageTableSize){
 		if((int)*copyFrom != 0){
-			print((int*)"copy pageframe [");
-			print(itoa(i , string_buffer, 10, 0, 0));
-			print((int*)"] from process [");
-			print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
-			print((int*)"]");
-			println();
-		
-			*copyTo = (int)pmalloc();
+			if(debug_copyPageTable){
+				print((int*)"copy pageframe [");
+				print(itoa(i , string_buffer, 10, 0, 0));
+				print((int*)"] at [");
+				print(itoa(*copyFrom, string_buffer, 10, 0, 0));
+				print((int*)"] from process [");
+				print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
+				print((int*)"] to ");
+			}
+			newPage = pmalloc();
+			*copyTo = (int)newPage;
 			
-//			print((int*)"copyPage\n");
-//			print((int*)"copyTo: ");
-//			print(itoa((int)copyTo, string_buffer, 10, 0, 0));
-//			println();
-//			print((int*)"copyFrom: ");
-//			print(itoa((int)copyFrom, string_buffer, 10, 0, 0));
-//			println();
-			duplicatePageFrame((int*)*copyTo, (int*)*copyFrom);
+			if(debug_copyPageTable){
+				print((int*)"new pageframe at [");
+				print(itoa(*copyTo , string_buffer, 10, 0, 0));
+				print((int*)"]\n");
+			}
+			duplicatePageFrame(newPage, (int*)*copyFrom);
+			
 		}
 		copyTo = copyTo + 1;
 		copyFrom = copyFrom + 1;
@@ -4906,7 +4902,7 @@ void copyPageTable(int *copyTo, int *copyFrom){
 void duplicatePageFrame(int *copyTo, int *copyFrom){
 	int i;
 	i = 0;
-	while(i < pageFrameSize){
+	while(i < pageFrameSize /4){
 		*copyTo = *copyFrom;
 		copyTo = copyTo + 1;
 		copyFrom = copyFrom + 1;
@@ -4915,16 +4911,15 @@ void duplicatePageFrame(int *copyTo, int *copyFrom){
 }
 int* pmalloc(){
 	int *page;
-//	printFreeList();
 	if((int)pfreeList == 0){
+		println();
 		exception_handler(EXCEPTION_OUTOFMEMORY);
 		yieldCaller = 2;
-		printFreeList();
 		killProcess(currProcess);
+		syscall_yield();
 	}
 	page = pfreeList;
 	pfreeList = (int*)*pfreeList;
-	
 	return page;
 }
 void freePages(int *process){
@@ -4944,7 +4939,6 @@ void freePages(int *process){
 	}
 }
 void pfree(int *page){
-	print((int*)"pFree\n");
 	*page = (int)pfreeList;
 	pfreeList = page;
 }
@@ -4964,6 +4958,9 @@ int* tlb(int vaddr) {
 	int pmemOffset;
 	int ptOffset;
 	int *newPage;
+	
+	if(interpret==0)
+		return pmemory + vaddr/4;
 	debug_tlb = 0;
 	if (vaddr % 4 != 0){
 		print((int*)"tlb 1: ");
@@ -4985,7 +4982,7 @@ int* tlb(int vaddr) {
 		exception_handler(EXCEPTION_PAGEFAULT);
 		newPage = pmalloc();
 		*(currPageTable+ptOffset) = (int)newPage;
-		printPageTable(currPageTable, getProcessID(currProcess));
+//		printPageTable(currPageTable, getProcessID(currProcess));
 
 		if(debug_tlb){
 		
