@@ -4004,6 +4004,13 @@ void syscall_read() {
 	int read_bytes;
 	int size;
 
+	size = *(registers + REG_A2);
+	vaddr = *(registers + REG_A1);
+	fd = *(registers + REG_A0);
+
+	bytes_to_write = size;
+	written_bytes = 0;
+
 	// MMU works something like this... virtual address translation for every word to be written
 	while (bytes_to_read > 0) {
 		bytes_to_next_page = PAGE_FRAME_SIZE - (vaddr % PAGE_FRAME_SIZE);
