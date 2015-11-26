@@ -760,8 +760,6 @@ int memorySize = 0; // size of memory in bytes
 
 int *memory = (int*) 0; // mipster memory
 
-int* segmentBumpPointer;
-
 int* freelist = 0;
 
 // ------------------------- INITIALIZATION ------------------------
@@ -779,8 +777,6 @@ void initMemory(int bytes) {
     memory = malloc(memorySize);
 
     freelist = memory;
-
-    //segmentBumpPointer = (int*) 0;
     
 	i = 0;
 	next = (int) memory + 4096;
@@ -792,7 +788,6 @@ void initMemory(int bytes) {
 	}
 	
 	*(memory + (i - 4096) / 4) = 0; 
-
 }
 
 // -----------------------------------------------------------------
@@ -875,12 +870,10 @@ int pc = 0; // program counter
 int ir = 0; // instruction record
 
 int* readyQueue;
-int* segmentTable;
 int notReady;
 int calledYield;
 int numberOfProcesses = 1;
 int numberOfInstructions;
-int numberOfThreads = 0;
 int* lock = (int*) 0;
 int* currentProcess = (int*) 0;
 int* blockingQueue;
@@ -932,11 +925,6 @@ void initInterpreter() {
     zombieQueue = malloc(2*4);
     *zombieQueue = 0;
     *(zombieQueue + 1) = 0;
-
-	segmentTable = malloc(2*4);
-	*segmentTable = 0;
-	*(segmentTable + 1) = 0;
-
 }
 
 void resetInterpreter() {
@@ -4172,7 +4160,6 @@ void syscall_fork() {
 	*(childRegisters + REG_V0) = 0;
 
    	*(registers+REG_V0) = *(child + 4);
-
 }
 
 void emitWait() {
@@ -4455,35 +4442,27 @@ int* dequeue(int* list) {
 }
 
 void copyMemSpace(int* from, int* to, int size) {
-	while (size - 1 >= 0) {
+
+	size = size - 1;
+
+	while (size >= 0) {
 		*(to + size) = *(from + size);
 	
 		size = size - 1;
 	}
 }
 
-int* kmalloc(int size) {
-	if (size % 4 != 0)
-        size = size + 4 - size % 4;
-
-    if ((int) (segmentBumpPointer + size / 4) >= memorySize) {
-        //print((int*) "out of memory");
-		return -1;
-	}
-
-    segmentBumpPointer = segmentBumpPointer + size / 4;
-
-	return segmentBumpPointer + (size / (-4));
-}
-
 int* copyCurrentProcess() {
 	int* child;
-	int* segToCopy;
-	int* segmentEntry;
+	int* pagetableToCopy;
+	int* newPagetable;
 	int* childRegisters;
 	int* listEntry;
+	int i;
 
-	segToCopy = (int*) *(registers + REG_K0);
+	newPagetable = palloc();
+
+	pagetableToCopy = (int*) *(registers + REG_K0);
 	child = malloc(7 * 4);
 
 	*child = 0;
@@ -4499,54 +4478,25 @@ int* copyCurrentProcess() {
 	*listEntry = 0;
 	*(listEntry + 1) = 0;
 
-	segmentEntry = malloc(4*4);
-	*segmentEntry = 0;
-	*(segmentEntry + 1) = 0;
-	*(segmentEntry + 2) = 4 * 1024 * 1024;
-	*(segmentEntry + 3) = (int) kmalloc(4 * 1024 * 1024);
+	copyMemSpace(registers, (int*) *(child + 3), 32);
 
-	if (*(segmentEntry + 3) == -1)
-		return 0;
+	i = 0;
 
-	copyMemSpace(registers, (int*)*(child + 3), 32);
-	copyMemSpace(memory + (*(segToCopy + 3) / 4), memory + (*(segmentEntry + 3) / 4), *(segToCopy + 2) / 4);
+	while (i < 4 * KILOBYTE / 4) {
+		if (*(pagetableToCopy + i) != 0) {
+			print((int*) "im if\n");
+			*(newPagetable + i) = palloc();
+			copyMemSpace(*(pagetableToCopy + i), *(newPagetable + i), 4 * KILOBYTE / 4);
+		}
+
+		i = i + 1; 
+	}
 
 	childRegisters = (int*) *(child + 3);
 
-	*(childRegisters + REG_K0) = (int) segmentEntry;
+	*(childRegisters + REG_K0) = (int) newPagetable;
 
 	return child;
-}
-
-void createThreads(int* process) {
-	int nrOfThreads;
-	int* thread;
-	int* threadRegisters;
-	int* processRegisters;
-
-	nrOfThreads = numberOfThreads - 1;
-
-	while (nrOfThreads > 0) {
-		thread = malloc(7 * 4);
-
-		*thread = 0;
-		*(thread + 1) = 0;
-		*(thread + 2) = 0;
-		*(thread + 3) = malloc(32 * 4);
-		*(thread + 4) = *(process + 4);
-		*(thread + 5) = 0;
-		*(thread + 6) = 0;
-
-		copyMemSpace((int*)*(process + 3), (int*)*(thread + 3), 32);
-
-		threadRegisters = *(thread + 3);
-		processRegisters = *(process + 3);
-		*(threadRegisters + REG_SP) = (int*) *(processRegisters + REG_SP) - ((numberOfThreads - nrOfThreads) * 512 * 1024) / 4;
-
-		enqueue(readyQueue, thread);
-
-		nrOfThreads = nrOfThreads - 1;
-	}
 }
 
 
@@ -4565,7 +4515,6 @@ int* palloc() {
 	int i;
 
 	if (freelist == 0) {
-//print((int*) "freelist == 0\n");
 		print((int*) "Physical memory full. Process with pid ");
 		print(itoa(*(currentProcess + 4), string_buffer, 10, 0, 0));
 		print((int*) " killed.");
@@ -4574,41 +4523,31 @@ int* palloc() {
 		//syscall_exit();
 		//return 0;
 	}
+
 	newPage = freelist;
 
-//print((int*) "vor freelist = *freelist\n");
-//println();
-//print(itoa((int) freelist - (int) memory, string_buffer, 10, 0, 0));
-
 	freelist = *freelist;
-
-	//print((int*) "nach freelist = *freelist\n");
-//println();
-//print(itoa((int) freelist - (int) memory, string_buffer, 10, 0, 0));
 
 	i = 0;
 
 	while (i < 1024) {
 		*(newPage + i) = 0;		
 		i = i + 1;
-	} 
-
-	//print((int*) "stelle 4:");
-	 	//print(itoa(*(memory + 4096) - (int) memory, string_buffer, 10, 0, 0));
-//println();
+	}
 
 	return newPage;
 }
 
 void pfree(int* page) {
 	int remainder;
+
 	if (page > memory + memorySize / 4) {
 		print((int*) "Tried to free nonexistent pageframe.");		
 		return;
 	}
 
 	// get beginning of the page
-	remainder = (int) (page - memory) % (4 * KILOBYTE);
+	remainder = ((int) page - (int) memory) % (4 * KILOBYTE);
 	page = page - remainder / 4;
 
 	*page = freelist;
@@ -4656,26 +4595,10 @@ int tlb(int vaddr) {
 	if (*pageTableEntry == 0) {
 		// page fault
 		*pageTableEntry = palloc();
-	//print((int*) "alfred\n");
-//print((int*) "stelle 4:");
-	// 	print(itoa(*(memory + 4096) - (int) memory, string_buffer, 10, 0, 0));
-//println();
-//print(itoa(*pageTableEntry, string_buffer, 10, 0, 0));
-//println();
 	}
-//print((int*) "pTE:");
-	// 	print(itoa(*pageTableEntry, string_buffer, 10, 0, 0));
-//println();
-//print((int*) "offset:");
-	// 	print(itoa(vaddr % (4 * KILOBYTE), string_buffer, 10, 0, 0));
-//println();
-//print((int*) "return:");
-	// 	print(itoa(*pageTableEntry + vaddr % (4 * KILOBYTE) - (int) memory, string_buffer, 10, 0, 0));
-//println();
-	return (*pageTableEntry + vaddr % (4 * KILOBYTE) - (int) memory) / 4;
 
-    // physical memory is word-addressed for lack of byte-sized data type
-    //return ((int) ((int*) *(segmentEntry + 3) + (vaddr / 4))) / 4;
+	// physical memory is word-addressed for lack of byte-sized data type
+	return (*pageTableEntry + vaddr % (4 * KILOBYTE) - (int) memory) / 4;
 }
 
 int loadMemory(int vaddr) {
@@ -4692,25 +4615,10 @@ int loadMemory(int vaddr) {
 
 void storeMemory(int vaddr, int data) {
     int paddr;
-
-	//print((int*) "in storeMemory\n");
-	//print((int*) "aus tlb\n");
-//print((int*) "stelle 4:");
-	// 	print(itoa(*(memory + 4096) - (int) memory, string_buffer, 10, 0, 0));
-//println();
 	
     paddr = tlb(vaddr);
 
     *(memory + paddr) = data;
-
-	//print((int*) "aus storeMemory\n");
-
-//print((int*) "stelle 4:");
-	// 	print(itoa(*(memory + 4096) - (int) memory, string_buffer, 10, 0, 0));
-//println();
-
-//print(itoa(vaddr, string_buffer, 10, 0, 0));
-//println();
 }
 
 // -----------------------------------------------------------------
@@ -5601,7 +5509,6 @@ void up_copyArguments(int argc, int *argv) {
 
 void initFirstProcess() {
 	int* process;
-	int* segmentEntry;
 	int* listEntry;
 
 	process = malloc(7 * 4);
@@ -5617,27 +5524,14 @@ void initFirstProcess() {
 	*listEntry = 0;
 	*(listEntry + 1) = 0;
 
-	//segmentEntry = malloc(4 * 4);
-
-	//*segmentEntry = 0;
-	//*(segmentEntry + 1) = 0;
-	//*(segmentEntry + 2) = 4 * 1024 * 1024;
-	//*(segmentEntry + 3) = (int) kmalloc(4 * 1024 * 1024); // 2 MB per process
-	
-	//if (*(segmentEntry + 3) == -1) {
-	//	print((int*) "not enough memory for first process");
-	//	exit(-1);	
-	//}
-
 	*(registers + REG_K0) = (int) palloc(); // R26 used as page table register
 	
 	enqueue(readyQueue, process);
-	//enqueue(segmentTable, segmentEntry);
 }
 
 void copyBinaryToMemory() {
     int a;
-	print((int*) "in cp\n");
+
     a = 0;
 
     while (a < binaryLength) {
@@ -5645,7 +5539,6 @@ void copyBinaryToMemory() {
 	
         a = a + 4;
     }
-	print((int*) "aus cp\n");
 }
 
 int addressWithMaxCounter(int *counters, int max) {
@@ -5781,7 +5674,6 @@ void disassemble() {
 
 void emulate(int argc, int *argv) {
 	int* process;
-	//int* segmentEntry;
 	
 	print(selfieName);
     print((int*) ": this is selfie's mipster executing ");
@@ -5797,11 +5689,7 @@ void emulate(int argc, int *argv) {
     //initInterpreter();
     //parse_args(argc, argv);
 
-	
 	initFirstProcess();
-
-	//segmentEntry = (int*) *(segmentTable);
-	//*(registers+REG_SP) = *(segmentEntry + 2) - 4;
 
 	*(registers + REG_SP) = 4 * MEGABYTE - 4; // 4 KB pagetable can handle 4 MB of memory
 
@@ -5812,10 +5700,6 @@ void emulate(int argc, int *argv) {
     *(registers+REG_K1) = *(registers+REG_GP);
 
     up_copyArguments(argc, argv);
-
-	//if (numberOfThreads > 0) {
-		//createThreads(*readyQueue); // multithread first process
-	//}
     
     //scheduling
     while (*readyQueue != 0) {    
@@ -5966,31 +5850,6 @@ int selfie(int argc, int* argv) {
 
                 argc = argc - 2;
                 argv = argv + 2;
-
-                // pass binaryName as first argument replacing size
-                *argv = (int) binaryName;
-
-                if (binaryLength > 0)
-                    emulate(argc, argv);
-                else {
-                    print(selfieName);
-                    print((int*) ": nothing to emulate");
-                    println();
-
-                    exit(-1);
-                }
-
-                return 0;
-			} else if (stringCompare((int*) *argv, (int*) "-t")) {
-				//numberOfProcesses = 1;
-        		numberOfInstructions = 10;
-
-				numberOfThreads = 3;
-
-				initMemory(atoi((int*) *(argv+1)));
-
-                argc = argc - 1;
-                argv = argv + 1;
 
                 // pass binaryName as first argument replacing size
                 *argv = (int) binaryName;
