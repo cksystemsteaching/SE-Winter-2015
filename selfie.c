@@ -3996,21 +3996,36 @@ void emitRead() {
 
 // TODO: Paging in syscall_read
 void syscall_read() {
-	int count;
 	int vaddr;
 	int fd;
 	int *buffer;
+	int bytes_to_read;
+	int bytes_to_next_page;
+	int read_bytes;
 	int size;
 
-	count = *(registers + REG_A2);
-	vaddr = *(registers + REG_A1);
-	fd = *(registers + REG_A0);
+	// MMU works something like this... virtual address translation for every word to be written
+	while (bytes_to_read > 0) {
+		bytes_to_next_page = PAGE_FRAME_SIZE - (vaddr % PAGE_FRAME_SIZE);
+		buffer = tlb(vaddr);
 
-	buffer = tlb(vaddr);
+		if (bytes_to_read > bytes_to_next_page) {
+			size = read(fd, buffer, bytes_to_next_page);
 
-	size = read(fd, buffer, count);
+			if (read_bytes < bytes_to_next_page) {
+				// Something went wrong, we need to stop writing
+				bytes_to_read = -1;
+			}
 
-	*(registers + REG_V0) = size;
+			bytes_to_read = bytes_to_read - bytes_to_next_page;
+			vaddr = vaddr + bytes_to_read;
+		} else {
+			read_bytes = read(fd, buffer, bytes_to_read);
+			bytes_to_read = 0;
+		}
+	}
+
+	*(registers + REG_V0) = read_bytes;
 
 	if (debug_read) {
 		print(binaryName);
@@ -4022,6 +4037,7 @@ void syscall_read() {
 		print(itoa((int) buffer, string_buffer, 16, 8, 0));
 		println();
 	}
+
 }
 
 void emitWrite() {
