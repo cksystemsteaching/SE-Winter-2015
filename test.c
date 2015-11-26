@@ -15,6 +15,7 @@ void alloc_and_access(int* space) {
 
 int main() {
 	int pid;
+	int pid2;
 	int* space;
 
 	pid = fork();
@@ -26,7 +27,16 @@ int main() {
 
 		if (pid == 0) {
 			alloc_and_access(space);
-			exit(2);
+
+			putchar('f');
+			putchar('f');
+			putchar('f');
+			putchar('f');
+			putchar('f');
+			putchar('f');
+			putchar('f');
+
+			exit(1);
 		} else if (pid > 0) {
 			alloc_and_access(space);
 
@@ -34,18 +44,42 @@ int main() {
 			putchar('e');
 			putchar('e');
 			putchar('e');
-			putchar('e');
-			putchar('e');
-			putchar('e');
-			putchar('e');
-			putchar('e');
-			putchar('e');
-			putchar('e');
-			putchar('e');
-			putchar('e');
 
 			wait(pid);
-			exit(3);
+
+			pid2 = fork();
+
+			if (pid2 > 0) {
+				putchar('i');
+				putchar('i');
+				putchar('i');
+				putchar('i');
+				wait(pid2);
+
+				pid = fork();
+
+				putchar('j');
+
+				exit(5);
+			} else if (pid2 == 0) {
+				putchar('h');
+				putchar('h');
+				putchar('h');
+				putchar('h');
+				putchar('h');
+				putchar('h');
+				putchar('h');
+				putchar('h');
+				putchar('h');
+				putchar('h');
+				putchar('h');
+				putchar('h');
+				putchar('h');
+				putchar('h');
+				putchar('h');
+				exit(9);
+			} else
+				exit(7);
 		} else {
 			exit(-1);
 		}
@@ -56,36 +90,10 @@ int main() {
 		putchar('d');
 		putchar('d');
 		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-		putchar('d');
-
-		alloc_and_access(space);
 
 		wait(pid);
 
-		exit(4);
+		exit(1);
 	} else {
 		exit(-1);
 	}
