@@ -712,7 +712,7 @@ int  isProcessWaiting(int *process);
 
 int* createChildProcess(int pid);
 void copyRegisters(int *copyTo, int *copyFrom);
-void duplicatePageTable(int *copyTo, int *copyFrom);
+void copyPageTable(int *copyTo, int *copyFrom);
 void duplicatePageFrame(int *copyTo, int *copyFrom);
 
 void killProcess(int *process);
@@ -3941,8 +3941,8 @@ void syscall_exit() {
    	print((int*)"] terminates");println();
 
 
-	killChildren(getChildren(currProcess));
-	freePages(currProcess);
+//	killChildren(getChildren(currProcess));
+//	freePages(currProcess);
 	if(hasParent(currProcess)){
 		yieldCaller = 2;
 		syscall_yield();
@@ -4375,13 +4375,14 @@ void syscall_fork(){
 			child = createChildProcess(getProcessID(childProcess));
 			if((int)child != 0){
 				copyRegisters(getRegisters(childProcess), registers);
-				duplicatePageTable(getPageTable(childProcess), currPageTable),
+				copyPageTable(getPageTable(childProcess), currPageTable),
 				childRegisters = getRegisters(childProcess);
 				setPPID(childProcess, getProcessID(currProcess));
 				*(registers+REG_V0) = getProcessID(childProcess); 	//return value for parent is childID
 				*(childRegisters+REG_V0) = 0;						//return value for child is 0
 				appendListElement(child, getChildren(currProcess));
 				appendListElement(childProcess, readyQueue);
+//				printPageTable(getPageTable(childProcess), getProcessID(childProcess));
 			}
 		}
 		if(debug_fork){
@@ -4836,7 +4837,7 @@ void killProcess(int *process){
 	killChildren(getChildren(process));
 
 	notify(getPPID(process));
-	freePages(process);
+//	freePages(process);
 	removeFromList(process);
 }
 // child process has another structure
@@ -4872,7 +4873,7 @@ void copyRegisters(int *copyTo, int *copyFrom){
 		i = i+1;
 	}
 }
-void duplicatePageTable(int *copyTo, int *copyFrom){
+void copyPageTable(int *copyTo, int *copyFrom){
 	int pageTableSize;
 	int i;
 	i=0;
@@ -4887,7 +4888,15 @@ void duplicatePageTable(int *copyTo, int *copyFrom){
 			println();
 		
 			*copyTo = (int)pmalloc();
-			duplicatePageFrame(copyTo, copyFrom);
+			
+//			print((int*)"copyPage\n");
+//			print((int*)"copyTo: ");
+//			print(itoa((int)copyTo, string_buffer, 10, 0, 0));
+//			println();
+//			print((int*)"copyFrom: ");
+//			print(itoa((int)copyFrom, string_buffer, 10, 0, 0));
+//			println();
+			duplicatePageFrame((int*)*copyTo, (int*)*copyFrom);
 		}
 		copyTo = copyTo + 1;
 		copyFrom = copyFrom + 1;
@@ -4906,10 +4915,11 @@ void duplicatePageFrame(int *copyTo, int *copyFrom){
 }
 int* pmalloc(){
 	int *page;
-	
+//	printFreeList();
 	if((int)pfreeList == 0){
 		exception_handler(EXCEPTION_OUTOFMEMORY);
 		yieldCaller = 2;
+		printFreeList();
 		killProcess(currProcess);
 	}
 	page = pfreeList;
@@ -4934,6 +4944,7 @@ void freePages(int *process){
 	}
 }
 void pfree(int *page){
+	print((int*)"pFree\n");
 	*page = (int)pfreeList;
 	pfreeList = page;
 }
