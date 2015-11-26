@@ -737,8 +737,7 @@ int coop;
 int switchAfterMInstructions;
 int switchIn;
 int* segTable;
-int stackSize = 10000000;
-int heapSize = 10000000;
+int* os_pageFreePointer; //Pointer to next free PMem
 
 int* os_readyQ;
 int* os_runQ;
@@ -750,7 +749,7 @@ int os_lock = 0;
 int os_blockedCtr = 0;
 int os_readyCtr = 0;
 int os_lockProcess = 0;
-
+int os_vMemSize = 4194304; //4MB vMem
 //PID's of new Processes
 int os_pId;
 
@@ -770,7 +769,10 @@ int os_kmalloc(int size);
 void os_prepare();
 void os_createProcess();
 int os_createFork();
-
+int os_palloc();
+void os_pfree();
+int* os_getListEntryFromOffset(int offset);
+int* os_createNewPageTable();
 // -----------------------------------------------------------------
 // ---------------------------- MEMORY -----------------------------
 // -----------------------------------------------------------------
@@ -5960,3 +5962,26 @@ int os_createFork()
     os_setListEntry(5, par_pId, newPr);
     return os_pId;
 }
+
+int os_palloc(){
+
+
+}
+
+void os_pfree(){
+
+
+}
+
+int* os_getListEntryFromOffset(int offset){
+    
+}
+
+int* os_createNewPageTable(){
+       int* pTable;
+       int size;
+       size = os_vMemSize / (4 * 1024);
+       pTable = malloc(size);
+       return pTable;
+}
+
