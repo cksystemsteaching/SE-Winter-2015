@@ -4825,10 +4825,10 @@ void removeAllZombieChildren(int *childList){
 }
 void killProcess(int *process){
 	
-//	killChildren(getChildren(process));
+	killChildren(getChildren(process));
 
 	notify(getPPID(process));
-//	freePages(process);
+	freePages(process);
 	removeFromList(process);
 }
 // child process has another structure
@@ -4838,7 +4838,7 @@ void killChildren(int *children){
 	int *curr;
 	curr = (int*)*children;
 	while((int)curr != 0){
-//		killProcess(curr);
+		killProcess(curr);
 		curr = (int*)(curr+1);
 	}
 	
