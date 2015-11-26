@@ -647,7 +647,7 @@ int  maxNrProcesses = 3;	// maximum number of processes;
 int  counterInstr = 0;		// currently processed instruction counter
 int  maxInstr = 1000;		// syscall_yield should be invoked every 'maxInstr'
 
-int  processFinished = 0;	// if process calls syscall_exit...1
+//int  processFinished = 0;	// if process calls syscall_exit...1
 int  yieldCaller = 0;		// 0...yield, 1...syscall_lock, 2...syscall_exit, 3...syscall_wait
 
 int *pfreeList;	// contains free pages in memory
@@ -710,7 +710,6 @@ int  getWaitStatus(int *process);
 void setWaitStatus(int *process, int status);
 int  isProcessWaiting(int *process);
 
-int* duplicateProcess();
 int* createChildProcess(int pid);
 void copyRegisters(int *copyTo, int *copyFrom);
 void duplicatePageTable(int *copyTo, int *copyFrom);
@@ -3941,16 +3940,13 @@ void syscall_exit() {
 	print(itoa(getProcessID(currProcess), string_buffer, 10,0, 0));
    	print((int*)"] terminates");println();
 
-//	printProcessList(blockedQueue);
+
+	killChildren(getChildren(currProcess));
+	freePages(currProcess);
 	if(hasParent(currProcess)){
-//		print((int*)"process with id [");
-//		print(itoa(getProcessID(currProcess), string_buffer, 10,0, 0));
-//	   	print((int*)"] has parent\n");println();
-		processFinished = 1;
 		yieldCaller = 2;
 		syscall_yield();
 	} else {
-		freePages(currProcess);
 		println();
 		println();
 		print(binaryName);
@@ -4174,7 +4170,7 @@ void emitPutchar() {
 }
 
 void emitYield(){
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "yield", binaryLength, FUNCTION, INT_T, 0);
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "yield", binaryLength, FUNCTION, VOID_T, 0);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
     emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
@@ -4190,6 +4186,7 @@ void emitYield(){
 void syscall_yield(){
 	int debug_yield;
 	debug_yield = 0;
+	
 	if(debug_yield)
 		print((int*)"\nswitch process caller=");
 	
@@ -4216,7 +4213,7 @@ void syscall_yield(){
 		println();
 		print((int*)"switch from process [");
 		print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
-		print((int*)"]");println();
+		print((int*)"]\n");
 	}
 	currProcess = (int*)0;
 	if(lock == 0){
@@ -4245,7 +4242,6 @@ void syscall_yield(){
 		println();
 	}
 	yieldCaller = 0;
-	processFinished = 0;
 	counterInstr = 0;
 	
 }
@@ -4382,11 +4378,10 @@ void syscall_fork(){
 				duplicatePageTable(getPageTable(childProcess), currPageTable),
 				childRegisters = getRegisters(childProcess);
 				setPPID(childProcess, getProcessID(currProcess));
-				*(registers+REG_V0) = getProcessID(childProcess); //return value for parent is childID
-				*(childRegisters+REG_V0) = 0;	//return value for child is 0
+				*(registers+REG_V0) = getProcessID(childProcess); 	//return value for parent is childID
+				*(childRegisters+REG_V0) = 0;						//return value for child is 0
 				appendListElement(child, getChildren(currProcess));
 				appendListElement(childProcess, readyQueue);
-
 			}
 		}
 		if(debug_fork){
@@ -4401,7 +4396,7 @@ void syscall_fork(){
 }
 
 void emitWait(){
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "wait", binaryLength, FUNCTION, INT_T, 0);
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "wait", binaryLength, FUNCTION, VOID_T, 0);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
     emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
@@ -4470,13 +4465,11 @@ void syscall_wait(){
 // 5 +-----+  
 //   | PT  | pointer to page table
 // 6 +-----+ 
-//   |vmem | pointer to virtual memory
-// 7 +-----+ 
 //   |PPID | parent process ID
-// 8 +-----+ 
+// 7 +-----+ 
 //   |child| list of children
 //   |list | 
-// 9 +-----+ 
+// 8 +-----+ 
 //   |wait | status of process, 1 if waiting, 0 otherwise
 // 9 +-----+ 
 
@@ -4737,8 +4730,6 @@ int* createChildProcess(int pid){
 }
 void saveProcessState(){
 	setPC(currProcess, pc);
-	setRegisters(currProcess, registers);
-	setPageTable(currProcess, currPageTable);
 }
 void setProcessState(){
 	registers = getRegisters(currProcess);
@@ -4785,6 +4776,9 @@ void printPageTable(int *pageTable, int pid){
 void releaseLock(){
 	if(lock==1){
 		if(lockID == getProcessID(currProcess)){
+			print((int*)"process [\n");
+			print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
+			print((int*)"] drops lock\n");
 			lock = 0;
 			lockCounter = 0;
 		}
@@ -4850,11 +4844,12 @@ void killProcess(int *process){
 // in a childProcess is at the same position as in a normal process
 void killChildren(int *children){
 	int *curr;
-	curr = (int*)children;
+	curr = (int*)*children;
 	while((int)curr != 0){
 		killProcess(curr);
 		curr = (int*)(curr+1);
 	}
+	
 }
 //@return: first "not waiting" process in blockedQueue
 //			if such a process does not exist it returns the the first process from readyQueue
@@ -4869,32 +4864,6 @@ int* removeFirstNotWaitingProcessFromBlockedQueue(){
 	}
 	return (int*)0;
 }
-
-int* duplicateProcess(){
-	int debug_duplicateProcess;
-	int *parentPageTable;
-	int *childPageTable;
-	int *childProcess;
-	debug_duplicateProcess = 0;
-	saveProcessState();
-	parentPageTable = getPageTable(currProcess);
-	
-	childProcess = createProcess();
-	childPageTable = getPageTable(childProcess);
-	
-	// set data of child
-	setPPID(childProcess, getProcessID(currProcess));
-	setPC(childProcess, *(registers+REG_RA));
-	copyRegisters(getRegisters(childProcess), registers);
-	duplicatePageTable(childPageTable, parentPageTable);
-	printPageTable(childPageTable, getProcessID(childProcess));
-
-	// add to process list
-	appendListElement(childProcess, readyQueue);
-	
-	return childProcess;
-}
-
 void copyRegisters(int *copyTo, int *copyFrom){
 	int i;
 	i = 0;
