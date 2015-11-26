@@ -98,6 +98,8 @@ void printString(int *s);
 void exit(int code);
 int* malloc(int size);
 
+void setColor(int *color);
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int CHAR_EOF          = -1; // end of file
@@ -132,6 +134,31 @@ int INT_MIN; // minimum numerical value of an integer
 
 int *string_buffer;
 
+// 0 = O_RDONLY (0x0000)
+int O_RDONLY = 0;
+
+// 577 = 0x0241 = O_CREAT (0x0040) | O_WRONLY (0x0001) | O_TRUNC (0x0200)
+int O_CREAT_WRONLY_TRUNC = 577; // flags for opening write-only files
+
+// 420 = 00644 = S_IRUSR (00400) | S_IWUSR (00200) | S_IRGRP (00040) | S_IROTH (00004)
+int S_IRUSR_IWUSR_IRGRP_IROTH = 420; // flags for rw-r--r-- file permissions
+
+
+// ---- debugging escape sequences----
+int *COLOR_RESET ;// (int*)"\e[0m";
+int *COLOR_RED ;// (int*)"\e[31m";
+int *COLOR_DARKBLUE ;// (int*)"\e[94m";
+int *COLOR_YELLOW ;// (int*)"\e[33m";
+int *COLOR_BOLDYELLOW ;// (int*)"\e[1;33m";
+int *COLOR_GREEN ;// (int*)"\e[32m";
+int *COLOR_DARKGREY ;// (int*)"\e[90m";
+int *COLOR_GREY ;// (int*)"\e[37m";
+int *COLOR_MAGENTA ;// (int*)"\e[35m";
+int *COLOR_CYAN ;// (int*)"\e[36m";
+int *COLOR_BLUE ;// (int*)"\e[34m";
+
+
+
 // ------------------------- INITIALIZATION ------------------------
 
 void initLibrary() {
@@ -155,6 +182,12 @@ void initLibrary() {
 
     // accommodate 32-bit numbers for itoa
     string_buffer = malloc(33);
+}
+
+void setColor(int *color) {
+    if (0) {
+        print(color);
+    }
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -707,7 +740,7 @@ int SYSCALL_UNLOCK  = 6001;
 
 void initMemory(int megabytes);
 
-int tlb(int vaddr);
+int tlb(int vaddr, int readOrWrite);
 
 int  loadMemory(int vaddr);
 void storeMemory(int vaddr, int data);
@@ -3145,7 +3178,7 @@ void compile() {
     print(sourceName);
     println();
 
-    sourceFD = open(sourceName, 0, 0); // 0 = O_RDONLY
+    sourceFD = open(sourceName, O_RDONLY, 0);
 
     if (sourceFD < 0) {
         print(selfieName);
@@ -3507,9 +3540,7 @@ void emitGlobalsStrings() {
 void emit() {
     int fd;
 
-    // 1537 = 0x0601 = O_CREAT (0x0200) | O_WRONLY (0x0001) | O_TRUNC (0x0400)
-    // 420 = 00644 = S_IRUSR (00400) | S_IWUSR (00200) | S_IRGRP (00040) | S_IROTH (00004)
-    fd = open(binaryName, 1537, 420);
+    fd = open(binaryName, O_CREAT_WRONLY_TRUNC, S_IRUSR_IWUSR_IRGRP_IROTH);
 
     if (fd < 0) {
         print(selfieName);
@@ -3532,7 +3563,7 @@ void load() {
     int fd;
     int numberOfReadBytes;
 
-    fd = open(binaryName, 0, 0); // 0 = O_RDONLY
+    fd = open(binaryName, O_RDONLY, 0);
 
     if (fd < 0) {
         print(selfieName);
@@ -3577,8 +3608,8 @@ void load() {
 // -----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 
-int currentInstCount;
 
+// ------ debugging ------
 int debug_getpid  = 0;
 int debug_yield   = 0;
 int debug_lock    = 0;
@@ -3586,57 +3617,336 @@ int debug_unlock  = 0;
 int debug_exit    = 1;
 int debug_fork    = 0;
 int debug_wait    = 0;
-int debug_sm      = 0;
-int debug_pr      = 0;
 
+int debug_pr      = 0;
+int debug_vm      = 2;
+
+// ------ processes ------
+int currentInstCount;
 int pid = 0;                   // last process identifier
-int sr = 0;                    // segment register
 int lock = 0;
 
-int segment_size;
-int segmentBumpPointer = 0;
-
+// ------ queues ------
 int *readyQ;
 int *blockedQ;
 int *zombieQ;
 int *waitQ;
 
+// ------ memory ------
+int *pageFrameRefs;
+int  virtualMemorySize;
+int  pageSize = 4096;          // pageSize in bytes
+int  maxPages;                 // maxium of pages
+int  allocatedPages = 0;
+int  freep;
+
+int invalidPage = 0;
+int readOnlyPage = 1;
+int readAndWritePage = 2;
+
+// ------ functions ------
+void os_boot();
+
+
+void os_pageFaultHandler(int *process, int vpn);
+int palloc();
+void pfree(int p);
+void os_pageDaemon(int refCount, int rpn);
+void os_updatePage(int *process, int vpn, int newRpn);
+int os_getVirtualPageNr(int vaddr);
+int os_getPageOffset(int vaddr);
+int os_getPageFlag(int* process, int vpn);
+int os_getRPNfromPageTable(int* process, int vpn);
+void os_insertIntoPageTable(int* process, int vpn, int rpn, int mode);
+void os_copyPageFrame(int fromRpn, int toRpn);
+int os_pageFrameLookup(int vaddr, int readOrWrite);
 
 // List Operations (generic)
-int* os_createQueue();                     // create empty queue
-int* os_removeQueue(int* list, int* data); // remove element from queue
-int* os_getHead(int* list);                // get current head of queue
-int* os_appendQueue(int* list, int* data); // append element to a queue
+int* os_createQueue();
+int* os_removeQueue(int* list, int* data);
+int* os_getHead(int* list);
+int* os_getTail(int* list);
+int* os_appendQueue(int* list, int* data);
+
 
 // process specific queue functions:
-int* os_searchPqueue(int* list, int key);  //  search process queue for given pid
-void os_printQueue(int* list, int* qname);
+int* os_searchPqueue(int* list, int key);
+void os_printQueue(int* list, int* qname, int field);
 
 // process functions
-int* os_createProcess();                   // create new process element
-int  os_getProcessID(int* process);        // get pid for a given process
-int  os_getProcessPc(int* process);        // get program counter of process object
-int* os_getProcessRegister(int* process);  // get pointer to registers of a process
-int  os_getProcessSegment(int* process);   // get pointer to memory of a given process
-int os_processTerminated(int* process);
+int* os_createProcess();
+int os_getProcessID(int* process);
+int os_getProcessPc(int* process);
+int* os_getProcessRegister(int* process);
+int os_getProcessPageFault(int* process);
+int os_addProcessPageFault(int* process);
 int* os_getProcessParent(int* process);
 int os_getProcessExitCode(int* process);
+int os_processTerminated(int* process);
+
 
 // functions for process scheduling:
-void os_restoreContext();                  //  restore context (reg,mem,pc) of a given process
-void os_saveContext();                     // save context of current process
-void os_contextSwitch(int notTerminated);  // carry out a context switch
-int  os_kmalloc();                         // allocate segment memory
-void os_fifo();                            // process scheduling modelled after fifo queue
+void os_restoreContext();
+void os_saveContext();
+void os_contextSwitch(int notTerminated);
+void os_fifo();
 int os_queuesNotEmpty();
 
 void os_copyRegisters(int* fromProcess, int* toProcess);
-void os_copyMemory(int* fromProcess, int* toProcess, int fromAddress, int toAddress);
+void os_forkPageTable(int *process, int *new_process);
+int os_incPageFrameRefs(int rpn);
+int os_decPageFrameRefs(int rpn);
+void initRegisterPointers(int* process);
+
+
+void os_debug_vm(int vpn, int rpn) {
+    if (debug_vm >= 2) {
+        setColor(COLOR_YELLOW);
+        print((int*) "[VM] page frame usage tot/act:  ");
+        print(itoa(memorySize/pageSize, string_buffer, 10, 10));
+        print((int*) "/");
+        print(itoa(allocatedPages, string_buffer, 10, 10));
+        print((int*) "[");
+        print(itoa(allocatedPages*100 / (memorySize/pageSize), string_buffer, 10, 10));
+        print((int*) "%]");
+        println();
+        setColor(COLOR_RESET);
+    }
+    if (debug_vm) {
+        setColor(COLOR_BOLDYELLOW);
+        print((int*) "[VM] Copy on Write Page:  ");
+        print(itoa(vpn, string_buffer, 10, 10));
+        print((int*) ", Real Page Number:  ");
+        print(itoa(rpn, string_buffer, 10, 10));
+        println();
+        os_printQueue(readyQ, (int*)"[VM] Pid[Pagefault]: ", 5);
+        setColor(COLOR_RESET);
+    }
+
+}
+
+// purpose: initialize queues and memory system, create first process
+void os_boot() {
+    int* process;
+
+    isEmulator = 1;
+
+    pageFrameRefs = (int*)malloc(4*(memorySize/pageSize));
+    virtualMemorySize = 4*1024*1024;
+    maxPages = virtualMemorySize/pageSize;
+
+    freep = 0;
+
+    readyQ   = os_createQueue();
+    blockedQ = os_createQueue();
+    zombieQ  = os_createQueue();
+    waitQ    = os_createQueue();
+
+    process = os_createProcess();
+    os_appendQueue(readyQ, process);
+
+    copyBinaryToMemory();
+    initRegisterPointers(process);
+
+
+    if (debug_vm >= 2) {
+        print((int*) "[VM] Real Memory: ");
+        print(itoa(memorySize/1024, string_buffer, 10, 10));
+        print((int*) "KB");
+        println();
+        print((int*) "[VM] Virtual Pages:  ");
+        print(itoa(virtualMemorySize/pageSize, string_buffer, 10, 10));
+        print((int*) " / Page Frames:  ");
+        print(itoa(memorySize/pageSize, string_buffer, 10, 10));
+        println();
+    }
+}
+
+// purpose: handle page faults for a given virtual page number "vpn":
+//          increment the page fault counter, allocate a physical page
+//          and insert this allocated page into the pagetable.
+void os_pageFaultHandler(int *process, int vpn) {
+    int rpn;
+    os_addProcessPageFault(process);
+    rpn = palloc();
+    os_insertIntoPageTable(process, vpn, rpn, readAndWritePage);
+
+    os_debug_vm(vpn, rpn);
+}
+
+
+// purpose:  allocate new page from page-free list
+int palloc() {
+    int current;
+
+    current = freep;
+
+    if (allocatedPages+1 > maxPages) {
+        // TODO page replacement
+        return 0;
+    }
+
+    if (*(memory+freep*pageSize) != 0)
+        freep = *(memory+freep*pageSize);
+    else
+        freep = freep + 1;
+
+    os_incPageFrameRefs(current);
+    allocatedPages = allocatedPages + 1;
+
+    return current;
+}
+
+// purpose:  free a page p.
+void pfree(int p) {
+    // XXX set whole page to 0
+    *(memory+p*pageSize) = freep;
+    freep = p;
+
+    allocatedPages = allocatedPages - 1;
+}
+
+// purpose:  kernel process "pagedaemon", to free physical pages
+//           that are no longer needed by any process.
+void os_pageDaemon(int refCount, int rpn) {
+    if (refCount == 0) {
+        pfree(rpn);
+    }
+}
+
+// purpose:  replace a virtual page number (vpn, oldRpn) with (vpn,neRpn)
+//           Used for updating a page table entry.
+void os_updatePage(int *process, int vpn, int newRpn) {
+    int *ptable;
+    int *ptableFlags;
+    ptable = (int*)*(process + 10);         // XXX getter/setter
+    ptableFlags = (int*)*(process + 11);         // XXX getter/setter
+    *(ptable + vpn) = newRpn;
+    *(ptableFlags + vpn) = readAndWritePage;
+}
+
+// purpose: return virtual page number (vpn) of a virtual address
+//          +-------------------------------+
+//          |         ++++++++++------------|
+//          +---------^^^^^^^^^^------------+
+//                     VPN
+int os_getVirtualPageNr(int vaddr) {
+    return rightShift(leftShift(vaddr, 10), 22);
+}
+
+
+// purpose: return virtual page number (vpn) of a virtual address
+//          +-------------------------------+
+//          |         ----------++++++++++++|
+//          +-------------------^^^^^^^^^^^^+
+//                                  RPN
+int os_getPageOffset(int vaddr) {
+    return rightShift(leftShift(vaddr, 20), 20);
+}
+
+
+// purpose: return the page flag  table for a process
+int os_getPageFlag(int* process, int vpn) {
+    int* table;
+    table = (int*)*(process + 11);
+
+    return *(table + vpn);
+}
+
+// purpose: return real page number (rpn) for process and a given
+//          virtual page number:  [ rpn -> vpn ]
+int os_getRPNfromPageTable(int* process, int vpn) {
+    int* table;
+
+    table = (int*)*(process + 10);
+
+    return *(table + vpn);
+}
+
+// purpose: insert (vpn, rpn) into a page table of a process.
+//          mode is used to specify if the page is read/write able
+void os_insertIntoPageTable(int* process, int vpn, int rpn, int mode) {
+    int* table;
+
+    table = (int*)*(process + 10);
+    *(table + vpn) = rpn;
+
+    table = (int*)*(process + 11);
+    *(table + vpn) = mode;
+}
+
+
+// purpose:  copy physical page
+void os_copyPageFrame(int fromRpn, int toRpn) {
+    int *fromPageFrame;
+    int *toPageFrame;
+    int i;
+    fromPageFrame = memory + leftShift(fromRpn,12);
+    toPageFrame = memory + leftShift(toRpn,12);
+
+    i = 0;
+    while (i < pageSize) {
+
+       //*(toPageFrame + i) = *(fromPageFrame + i);
+        *(memory + ((leftShift(toRpn, 12) + i) / 4)) = *(memory + ((leftShift(fromRpn, 12) + i) / 4));
+       i = i + 4;
+    }
+}
+
+// purpose: mechanism to translate a vaddr to a physical one.
+//     1.  lookup the (vpn,offset) tupel
+//     2.  check if we have a valid vpn
+//        a) valid page:
+//          i) check if readOnlyPage
+//            - if readOnly, and we want to write: copy-on-write
+//            - if readOnly, and we want to read: OK
+//          ii) write allowed, doesn't matter
+//         b) no valid page:
+//          i) allocate new page with the pageFaultHandler
+//     return (rpn,offset)
+int os_pageFrameLookup(int vaddr, int readOrWrite) {
+    int *process;
+    int vpn;
+    int newRpn;
+    int oldRpn;
+    int rpn;
+    int offset;
+    int flag;
+
+    process = os_getHead(readyQ);
+    vpn = os_getVirtualPageNr(vaddr);
+    offset = os_getPageOffset(vaddr);
+    flag = os_getPageFlag(process, vpn);
+
+
+    if (flag != invalidPage) {
+        if (flag == readOnlyPage) {
+          if (readOrWrite == 2) {
+              newRpn = palloc();
+              oldRpn = os_getRPNfromPageTable(process, vpn);
+
+              os_copyPageFrame(oldRpn, newRpn);
+              os_pageDaemon(os_decPageFrameRefs(oldRpn), oldRpn);
+              os_updatePage(process, vpn, newRpn);
+
+              os_debug_vm(vpn, newRpn);
+          }
+        }
+    } else {   // page fault
+        os_pageFaultHandler(process, vpn);
+    }
 
 
 
-// create and initialize a queue, return pointer to it.
-// a queue consists of a pointer to a head and a tail.
+    // XXX: fails if palloc fails.. handle errors.
+    rpn = os_getRPNfromPageTable(process, vpn);
+    return (leftShift(rpn, 12) + offset)/4;
+}
+
+
+
+// purpose:  create and initialize a queue, return pointer to it.
+//           a queue consists of a pointer to a head and a tail.
 int* os_createQueue() {
     int *q;
     q = (int*)malloc(2*4);
@@ -3645,7 +3955,7 @@ int* os_createQueue() {
     return q;
 }
 
-// remove element data from list
+// purpose:  remove element "data" from list
 int* os_removeQueue(int* list, int* data) {
     int *prev;
     int *next;
@@ -3684,13 +3994,12 @@ int* os_removeQueue(int* list, int* data) {
     return data;
 }
 
-// getHead: get head of list
+// purpose: get head of list
 int* os_getHead(int* list) {
     return (int*)*list;
 }
 
-
-// getHead: get head of list
+// purpose: get tail of list
 int* os_getTail(int* list) {
     return (int*)*(list+1);
 }
@@ -3722,8 +4031,8 @@ int* os_appendQueue(int* list, int* data) {
 }
 
 
-// search process queue, key is a PID
-// important: list must be a list of 'process'-records.
+// purpose: search process queue, key is a PID
+//          important: list must be a list of 'process'-records.
 int* os_searchPqueue(int* list, int key) {
     int* q;
 
@@ -3737,9 +4046,13 @@ int* os_searchPqueue(int* list, int key) {
     return (int*)0;
 }
 
-void os_printQueue(int* list, int* qname) {
+// purpose:  print a given queue 'list'.  'qname' is a string/title of
+//           the queue.  field is used to print a special "offset" of
+//           the queue elements.
+void os_printQueue(int* list, int* qname, int field) {
     int* q;
     int* tail;
+
     q = os_getHead(list);
     tail = os_getTail(list);
 
@@ -3747,34 +4060,48 @@ void os_printQueue(int* list, int* qname) {
         return;
 
     print(qname);
-     while (q != tail) {
+    while (q != tail) {
         print(itoa(os_getProcessID(q), string_buffer, 10, 0));
+        if (field > 1) {
+            print((int*)"[");
+            print(itoa(*(q + field), string_buffer, 10, 0));
+            print((int*)"]");
+        }
         putchar(',');
         q = (int*)*q;
     }
     print(itoa(os_getProcessID(q), string_buffer, 10, 0));
 
+    if (field > 1) {
+        print((int*)"[");
+        print(itoa(*(q + field), string_buffer, 10, 0));
+        print((int*)"]");
+    }
+
+
     println();
 }
 
-// process:  create a new process object:
+// purpose:  create process element
 // return :  return pointer to the new prrocess
 // +-------------------+
-// |0 next pointer     |
-// |1 prev pointer     |
-// |2 process id       |
-// |3 program counter  |
-// |4 register ptr     |
-// |5 segment register |
-// |6 parent pointer   |
-// |7 exit code        |
-// |8 hasTerminated    |
-// |9 waitsForPID      |
+// |0  next pointer     |
+// |1  prev pointer     |
+// |2  process id       |
+// |3  program counter  |
+// |4  register ptr     |
+// |5  page faults      |
+// |6  parent pointer   |
+// |7  exit code        |
+// |8  hasTerminated    |
+// |9  waitsForPID      |
+// |10 pageTable        |
+// |11 pageInfo         |
 // +-------------------+
 
 int* os_createProcess() {
     int *new;
-    new = malloc(9*4);
+    new = malloc(12*4);
 
     pid = pid + 1;   // use 0 for the operating system
 
@@ -3783,25 +4110,26 @@ int* os_createProcess() {
     *(new + 2) = pid;                // PID
     *(new + 3) = 0;                  // PC
     *(new + 4) = (int)malloc(32*4);  // registers
-    *(new + 5) = sr;                 // segment register
+    *(new + 5) = 0;                  // page fault
     *(new + 6) = 0;                  // is child of init
     *(new + 7) = 0;                  // exit code
     *(new + 8) = 0;                  // has not terminated yet
     *(new + 9) = 0;
+    *(new + 10) = (int)malloc(pageSize);
+    *(new + 11) = (int)malloc(pageSize); // assume all entries are 0 -> invalidPage
 
     *(registers + REG_ZR) = 0;
 
     if (debug_pr) {
+        setColor(COLOR_DARKBLUE);
         print((int*) "[PR] create process ");
     	itoa(pid, string_buffer, 10, 2);
         print(string_buffer);
-        putchar(CHAR_LF);
-    }
-    if (debug_sm) {
-        print((int*) "[SM] Current SR: ");
-        print(itoa(sr, string_buffer, 10, 10));
+        print((int*) ", init page faults to 0.");
+        setColor(COLOR_RESET);
         println();
     }
+
     return new;
 
 }
@@ -3818,13 +4146,19 @@ int* os_getProcessRegister(int* process) {
     return (int*)*(process + 4);
 }
 
-int os_getProcessSegment(int* process) {
+int os_getProcessPageFault(int* process) {
+    return *(process + 5);
+}
+
+int os_addProcessPageFault(int* process) {
+    *(process + 5) = *(process + 5) + 1;
     return *(process + 5);
 }
 
 int* os_getProcessParent(int* process){
     return (int*)*(process + 6);
 }
+
 int os_getProcessExitCode(int* process) {
     return *(process + 7);
 }
@@ -3833,7 +4167,7 @@ int os_processTerminated(int* process){
     return *(process + 8);
 }
 
-// Restore Context from Head Process
+// purpose: Restore Context (=pc, registers) from Head Process
 void os_restoreContext() {
     int *process;
 
@@ -3848,30 +4182,34 @@ void os_restoreContext() {
     }
     pc = os_getProcessPc(process);
     registers = os_getProcessRegister(process);
-    sr = os_getProcessSegment(process);
 }
 
-// save context of current process
+// purpose: save context of current process
 void os_saveContext() {
     int *process;
     process = os_getHead(readyQ);
     *(process + 3) = pc;
 }
 
-
+// purpose: print debugging message for process switching
 void os_printSwitch(int *process) {
     if (debug_pr) {
-        os_printQueue(readyQ, (int*)"[PR] Ready Queue: ");
+        setColor(COLOR_BLUE);
+        os_printQueue(readyQ, (int*)"[PR] Ready Queue: ", 0);
         print((int*) "[PR] switch to PID ");
-        itoa(os_getProcessID(process), string_buffer, 10, 2);
-        print(string_buffer);
-        putchar(CHAR_LF);
+        print(itoa(os_getProcessID(process), string_buffer, 10, 2));
+        setColor(COLOR_RESET);
+        println();
     }
 }
 
+// purpose: switch the current process.  If the process who triggered
+//          the function has not terminated, save the old context, and
+//          load the new context.  If the process who triggered the
+//          function (exit), then the head of the list already points
+//          to the new process and we can start with restoring the context
 void os_contextSwitch(int notTerminated) {
     int *process;
-    int newpid;
 
     // save old context
     if (notTerminated) {
@@ -3884,6 +4222,7 @@ void os_contextSwitch(int notTerminated) {
     os_printSwitch(process);
 }
 
+// pupose:  fifo scheduler
 void os_fifo() {
     int *headp;
     headp = os_getHead(readyQ);
@@ -3891,14 +4230,7 @@ void os_fifo() {
     os_appendQueue(readyQ, headp);
 }
 
-
-int os_kmalloc() {
-    int old;
-    old = segmentBumpPointer;
-    segmentBumpPointer = segmentBumpPointer + segment_size;
-    return old;
-}
-
+// purpose:  return 0 if queue is empty, 1 if it is not empty
 int os_queuesNotEmpty() {
     int *process;
     if ((int)os_getHead(readyQ) == 0) {
@@ -3915,6 +4247,7 @@ int os_queuesNotEmpty() {
         return 1;
 }
 
+// purpose:  copy registers from one process to another
 void os_copyRegisters(int* fromProcess, int* toProcess) {
     int *from_process_regs;
     int *to_process_regs;
@@ -3930,19 +4263,58 @@ void os_copyRegisters(int* fromProcess, int* toProcess) {
     }
 }
 
-void os_copyMemory(int* fromProcess, int* toProcess, int fromAddress, int toAddress) {
-    int memory_value;
+// purpose: copy page table from one process to another
+void os_forkPageTable(int *process, int *new_process) {
+    int *from_pTable;
+    int *from_pTableFlags;
+    int *to_pTable;
+    int *to_pTableFlags;
+    int rpn;
+    int i;
 
-    while (fromAddress < toAddress) {
-        sr = os_getProcessSegment(fromProcess);
-        memory_value = loadMemory(fromAddress);
+    from_pTable = (int*)*(process + 10);
+    from_pTableFlags = (int*)*(process + 11);
+    to_pTable = (int*)*(new_process+ 10);
+    to_pTableFlags = (int*)*(new_process + 11);
 
-        sr = os_getProcessSegment(toProcess);
-        storeMemory(fromAddress, memory_value);
-        fromAddress = fromAddress + 4;
+    i = 0;
+    while (i < pageSize/4) {
+        if (*(from_pTableFlags + i) != invalidPage) {
+
+            *(from_pTableFlags + i)= readOnlyPage;
+            *(to_pTableFlags + i)= readOnlyPage;
+
+            rpn = *(from_pTable + i);
+            *(to_pTable + i) = rpn;
+            os_incPageFrameRefs(rpn);
+
+         }
+         i = i + 1;
     }
 }
 
+// purpose: increase the number of references to a physical page rpn
+int os_incPageFrameRefs(int rpn) {
+    *(pageFrameRefs + rpn) = *(pageFrameRefs + rpn) + 1;
+    return *(pageFrameRefs + rpn);
+}
+
+// purpose: decrease the number of references to a physical page rpn
+int os_decPageFrameRefs(int rpn) {
+    *(pageFrameRefs + rpn) = *(pageFrameRefs + rpn) - 1;
+    return *(pageFrameRefs + rpn);
+}
+
+// purpose:  initialize SP/GP/K1 pointer during boot
+void initRegisterPointers(int* process) {
+    registers = (int*)*(process + 4);
+    // initialize stack pointer
+    *(registers+REG_SP) = virtualMemorySize-4;
+    // initialize global pointer
+    *(registers+REG_GP) = binaryLength;
+    // initialize heap/bump pointer (malloc)
+    *(registers+REG_K1) = *(registers+REG_GP);
+}
 
 // -----------------------------------------------------------------
 // --------------------------- SYSCALLS ----------------------------
@@ -3967,18 +4339,39 @@ void syscall_exit() {
     int* process;
     int* parent;
     int* parentRegs;
+    int i;
+    int rpn;
+    int* pTable;
+    int* pTableFlag;
 
     process = os_getHead(readyQ);
-
+    pTable   = (int*)*(process + 10);
+    pTableFlag = (int*)*(process + 11);
     exitCode = *(registers+REG_A0);
 
+    // free page table memory:
+    i = 0;
+    while (i < pageSize/4) {
+        if (*(pTableFlag + i) != invalidPage) {
+          rpn = *(pTable + i);
+          os_pageDaemon(os_decPageFrameRefs(rpn), rpn);
+        }
+        i = i + 1;
+    }
+
     if (debug_exit) {
+        setColor(COLOR_MAGENTA);
         print((int*)"[OS] PID");
         print(itoa(os_getProcessID(process), string_buffer, 10, 0));
         print((int*)" Terminated with ");
         print(itoa(exitCode, string_buffer, 10, 0));
-        putchar(CHAR_LF);
+        setColor(COLOR_RESET);
+        println();
     }
+
+
+
+
 
     *(registers+REG_V0) = exitCode;
     *(process+7) = exitCode;
@@ -3994,7 +4387,7 @@ void syscall_exit() {
             else {
                 os_appendQueue(zombieQ, process);
                 if (debug_pr)
-                    os_printQueue(zombieQ, (int*)"[PR] Zombie Queue: ");
+                    os_printQueue(zombieQ, (int*)"[PR] Zombie Queue: ", 0);
             }
         } else {
             os_removeQueue(waitQ, parent);
@@ -4040,7 +4433,7 @@ void syscall_read() {
     vaddr = *(registers+REG_A1);
     fd    = *(registers+REG_A0);
 
-    buffer = memory + tlb(vaddr);
+    buffer = memory + tlb(vaddr, 1);
 
     size = read(fd, buffer, count);
 
@@ -4088,7 +4481,7 @@ void syscall_write() {
     vaddr = *(registers+REG_A1);
     fd    = *(registers+REG_A0);
 
-    buffer = memory + tlb(vaddr);
+    buffer = memory + tlb(vaddr, 2);
 
     size = write(fd, buffer, size);
 
@@ -4137,7 +4530,7 @@ void syscall_open() {
     flags = *(registers+REG_A1);
     vaddr = *(registers+REG_A0);
 
-    filename = memory + tlb(vaddr);
+    filename = memory + tlb(vaddr, 1);
 
     fd = open(filename, flags, mode);
 
@@ -4320,7 +4713,7 @@ void syscall_lock() {
     }
 
     if (debug_pr) {
-        os_printQueue(blockedQ, (int*)"[PR] Blocked Queue: ");
+        os_printQueue(blockedQ, (int*)"[PR] Blocked Queue: ", 0);
     }
 
     if (debug_lock) {
@@ -4373,7 +4766,7 @@ void syscall_unlock() {
     if (debug_pr) {
         print(binaryName);
         print((int*) ": blocked queue after unlock: ");
-        os_printQueue(blockedQ, (int*)"[PR] Blocked Queue: ");
+        os_printQueue(blockedQ, (int*)"[PR] Blocked Queue: ", 0);
         println();
     }
 
@@ -4409,7 +4802,7 @@ void syscall_fork() {
 
     process = os_getHead(readyQ);
 
-    sr = os_kmalloc();
+
     new_process = os_createProcess();
 
     *(new_process+3) = pc;
@@ -4418,11 +4811,9 @@ void syscall_fork() {
 
     new_process_regs = os_getProcessRegister(new_process);
 
-    os_copyRegisters(process, new_process);
-    os_copyMemory(process, new_process, 0, *(registers + REG_K1));
-    os_copyMemory(process, new_process, *(registers+REG_SP), segment_size);
 
-    sr = os_getProcessSegment(process);
+    os_copyRegisters(process, new_process);
+    os_forkPageTable(process, new_process);
 
     *(registers + REG_V0) = os_getProcessID(new_process);
     *(new_process_regs + REG_V0) = 0;
@@ -4512,7 +4903,7 @@ void syscall_wait() {
     }
 
     if (debug_pr)
-        os_printQueue(waitQ, (int*)"[PR] Wait Queue: ");
+        os_printQueue(waitQ, (int*)"[PR] Wait Queue: ", 0);
 }
 
 
@@ -4526,25 +4917,28 @@ void syscall_wait() {
 // ---------------------------- MEMORY -----------------------------
 // -----------------------------------------------------------------
 
-int tlb(int vaddr) {
+
+int tlb(int vaddr, int readOrWrite) {
+    int* process;
+
     if (vaddr % 4 != 0)
         exception_handler(EXCEPTION_ADDRESSERROR);
 
     if (isEmulator) {
-        // XXX Currently, no Segmentation Fault will occur because
-        //     of threads.
-        return (sr + vaddr) / 4;
+        return os_pageFrameLookup(vaddr, readOrWrite);
     }
     // physical memory is word-addressed for lack of byte-sized data type
     return vaddr/4;
 }
 
 int loadMemory(int vaddr) {
-    return *(memory + tlb(vaddr));
+    return *(memory + tlb(vaddr, 1));
 }
 
 void storeMemory(int vaddr, int data) {
-    *(memory + tlb(vaddr)) = data;
+    int tl;
+    tl = tlb(vaddr, 2);
+    *(memory + tl) = data;
 }
 
 // -----------------------------------------------------------------
@@ -4920,7 +5314,7 @@ void post_debug() {
     int i;
     if (debug_registers) {
         i = 0;
-
+        setColor(COLOR_GREEN);
         while (i < 32) {
             if (*(registers+i) != 0) {
                 print(binaryName);
@@ -4932,6 +5326,7 @@ void post_debug() {
             }
             i = i + 1;
         }
+        setColor(COLOR_RESET);
         println();
     }
 }
@@ -5096,19 +5491,8 @@ void copyBinaryToMemory() {
     }
 }
 
-void initRegisterPointers(int* process) {
-    registers = (int*)*(process + 4);
-    // initialize stack pointer
-    *(registers+REG_SP) = segment_size - 4;
-    // initialize global pointer
-    *(registers+REG_GP) = binaryLength;
-    // initialize heap/bump pointer (malloc)
-    *(registers+REG_K1) = *(registers+REG_GP);
-}
 
 void emulate(int argc, int *argv) {
-    int* process;
-
     print(selfieName);
     print((int*) ": this is selfie's mipster executing ");
     print(binaryName);
@@ -5118,31 +5502,9 @@ void emulate(int argc, int *argv) {
     println();
 
     resetInterpreter();
+    os_boot();
 
-    isEmulator        = 1;
-    segment_size      = 8 * 1024 * 1024;
-
-    readyQ   = os_createQueue();
-    blockedQ = os_createQueue();
-    zombieQ  = os_createQueue();
-    waitQ    = os_createQueue();
-
-    sr = os_kmalloc();
-    process = os_createProcess();
-    os_appendQueue(readyQ, process);
-
-    copyBinaryToMemory();
-    initRegisterPointers(process);
     //up_copyArguments(argc, argv);
-
-    if (debug_sm) {
-        print((int*) "[SM] current SP: ");
-        print(itoa(*(registers+REG_SP)+sr, string_buffer, 10, 10));
-        println();
-        print((int*) "--------------------------");
-        println();
-    }
-
     run();
 }
 
