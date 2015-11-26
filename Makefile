@@ -1,7 +1,7 @@
 CC			:= clang
 CC_OPT			:= -w -m32 -D'main(a, b)=main(int argc, char **argv)'
 EXEC			:= selfie
-MEM_SIZE		:= 32
+MEM_SIZE		:= 64
 RTS1			:= 2
 RTS2			:= 10
 RTS3			:= 100
@@ -14,6 +14,7 @@ clena: clean
 clan: clean
 clane: clean
 claen: clean
+cean: clean
 calen: clean
 clea: clean
 cclean: clean
@@ -47,5 +48,7 @@ clean:
 	rm -f $(EXEC)
 	rm -f out
 	rm -f $(TEST_BINARY)
-	rm -f *~
 	rm -f out.txt
+	rm -f *~
+	rm -f *.s
+
