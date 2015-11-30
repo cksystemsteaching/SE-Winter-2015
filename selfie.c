@@ -892,7 +892,7 @@ void printFreeList(){
 	curr = pfreeList;
 	print((int*)"freeList\n");
 	
-	while(curr != 0){
+	while((int)curr != 0){
 		print((int*)"content of pageFrame [");
 		print(itoa(i, string_buffer, 10, 0, 0));
 		print((int*)"] at position [");
@@ -3983,21 +3983,35 @@ void syscall_read() {
     int vaddr;
     int fd;
     int *buffer;
-    int size;
 
+	int pageFrameOffset;
+	int sizeToRead;
+	int sizeRead;
+	
     count = *(registers+REG_A2);
     vaddr = *(registers+REG_A1);
     fd    = *(registers+REG_A0);
-    buffer = tlb(vaddr);
+	sizeToRead = count;
+	sizeRead = 0;
 
-    size = read(fd, buffer, count);
-
-    *(registers+REG_V0) = size;
+	while(sizeToRead > 0){
+		pageFrameOffset = pageFrameSize - vaddr % pageFrameSize;
+		
+		buffer = tlb(vaddr);
+		
+		if(pageFrameOffset <= sizeToRead)
+			sizeRead = read(fd, buffer, pageFrameOffset);
+		else
+			sizeRead = read(fd, buffer, sizeToRead);
+		sizeToRead = sizeToRead - pageFrameOffset;
+		vaddr = vaddr + pageFrameOffset;
+	}
+    *(registers+REG_V0) = sizeRead;
 
     if (debug_read) {
         print(binaryName);
         print((int*) ": read ");
-        print(itoa(size, string_buffer, 10, 0, 0));
+        print(itoa(count, string_buffer, 10, 0, 0));
         print((int*) " bytes from file with descriptor ");
         print(itoa(fd, string_buffer, 10, 0, 0));
         print((int*) " into buffer at address ");
@@ -4031,22 +4045,36 @@ void syscall_write() {
     int vaddr;
     int fd;
     int *buffer;
+    
+    int pageFrameOffset;
+    int sizeToWrite;
+    int sizeWritten;
 //    syscall_lock();
+
 	size  = *(registers+REG_A2);
 	vaddr = *(registers+REG_A1);
 	fd    = *(registers+REG_A0);
+	sizeToWrite = size;
+	sizeWritten = 0;
 
-	buffer = tlb(vaddr);
+	while(sizeToWrite > 0){
+		pageFrameOffset = pageFrameSize - vaddr % pageFrameSize;
 
-	size = write(fd, buffer, size);
+		buffer = tlb(vaddr);
 
-	*(registers+REG_V0) = size;
-
+		if(pageFrameOffset <= sizeToWrite)
+			sizeWritten = write(fd, buffer, pageFrameOffset);
+		else
+			sizeWritten = write(fd, buffer, sizeToWrite);
+		vaddr = vaddr + pageFrameOffset;
+		sizeToWrite = sizeToWrite - pageFrameOffset;
+	}
+	*(registers+REG_V0) = sizeWritten;
 	
     if (debug_write) {
         print(binaryName);
         print((int*) ": wrote ");
-        print(itoa(size, string_buffer, 10, 0, 0));
+        print(itoa(sizeWritten, string_buffer, 10, 0, 0));
         print((int*) " bytes from buffer at address ");
         print(itoa((int) buffer, string_buffer, 16, 8, 0));
         print((int*) " into file with descriptor ");
@@ -4372,7 +4400,7 @@ void syscall_fork(){
 			if((int)child != 0){
 
 				copyRegisters(getRegisters(childProcess), registers);
-				copyPageTable(getPageTable(childProcess), currPageTable),
+				copyPageTable(getPageTable(childProcess), currPageTable);
 				
 				childRegisters = getRegisters(childProcess);
 				setPPID(childProcess, getProcessID(currProcess));
@@ -4955,8 +4983,8 @@ void pfree(int *page){
 int* tlb(int vaddr) {
 	int debug_tlb;
 	int paddr;
-	int pmemOffset;
-	int ptOffset;
+	int pageFrameOffset;
+	int pageTableOffset;
 	int *newPage;
 	
 	if(interpret==0)
@@ -4975,19 +5003,17 @@ int* tlb(int vaddr) {
 		exception_handler(EXCEPTION_ADDRESSERROR);
 	}
 
-	ptOffset = vaddr / pageSize;
-	pmemOffset = vaddr % pageSize;
+	pageTableOffset = vaddr / pageSize;
+	pageFrameOffset = vaddr % pageSize;
 
-	if((int)*(currPageTable+ptOffset) == 0){
+	if((int)*(currPageTable+pageTableOffset) == 0){
 		exception_handler(EXCEPTION_PAGEFAULT);
 		newPage = pmalloc();
-		*(currPageTable+ptOffset) = (int)newPage;
-//		printPageTable(currPageTable, getProcessID(currProcess));
+		*(currPageTable+pageTableOffset) = (int)newPage;
 
 		if(debug_tlb){
-		
-			print((int*)"(currPageTable+ptOffset): ");
-			print(itoa((int)(currPageTable+ptOffset), string_buffer, 10, 0, 0));
+			print((int*)"(currPageTable+pageTableOffset): ");
+			print(itoa((int)(currPageTable+pageTableOffset), string_buffer, 10, 0, 0));
 			println();
 			print((int*)"currPageTable: ");
 			print(itoa((int)currPageTable, string_buffer, 10, 0, 0));
@@ -5001,22 +5027,22 @@ int* tlb(int vaddr) {
 			print((int*)"paddr: ");
 			print(itoa(paddr, string_buffer, 10, 0, 0));
 			println();
-			print((int*)"pmemOffset: ");
-			print(itoa(pmemOffset, string_buffer, 10, 0, 0));
+			print((int*)"pageFrameOffset: ");
+			print(itoa(pageFrameOffset, string_buffer, 10, 0, 0));
 			println();
-			print((int*)"ptOffset: ");
-			print(itoa(ptOffset, string_buffer, 10, 0, 0));
+			print((int*)"pageTableOffset: ");
+			print(itoa(pageTableOffset, string_buffer, 10, 0, 0));
 			println();
 			print((int*)"allocate new page for process [");
 			print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
 			print((int*)"] at position [");
-			print(itoa(ptOffset, string_buffer, 10, 0, 0));
+			print(itoa(pageTableOffset, string_buffer, 10, 0, 0));
 			print((int*)"] in pageTable");
 			println();
 		}
 	}
 	
-	paddr = (int)*(currPageTable + ptOffset) + pmemOffset;
+	paddr = (int)*(currPageTable + pageTableOffset) + pageFrameOffset;
 
 	if (paddr % 4 != 0){
 		print((int*)"tlb 4: ");
