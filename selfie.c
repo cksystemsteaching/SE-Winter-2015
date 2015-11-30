@@ -771,7 +771,8 @@ void os_createProcess();
 int os_createFork();
 int os_palloc();
 void os_pfree();
-int* os_getListEntryFromOffset(int offset);
+int* os_getPageTableEntry(int offset);
+void os_setPageTableEntry(int offset, int value);
 int* os_createNewPageTable();
 // -----------------------------------------------------------------
 // ---------------------------- MEMORY -----------------------------
@@ -872,7 +873,8 @@ int debug_open = 0;
 int debug_malloc = 0;
 int debug_yield = 0;
 int debug_fork = 1;
-int debug_memory_wExit = 1;
+int debug_memory_wExit = 0;
+int debug_memory = 0;
 int debug_contextSwitch = 0;
 int debug_lock = 0;
 
@@ -4396,11 +4398,29 @@ void emitPutchar()
 
 int tlb(int vaddr)
 {
+    int* pAddr;
+    int pTOffset; //VPN
+    int pAOffset; //RPN
+    pTOffset = rightShift(leftShift(vaddr,10),22);
+    pAOffset = rightShift(leftShift(vaddr,20),20);
+    
     if (vaddr % 4 != 0)
         exception_handler(EXCEPTION_ADDRESSERROR);
     
+    pAddr = (int*)os_getPageTableEntry(pTOffset);
+
+    if(pAddr == 0){ //Page Fault no Entry
+        if(debug_memory){
+            print((int*)"Page Fault, No Page Entry, Palloc Now");
+            println();
+        }
+        os_setPageTableEntry(pTOffset,os_palloc());
+        pAddr = os_getPageTableEntry(pTOffset);
+    }
+    //Calculate Memory Offset
+    pAddr = memory - pAddr;
     // physical memory is word-addressed for lack of byte-sized data type
-    return (vaddr + os_segStart) / 4;
+    return pAddr + (pAOffset / 4);
 }
 
 int loadMemory(int vaddr)
@@ -5502,13 +5522,12 @@ void emulate(int argc, int* argv)
     pc = os_getListEntry(1, os_readyQ);
     registers = (int*)os_getListEntry(2, os_readyQ);
     os_pId = os_getListEntry(4, os_readyQ);
-    os_segStart = os_getListEntry(3,os_readyQ);
 
     copyBinaryToMemory();
     
     resetInterpreter();
     
-    *(registers + REG_SP) = os_bumpPointer - 4; // initialize stack pointer
+    *(registers + REG_SP) = os_vMemSize - 4; // initialize stack pointer
     
     *(registers + REG_GP) = binaryLength; // initialize global pointer
     
@@ -5882,10 +5901,10 @@ void os_prepare()
     //free list because it needs the same runtime
       
     os_pageFreePointer = memory;
-    *memory = (int)memory + count; //Set first entry to next free
+    *memory = memory + count; //Set first entry to next free
     
     while(count < memorySize/4){
-         *(memory + count) = (int)memory + (count + 1024);
+         *(memory + count) = memory + (count + 1024);
          count = count + 1024;
     }
     if(debug_memory_wExit){
@@ -5938,6 +5957,9 @@ void os_createProcess()
     int* newP;
     int* dRegister;
     int* pageTable;
+    int size;
+    int i;
+    size = os_vMemSize / (4 * 1024);
     pageTable = os_createNewPageTable();
     os_readyCtr = os_readyCtr + 1;
     if ((int)os_readyQ == 0) {
@@ -5956,19 +5978,28 @@ void os_createProcess()
     os_setListEntry(3, (int)pageTable, newP);
     os_setListEntry(4, os_pId, newP);
     os_setListEntry(5, 0, newP);
+    //Make sure PageTable is empty
+    i = 0;
+    while(i <= size){
+        os_setPageTableEntry(i,0);
+        i = i + 1;
+    }
+
 }
 
 int os_createFork()
 {
-    int segStart;
     int* dregisters;
     int i;
     int j;
     int* newPr;
     int par_pId;
     int vaddr;
+    int* pTable;
+    int size;
+    size = os_vMemSize / (4 * 1024);
+    pTable = os_createNewPageTable();
     par_pId = os_getListEntry(4, os_readyQ);
-    segStart = os_kmalloc(os_segSize);
     dregisters = malloc(32 * 4);
     //Copy Registers
     i = 0;
@@ -5990,9 +6021,15 @@ int os_createFork()
     os_pId = os_pId + 1;
     os_setListEntry(1, pc, newPr);
     os_setListEntry(2, (int)dregisters, newPr);
-    os_setListEntry(3, segStart, newPr);
+    os_setListEntry(3, (int)pTable, newPr);
     os_setListEntry(4, os_pId, newPr);
     os_setListEntry(5, par_pId, newPr);
+    //Zero Page Table
+    i = 0;
+    while(i <= size){
+        os_setPageTableEntry(i,0);
+        i = i + 1;
+    }
     return os_pId;
 }
 
@@ -6008,18 +6045,29 @@ void os_pfree(){
 
 }
 
-int* os_getListEntryFromOffset(int offset){
+int* os_getPageTableEntry(int offset){
    int* pTable;
    pTable = (int*)os_getListEntry(3,os_readyQ);
    pTable = (pTable + offset);
    return (int*)*pTable; 
 }
 
+void os_setPageTableEntry(int offset, int value){
+    int* pTable;
+    pTable = (int*)os_getListEntry(3,os_readyQ);
+    pTable = (int*)(pTable + offset);
+    *pTable = value;
+}
+
 int* os_createNewPageTable(){
+       if(debug_memory){
+        print((int*)"Create Page Table!");
+        println();
+       }
        int* pTable;
        int size;
        size = os_vMemSize / (4 * 1024);
-       pTable = malloc(size);
+       pTable = malloc(size * 4);
        return pTable;
 }
 
