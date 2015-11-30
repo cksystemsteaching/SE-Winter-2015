@@ -741,8 +741,7 @@ int coop;
 int switchAfterMInstructions;
 int switchIn;
 int* segTable;
-int stackSize = 10000000;
-int heapSize = 10000000;
+int* os_pageFreePointer; //Pointer to next free PMem
 
 int* os_readyQ;
 int* os_runQ;
@@ -755,6 +754,7 @@ int os_blockedCtr = 0;
 int os_readyCtr = 0;
 int os_lockProcess = 0;
 int os_pExited = 0;
+int os_vMemSize = 4194304; //4MB vMem
 //PID's of new Processes
 int os_pId;
 
@@ -775,7 +775,11 @@ int os_kmalloc(int size);
 void os_prepare();
 void os_createProcess();
 int os_createFork();
-
+int os_palloc();
+void os_pfree();
+int* os_getPageTableEntry(int offset);
+void os_setPageTableEntry(int offset, int value);
+int* os_createNewPageTable();
 // -----------------------------------------------------------------
 // ---------------------------- MEMORY -----------------------------
 // -----------------------------------------------------------------
@@ -875,7 +879,8 @@ int debug_open = 0;
 int debug_malloc = 0;
 int debug_yield = 0;
 int debug_fork = 1;
-
+int debug_memory_wExit = 0;
+int debug_memory = 0;
 int debug_contextSwitch = 0;
 int debug_lock = 0;
 
@@ -4045,7 +4050,7 @@ void syscall_unlock()
     if (os_blockedCtr == 1) {
         os_lock = 0;
     }
-    if (os_lockQ != 0) {
+    if ((int)os_lockQ != 0) {
         waitForChild = os_getListEntry(7, os_lockQ);
         listStart = os_lockQ;
         while (waitForChild != 0) {
@@ -4485,11 +4490,29 @@ void emitPutchar()
 
 int tlb(int vaddr)
 {
+    int* pAddr;
+    int pTOffset; //VPN
+    int pAOffset; //RPN
+    pTOffset = rightShift(leftShift(vaddr, 10), 22);
+    pAOffset = rightShift(leftShift(vaddr, 20), 20);
+
     if (vaddr % 4 != 0)
         exception_handler(EXCEPTION_ADDRESSERROR);
 
+    pAddr = (int*)os_getPageTableEntry(pTOffset);
+
+    if (pAddr == 0) { //Page Fault no Entry
+        if (debug_memory) {
+            print((int*)"Page Fault, No Page Entry, Palloc Now");
+            println();
+        }
+        os_setPageTableEntry(pTOffset, os_palloc());
+        pAddr = os_getPageTableEntry(pTOffset);
+    }
+    //Calculate Memory Offset
+    pAddr = memory - pAddr;
     // physical memory is word-addressed for lack of byte-sized data type
-    return (vaddr + os_segStart) / 4;
+    return pAddr + (pAOffset / 4);
 }
 
 int loadMemory(int vaddr)
@@ -5361,7 +5384,6 @@ void run()
 void up_push(int value)
 {
     int vaddr;
-
     // allocate space for one value on the stack
     *(registers + REG_SP) = *(registers + REG_SP) - 4;
 
@@ -5413,7 +5435,6 @@ int up_copyString(int* s)
 void up_copyArguments(int argc, int* argv)
 {
     int vaddr;
-
     up_push(argc);
 
     vaddr = up_malloc(argc * 4);
@@ -5593,25 +5614,25 @@ void emulate(int argc, int* argv)
 
     interpret = 1;
 
-    copyBinaryToMemory();
-
-    resetInterpreter();
-
     os_prepare();
 
     os_createProcess();
 
-    *(registers + REG_SP) = os_bumpPointer - 4; // initialize stack pointer
+    copyBinaryToMemory();
+
+    resetInterpreter();
+
+    pc = os_getListEntry(1, os_readyQ);
+    registers = (int*)os_getListEntry(2, os_readyQ);
+    os_pId = os_getListEntry(4, os_readyQ);
+
+    *(registers + REG_SP) = os_vMemSize - 4; // initialize stack pointer
 
     *(registers + REG_GP) = binaryLength; // initialize global pointer
 
     *(registers + REG_K1) = *(registers + REG_GP); // initialize bump pointer
 
     up_copyArguments(argc, argv);
-
-    pc = os_getListEntry(1, os_readyQ);
-    registers = (int*)os_getListEntry(2, os_readyQ);
-    os_pId = os_getListEntry(4, os_readyQ);
 
     run();
 
@@ -5858,12 +5879,11 @@ void os_removeNodeFromReadyQ(int* node)
     }
 }
 
-
 void os_moveNode(int* node, int* toList)
 {
     int* pr;
     os_removeNode(node);
-    if (toList == 0) {
+    if ((int)toList == 0) {
         toList = node;
         return;
     }
@@ -5881,7 +5901,7 @@ void os_move2readyQ(int* node)
     os_blockedCtr = os_blockedCtr - 1;
     os_removeNode(node);
     os_lockQ = os_getNextNode(os_lockQ);
-    if (os_readyQ == 0) {
+    if ((int)os_readyQ == 0) {
         os_readyQ = node;
         *os_readyQ = (int)os_readyQ;
         *(os_readyQ + 1) = (int)os_readyQ;
@@ -5901,7 +5921,7 @@ void os_move2lockQ(int* node)
     os_readyCtr = os_readyCtr - 1;
     os_removeNode(node);
     os_readyQ = os_getNextNode(os_readyQ);
-    if (os_lockQ == 0) {
+    if ((int)os_lockQ == 0) {
         os_lockQ = node;
         *(os_lockQ + 1) = (int)os_lockQ;
 
@@ -5944,7 +5964,7 @@ void os_contextSwitch()
     int pId;
     pId = os_getListEntry(4, os_readyQ);
     if (os_pExited == 0) {
-        printf("Set Values of [PID] %d to pc: %d\n",pId,pc);
+        printf("Set Values of [PID] %d to pc: %d\n", pId, pc);
         os_setListEntry(1, pc, os_readyQ);
         os_setListEntry(2, (int)registers, os_readyQ);
     }
@@ -5986,10 +6006,44 @@ int os_kmalloc(int size)
 
 void os_prepare()
 {
+    int count;
+    int* ptr;
+    int memEnd;
+    count = 1024;
     //Prepare Scheduler
-    os_readyQ = 0;
-    os_runQ = 0;
-    os_lockQ = 0;
+    os_readyQ = (int*)0;
+    os_runQ = (int*)0;
+    os_lockQ = (int*)0;
+
+    //We said in Class that we should
+    //iterate over the pmem and set the
+    //mem to zero, but if we have to iterate
+    //over the memory we can also create the
+    //free list because it needs the same runtime
+
+    os_pageFreePointer = memory;
+    *memory = memory + count; //Set first entry to next free
+
+    while (count < memorySize / 4) {
+        *(memory + count) = memory + (count + 1024);
+        count = count + 1024;
+    }
+    if (debug_memory_wExit) {
+        print((int*)"Printing Free List");
+        println();
+        print((int*)"[Address Start]");
+        print(itoa(os_pageFreePointer, string_buffer, 16, 0, 0));
+        println();
+        ptr = os_pageFreePointer;
+        while ((int)ptr != 0) {
+            ptr = (int*)*ptr;
+            print((int*)"[Address]");
+            print(itoa(ptr, string_buffer, 16, 0, 0));
+            println();
+        }
+        print((int*)"End Free List");
+        println();
+    }
 
     coop = 0;
     switchAfterMInstructions = 1;
@@ -6004,15 +6058,15 @@ void os_prepare()
 //		+----------------+
 //		|   prev 	     |
 //		+----------------+
-//		|   pc		     |
+//		|   pc		     | 1
 //		+----------------+
-//		|   reg	 	     |
+//		|   reg	 	     | 2
 //		+----------------+
-//		|   memSeg	     |
+//		|   pageTablePtr | 3
 //		+----------------+
-//      |   pid	     	 |
+//      |   pid	     	 | 4
 //		+----------------+
-//		|   parent id    | //If 0 OS is the parent else we are a child
+//		|   parent id    | 5 //If 0 OS is the parent else we are a child
 //		+----------------+
 //		|   has child    | //Check if there are any childs for this process, so we do not need a zombieQ
 //		+----------------+
@@ -6027,11 +6081,14 @@ void os_createProcess()
 {
     int* newP;
     int* dRegister;
-    int seg;
-    seg = os_kmalloc(os_segSize);
+    int* pageTable;
+    int size;
+    int i;
+    size = os_vMemSize / (4 * 1024);
+    pageTable = os_createNewPageTable();
     os_readyCtr = os_readyCtr + 1;
-    if (os_readyQ == 0) {
-        newP = os_createLList(7);
+    if ((int)os_readyQ == 0) {
+        newP = os_createLList(5);
         os_readyQ = newP;
         os_pId = 1;
     }
@@ -6042,52 +6099,112 @@ void os_createProcess()
     dRegister = malloc(32 * 4);
     os_setListEntry(1, 4, newP);
     os_setListEntry(2, (int)dRegister, newP);
-    os_setListEntry(3, seg, newP);
+    //Replace Segment with Pagetable
+    os_setListEntry(3, (int)pageTable, newP);
     os_setListEntry(4, os_pId, newP);
     os_setListEntry(5, 0, newP);
     os_setListEntry(6, 0, newP);
     os_setListEntry(7, 0, newP);
+    //Make sure PageTable is empty
+    i = 0;
+    while (i <= size) {
+        os_setPageTableEntry(i, 0);
+        i = i + 1;
+    }
 }
 
 int os_createFork()
 {
-    int segStart;
     int* dregisters;
     int i;
     int j;
     int childCntr;
     int* newPr;
     int vaddr;
+    int* pTable;
+    int size;
+    int par_pId;
     childCntr = os_getListEntry(6, os_readyQ);
     childCntr = childCntr + 1;
+
     os_setListEntry(6, childCntr, os_readyQ);
-    segStart = os_kmalloc(os_segSize);
+
+    size = os_vMemSize / (4 * 1024);
+    pTable = os_createNewPageTable();
+    par_pId = os_getListEntry(4, os_readyQ);
     dregisters = malloc(32 * 4);
     //Copy Registers
     i = 0;
     while (i < 32) {
         *(dregisters + i) = *(registers + i);
-        i++;
+        i = i + 1;
     }
 
     //Copy Memory
     i = 0;
-    j = segStart;
-    while (j < os_bumpPointer) {
-        vaddr = (segStart / 4) + i;
-        *(memory + vaddr) = loadMemory(i * 4);
-        i = i + 1;
-        j = j + 4;
-    }
+    //j = segStart;
+    //while (j < os_bumpPointer) {
+    //    vaddr = (segStart / 4) + i;
+    //    *(memory + vaddr) = loadMemory(i * 4);
+    //    i = i + 1;
+    //    j = j + 4;
+    //}
     newPr = os_addNodeToLList(5, os_readyQ);
     os_pId = os_pId + 1;
     os_setListEntry(1, pc, newPr);
     os_setListEntry(2, (int)dregisters, newPr);
-    os_setListEntry(3, segStart, newPr);
+    os_setListEntry(3, (int)pTable, newPr);
     os_setListEntry(4, os_pId, newPr);
     os_setListEntry(5, (int)os_readyQ, newPr);
     os_setListEntry(6, 0, newPr);
     os_setListEntry(7, 0, newPr);
 
+    //Zero Page Table
+    i = 0;
+    while (i <= size) {
+        os_setPageTableEntry(i, 0);
+        i = i + 1;
+    }
     return os_pId;
+}
+
+int os_palloc()
+{
+    int* nextFree;
+    nextFree = os_pageFreePointer;
+    os_pageFreePointer = (int*)*os_pageFreePointer;
+    return (int)nextFree;
+}
+
+void os_pfree()
+{
+}
+
+int* os_getPageTableEntry(int offset)
+{
+    int* pTable;
+    pTable = os_getListEntry(3, os_readyQ);
+    pTable = (pTable + offset);
+    return (int*)*pTable;
+}
+
+void os_setPageTableEntry(int offset, int value)
+{
+    int* pTable;
+    pTable = os_getListEntry(3, os_readyQ);
+    pTable = (int*)(pTable + offset);
+    *pTable = value;
+}
+
+int* os_createNewPageTable()
+{
+    if (debug_memory) {
+        print((int*)"Create Page Table!");
+        println();
+    }
+    int* pTable;
+    int size;
+    size = os_vMemSize / (4 * 1024);
+    pTable = malloc(size * 4);
+    return pTable;
 }
