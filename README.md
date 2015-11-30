@@ -106,3 +106,7 @@ clang -w -m32 -D'main(a, b)=main(int argc, char **argv)' -o selfie selfie.c
 After that, you can proceed with the same commands as for 32-bit Linux.
 
 The `-w` option suppresses warnings that can be ignored for now. The `-m32` option makes the compiler generate a 32-bit executable. Selfie only supports 32-bit architectures right now. The `-D` option is needed to bootstrap the main function declaration. The `char` data type is not available in C\* but required by `clang`.
+
+#### Makefile
+make all compile mipster
+make test compile with selfie and execute Assignment 5. (We print at the end the allocated Pages)

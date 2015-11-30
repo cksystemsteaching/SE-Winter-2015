@@ -755,6 +755,7 @@ int os_readyCtr = 0;
 int os_lockProcess = 0;
 int os_pExited = 0;
 int os_vMemSize = 4194304; //4MB vMem
+int pagesAllocatet = 0;
 //PID's of new Processes
 int os_pId;
 
@@ -878,7 +879,7 @@ int debug_write = 0;
 int debug_open = 0;
 int debug_malloc = 0;
 int debug_yield = 0;
-int debug_fork = 1;
+int debug_fork = 0;
 int debug_memory_wExit = 0;
 int debug_memory = 0;
 int debug_contextSwitch = 0;
@@ -4207,7 +4208,7 @@ void syscall_exit()
     int* node;
     int pId;
     int childCntr;
-    int parentNode;
+    int* parentNode;
     int pIsWaiting;
     int parentPId;
     parentNode = (int*)os_getListEntry(5, os_readyQ);
@@ -4226,7 +4227,7 @@ void syscall_exit()
 
     node = os_readyQ;
     os_removeNodeFromReadyQ(node);
-    if (parentNode != 0) {
+    if ((int)parentNode != 0) {
         if (debug_fork) {
             println();
             print((int*)"Child Process Exiting!");
@@ -4250,7 +4251,7 @@ void syscall_exit()
             }
         }
     }
-    if (os_readyQ == 0) {
+    if ((int)os_readyQ == 0) {
         halt = 1;
     }
     else {
@@ -4501,7 +4502,7 @@ int tlb(int vaddr)
 
     pAddr = (int*)os_getPageTableEntry(pTOffset);
 
-    if (pAddr == 0) { //Page Fault no Entry
+    if ((int)pAddr == 0) { //Page Fault no Entry
         if (debug_memory) {
             print((int*)"Page Fault, No Page Entry, Palloc Now");
             println();
@@ -4512,7 +4513,7 @@ int tlb(int vaddr)
     //Calculate Memory Offset
     pAddr = memory - pAddr;
     // physical memory is word-addressed for lack of byte-sized data type
-    return pAddr + (pAOffset / 4);
+    return (int)(pAddr + (pAOffset / 4));
 }
 
 int loadMemory(int vaddr)
@@ -5642,6 +5643,9 @@ void emulate(int argc, int* argv)
     println();
 
     print(selfieName);
+    print((int*)"Pages Allocated:");
+    print(itoa(pagesAllocatet,string_buffer,10,0,0));
+    println();
     print((int*)": profile: total,max(ratio%)@addr(line#),2max(ratio%)@addr(line#),3max(ratio%)@addr(line#)");
     println();
     printProfile((int*)": calls: ", calls, callsPerAddress);
@@ -5874,7 +5878,7 @@ void os_removeNodeFromReadyQ(int* node)
     *(next + 1) = (int)prev;
 
     if (next == node) {
-        os_readyQ = 0;
+        os_readyQ = (int*)0;
         return;
     }
 }
@@ -5964,7 +5968,6 @@ void os_contextSwitch()
     int pId;
     pId = os_getListEntry(4, os_readyQ);
     if (os_pExited == 0) {
-        printf("Set Values of [PID] %d to pc: %d\n", pId, pc);
         os_setListEntry(1, pc, os_readyQ);
         os_setListEntry(2, (int)registers, os_readyQ);
     }
@@ -6139,6 +6142,12 @@ int os_createFork()
         *(dregisters + i) = *(registers + i);
         i = i + 1;
     }
+    //Zero Page Table
+    i = 0;
+    while (i <= size) {
+        os_setPageTableEntry(i, 0);
+        i = i + 1;
+    }
 
     //Copy Memory
     i = 0;
@@ -6159,12 +6168,6 @@ int os_createFork()
     os_setListEntry(6, 0, newPr);
     os_setListEntry(7, 0, newPr);
 
-    //Zero Page Table
-    i = 0;
-    while (i <= size) {
-        os_setPageTableEntry(i, 0);
-        i = i + 1;
-    }
     return os_pId;
 }
 
@@ -6173,6 +6176,7 @@ int os_palloc()
     int* nextFree;
     nextFree = os_pageFreePointer;
     os_pageFreePointer = (int*)*os_pageFreePointer;
+    pagesAllocatet = pagesAllocatet + 1;
     return (int)nextFree;
 }
 
@@ -6198,12 +6202,12 @@ void os_setPageTableEntry(int offset, int value)
 
 int* os_createNewPageTable()
 {
+    int* pTable;
+    int size;
     if (debug_memory) {
         print((int*)"Create Page Table!");
         println();
     }
-    int* pTable;
-    int size;
     size = os_vMemSize / (4 * 1024);
     pTable = malloc(size * 4);
     return pTable;
