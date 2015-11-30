@@ -771,8 +771,8 @@ void os_createProcess();
 int os_createFork();
 int os_palloc();
 void os_pfree();
-int* os_getPageTableEntry(int offset);
-void os_setPageTableEntry(int offset, int value);
+int* os_getPageTableEntry(int* pTable, int offset);
+void os_setPageTableEntry(int* pTable, int offset, int value);
 int* os_createNewPageTable();
 // -----------------------------------------------------------------
 // ---------------------------- MEMORY -----------------------------
@@ -6045,16 +6045,12 @@ void os_pfree(){
 
 }
 
-int* os_getPageTableEntry(int offset){
-   int* pTable;
-   pTable = (int*)os_getListEntry(3,os_readyQ);
+int* os_getPageTableEntry(int* pTable, int offset){
    pTable = (pTable + offset);
    return (int*)*pTable; 
 }
 
-void os_setPageTableEntry(int offset, int value){
-    int* pTable;
-    pTable = (int*)os_getListEntry(3,os_readyQ);
+void os_setPageTableEntry(int* pTable, int offset, int value){
     pTable = (int*)(pTable + offset);
     *pTable = value;
 }
