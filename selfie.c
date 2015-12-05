@@ -573,7 +573,7 @@ int OP_BNE     = 5;
 int OP_ADDIU   = 9;
 int OP_LW      = 35;
 int OP_SW      = 43;
-    
+
 int *OPCODES; // array of strings representing MIPS opcodes
 
 int FCT_NOP     = 0;
@@ -719,6 +719,16 @@ int tlb(int vaddr);
 int  loadMemory(int vaddr);
 void storeMemory(int vaddr, int data);
 
+// -----------------------------------------------------------------
+// -------------------------- HYPERCALLS ---------------------------
+// -----------------------------------------------------------------
+
+void create_context();
+void switch_context();
+void delete_context();
+void map_page_in_context();
+void flush_page_in_context();
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int MEGABYTE = 1048576;
@@ -795,6 +805,9 @@ void printProfile(int *message, int total, int *counters);
 
 void disassemble();
 void emulate(int argc, int *argv);
+
+// ------------------------- Kernel --------------------------------
+void kernel_process(int argc, int* argv);
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -930,7 +943,7 @@ int* storeCharacter(int *s, int i, int c) {
     a = i / 4;
 
     *(s + a) = (*(s + a) - leftShift(loadCharacter(s, i), (i % 4) * 8)) + leftShift(c, (i % 4) * 8);
-    
+
     return s;
 }
 
@@ -955,7 +968,7 @@ void stringReverse(int *s) {
 
     while (i < j) {
         tmp = loadCharacter(s, i);
-        
+
         storeCharacter(s, i, loadCharacter(s, j));
         storeCharacter(s, j, tmp);
 
@@ -1001,7 +1014,7 @@ int atoi(int *s) {
             return -1;
 
         n = n * 10 + c;
-        
+
         i = i + 1;
 
         c = loadCharacter(s, i);
@@ -1134,7 +1147,7 @@ int* itoa(int n, int *s, int b, int a, int p) {
             i = i + 2;
         }
     }
-    
+
     storeCharacter(s, i, 0); // null terminated string
 
     stringReverse(s);
@@ -1198,7 +1211,7 @@ void printString(int *s) {
     putCharacter(CHAR_DOUBLEQUOTE);
 
     print(s);
-    
+
     putCharacter(CHAR_DOUBLEQUOTE);
 }
 
@@ -1238,7 +1251,7 @@ void syntaxErrorMessage(int *message) {
     printLineNumber((int*) "error", lineNumber);
 
     print(message);
-    
+
     println();
 }
 
@@ -1443,7 +1456,7 @@ int getSymbol() {
             storeCharacter(integer, i, character);
 
             i = i + 1;
-            
+
             getCharacter();
         }
 
@@ -1508,7 +1521,7 @@ int getSymbol() {
             storeCharacter(string, i, character);
 
             i = i + 1;
-            
+
             getCharacter();
         }
 
@@ -1618,7 +1631,7 @@ int getSymbol() {
         printLineNumber((int*) "error", lineNumber);
         print((int*) "found unknown character ");
         printCharacter(character);
-        
+
         println();
 
         exit(-1);
@@ -1654,7 +1667,7 @@ void createSymbolTableEntry(int whichTable, int *string, int line, int class, in
     setType(newEntry, type);
     setValue(newEntry, value);
     setReference(newEntry, reference);
-    
+
     // create entry at head of symbol table
     if (whichTable == GLOBAL_TABLE) {
         setRegister(newEntry, REG_GP);
@@ -1672,7 +1685,7 @@ int* getSymbolTableEntry(int *string, int class, int *symbol_table) {
         if (stringCompare(string, getString(symbol_table)))
             if (class == getClass(symbol_table))
                 return symbol_table;
-        
+
         // keep looking
         symbol_table = getNext(symbol_table);
     }
@@ -1687,7 +1700,7 @@ int isUndefinedProcedure(int *entry) {
         else if (getOpcode(loadBinary(getReference(entry))) == OP_JAL)
             return 1;
     }
-    
+
     return 0;
 }
 
@@ -2230,7 +2243,7 @@ int gr_call(int *procedure) {
 
         if (symbol == SYM_RPARENTHESIS) {
             getSymbol();
-            
+
             type = help_call_codegen(entry, procedure);
         } else {
             syntaxErrorSymbol(SYM_RPARENTHESIS);
@@ -2372,9 +2385,9 @@ int gr_factor() {
         emitIFormat(OP_ADDIU, REG_ZR, currentTemporary(), constant);
 
         getSymbol();
-    
+
         type = INT_T;
-        
+
     // string?
     } else if (symbol == SYM_STRING) {
         load_string();
@@ -2424,7 +2437,7 @@ int gr_term() {
         rtype = gr_factor();
 
         // assert: allocatedTemporaries == n + 2
-        
+
         if (ltype != rtype)
             typeWarning(ltype, rtype);
 
@@ -2470,7 +2483,7 @@ int gr_simpleExpression() {
 
         if (isINTMINConstant) {
             isINTMINConstant = 0;
-            
+
             // avoids 0-INT_MIN overflow when bootstrapping
             // even though 0-INT_MIN == INT_MIN
             sign = 0;
@@ -2608,7 +2621,7 @@ int gr_expression() {
             emitIFormat(OP_ADDIU, REG_ZR, currentTemporary(), 0);
         }
     }
-    
+
     // assert: allocatedTemporaries == n + 1
 
     return ltype;
@@ -2789,7 +2802,7 @@ void gr_return(int returnType) {
 
         // save value of expression in return register
         emitRFormat(OP_SPECIAL, REG_ZR, currentTemporary(), REG_V0, FCT_ADDU);
-        
+
         tfree(1);
     }
 
@@ -2956,7 +2969,7 @@ int gr_type() {
     int type;
 
     type = INT_T;
-    
+
     if (symbol == SYM_INT) {
         getSymbol();
 
@@ -3029,7 +3042,7 @@ void gr_initialization(int *name, int offset, int type) {
 
             if (isINTMINConstant) {
                 isINTMINConstant = 0;
-            
+
                 // avoids 0-INT_MIN overflow when bootstrapping
                 // even though 0-INT_MIN == INT_MIN
                 sign = 0;
@@ -3123,7 +3136,7 @@ void gr_procedure(int *procedure, int returnType) {
     // ( variable, variable ) { variable; variable; statement }
     } else if (symbol == SYM_LBRACE) {
         functionStart = binaryLength;
-        
+
         entry = getSymbolTableEntry(currentProcedureName, FUNCTION, global_symbol_table);
 
         if (entry == (int*) 0)
@@ -3541,7 +3554,7 @@ void emitInstruction(int instruction) {
         exit(-1);
     } else {
         storeInstruction(binaryLength, instruction);
-        
+
         binaryLength = binaryLength + 4;
     }
 }
@@ -3654,7 +3667,7 @@ void emitGlobalsStrings() {
 
 void emit() {
     int fd;
-    
+
     fd = open(binaryName, O_CREAT_WRONLY_TRUNC, S_IRUSR_IWUSR_IRGRP_IROTH);
 
     if (fd < 0) {
@@ -3712,7 +3725,7 @@ void load() {
 
     if (numberOfReadBytes == 4) {
         codeLength = *io_buffer;
-        
+
         // now read binary
         numberOfReadBytes = read(fd, binary, maxBinaryLength);
 
@@ -4013,6 +4026,31 @@ void storeMemory(int vaddr, int data) {
 
     *(memory + paddr) = data;
 }
+
+// -----------------------------------------------------------------
+// ------------------------- HYPERCALLS ----------------------------
+// -----------------------------------------------------------------
+
+void create_context() {
+
+}
+
+void switch_context() {
+
+}
+
+void delete_context() {
+
+}
+
+void map_page_in_context() {
+
+}
+
+void flush_page_in_context() {
+
+}
+
 
 // -----------------------------------------------------------------
 // ------------------------- INSTRUCTIONS --------------------------
@@ -4897,9 +4935,9 @@ int fixedPointRatio(int a, int b) {
     int r;
 
     // compute fixed point ratio r with 2 fractional digits
-    
+
     r = 0;
-    
+
     // multiply a/b with 100 but avoid overflow
 
     if (a <= INT_MAX / 100) {
@@ -4928,11 +4966,11 @@ int printCounters(int total, int *counters, int max) {
     a = addressWithMaxCounter(counters, max);
 
     print(itoa(*(counters + a / 4), string_buffer, 10, 0, 0));
-    
+
     print((int*) "(");
     print(itoa(fixedPointRatio(total, *(counters + a / 4)), string_buffer, 10, 0, 2));
     print((int*) "%)");
-    
+
     if (*(counters + a / 4) != 0) {
         print((int*) "@");
         print(itoa(a, string_buffer, 16, 8, 0));
@@ -4987,7 +5025,7 @@ void disassemble() {
     debug     = 1;
 
     copyBinaryToMemory();
-    
+
     resetInterpreter();
 
     run();
@@ -5007,6 +5045,7 @@ void emulate(int argc, int *argv) {
 
     interpret = 1;
 
+    // Load the operation system
     copyBinaryToMemory();
 
     resetInterpreter();
@@ -5035,13 +5074,54 @@ void emulate(int argc, int *argv) {
     printProfile((int*) ": stores: ", stores, storesPerAddress);
 }
 
+
+// -----------------------------------------------------------------
+// --------------------------- KERNEL ------------------------------
+// -----------------------------------------------------------------
+
+void create_process() {
+
+}
+
+void kernel_process(int argc, int* argv) {
+
+  print((int*) "Starting the kernel process");
+  println();
+
+  // Currently only user process is supported. However this can be increased easily.
+  if ( argc != 1 ) {
+    print((int*) "Error: Please provide a user program to execute ");
+    println();
+
+    exit(-1);
+  }
+
+  // Load the user program
+  binaryName = (int*) *argv;
+  load();
+
+  create_process();
+
+  copyBinaryToMemory();
+
+  *(registers + REG_GP) = binaryLength;
+  *(registers + REG_K1) = *(registers + REG_GP);
+
+  print((int*) "Kernel process is terminating ");
+  println();
+
+  exit(0);
+}
+
 // -----------------------------------------------------------------
 // ----------------------------- MAIN ------------------------------
 // -----------------------------------------------------------------
 
 int selfie(int argc, int* argv) {
-    if (argc < 2)
+
+    if (argc < 2) {
         return -1;
+    }
     else {
         while (argc >= 2) {
             if (stringCompare((int*) *argv, (int*) "-c")) {
@@ -5060,7 +5140,7 @@ int selfie(int argc, int* argv) {
 
                 if (binaryLength > 0)
                     emit();
-                else {                    
+                else {
                     print(selfieName);
                     print((int*) ": nothing to emit to output file ");
                     print(binaryName);
@@ -5133,6 +5213,15 @@ int selfie(int argc, int* argv) {
                 }
 
                 return 0;
+            } else if (stringCompare((int*) *argv, (int*) "-u"))  {
+
+              argc = argc - 1;
+              argv = argv + 1;
+
+              kernel_process(argc, argv);
+
+              return 0;
+
             } else if (stringCompare((int*) *argv, (int*) "-k")) {
                 print(selfieName);
                 print((int*) ": selfie -k size ... not yet implemented");
@@ -5151,10 +5240,10 @@ int main(int argc, int *argv) {
     initLibrary();
 
     initScanner();
-    
+
     initRegister();
     initDecoder();
-    
+
     initInterpreter();
 
     selfieName = (int*) *argv;
