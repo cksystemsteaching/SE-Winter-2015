@@ -654,8 +654,6 @@ void emitGlobalsStrings();
 void emit();
 void load();
 
-void insert_context(int context_id, int* reg, int* seg, int* prev, int* next);
-
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int maxBinaryLength = 131072; // 128KB
@@ -722,11 +720,36 @@ int  loadMemory(int vaddr);
 void storeMemory(int vaddr, int data);
 
 // -----------------------------------------------------------------
+// --------------------------- Context -----------------------------
+// -----------------------------------------------------------------
+
+int* context_insert(int contextId, int pc, int* registers, int* page_table, int* prev, int* next );
+int* context_find_context_by_context_id(int* contexts, int contextId);
+
+void context_setId(int* node, int contextId);
+void context_setPC(int* node, int pc);
+void context_setRegisters(int* node, int registers);
+void context_setPageTable(int* node, int page_table);
+void context_setPrev(int* node, int prev);
+void context_setNext(int* node, int next);
+
+int* context_getPC(int* node);
+int* context_getRegisters(int* node);
+int* context_getPageTable(int* node);
+
+// -----------------------------------------------------------------
+// -------------------- Emulator Helper Functions ------------------
+// -----------------------------------------------------------------
+
+void save_context();
+void restore_context(int contextId);
+
+// -----------------------------------------------------------------
 // -------------------------- HYPERCALLS ---------------------------
 // -----------------------------------------------------------------
 
-void create_context();
-void switch_context();
+int create_context();
+void switch_context(int contextId);
 void delete_context();
 void map_page_in_context();
 void flush_page_in_context();
@@ -734,6 +757,8 @@ void flush_page_in_context();
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int MEGABYTE = 1048576;
+
+int PAGE_TABLE_SIZE = 1700;
 
 // ------------------------ GLOBAL VARIABLES -----------------------
 
@@ -744,6 +769,10 @@ int *memory = (int*) 0; // mipster memory
 int *contexts = (int*) 0; // List of contexts
 
 int nextFreeContextId = 0;
+
+int* current_page_table;
+
+int* current_context;
 
 // ------------------------- INITIALIZATION ------------------------
 
@@ -811,9 +840,6 @@ void printProfile(int *message, int total, int *counters);
 
 void disassemble();
 void emulate(int argc, int *argv);
-
-// ------------------------- Kernel --------------------------------
-void kernel_process(int argc, int* argv);
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -3751,6 +3777,20 @@ void load() {
 }
 
 // -----------------------------------------------------------------
+// --------------------------- KERNEL ------------------------------
+// -----------------------------------------------------------------
+
+void kernel_process(int argc, int* argv);
+
+// -----------------------------------------------------------------
+// --------------------------- PROCESS -----------------------------
+// -----------------------------------------------------------------
+
+
+// ------------------------ GLOBAL VARIABLES -----------------------
+
+
+// -----------------------------------------------------------------
 // --------------------------- SYSCALLS ----------------------------
 // -----------------------------------------------------------------
 
@@ -4034,6 +4074,108 @@ void storeMemory(int vaddr, int data) {
 }
 
 // -----------------------------------------------------------------
+// --------------------------- Context -----------------------------
+// -----------------------------------------------------------------
+
+int* context_insert(int contextId, int pc, int* registers, int* page_table, int* prev, int* next ) {
+	int* node;
+
+	node = malloc(5 * 4);
+
+	context_setId(node, contextId);
+  context_setPC(node, pc);
+	context_setRegisters(node, (int) registers);
+	context_setPageTable(node, (int) page_table);
+	context_setPrev(node, (int) prev);
+	context_setNext(node, (int) next);
+
+	if ((int) prev != 0) {
+		context_setNext(prev, (int) node);
+	}
+	if ((int) next != 0) {
+		context_setPrev(next, (int) node);
+	}
+
+	return node;
+}
+
+int* context_find_context_by_context_id(int* contexts, int contextId) {
+  int* cursor;
+
+	cursor = contexts;
+
+	while ((int) cursor != 0) {
+		if (*(cursor + 0) == contextId) {
+			return cursor;
+		}
+
+		cursor = (int*) *(cursor + 4);
+	}
+
+	return (int*) 0;
+}
+
+void context_setId(int* node, int contextId) {
+  *node = contextId;
+}
+
+void context_setPC(int* node, int pc) {
+  *(node+1) = pc;
+}
+
+void context_setRegisters(int* node, int registers) {
+  *(node + 2) = registers;
+}
+
+void context_setPageTable(int* node, int pageTable) {
+  *(node + 3) = pageTable;
+}
+
+void context_setPrev(int* node, int prev) {
+  *(node + 4) = prev;
+}
+
+void context_setNext(int* node, int next) {
+  *(node + 5) = next;
+}
+
+int* context_getPC(int* node) {
+  return *(node + 1);
+}
+
+int* context_getRegisters(int* node) {
+  return *(node + 2);
+}
+
+int* context_getPageTable(int* node) {
+  return *(node + 3);
+}
+
+
+// -----------------------------------------------------------------
+// -------------------- Emulator Helper Functions ------------------
+// -----------------------------------------------------------------
+
+
+void save_context() {
+	context_setPC(current_context, pc);
+}
+
+void restore_context(int contextId) {
+
+  int* next_context;
+
+  next_context = context_find_context_by_context_id(contexts,contextId);
+
+  registers = context_getRegisters(next_context);
+  current_page_table = context_getPageTable(next_context);
+  pc = context_getPC(next_context);
+
+  current_context = next_context;
+
+}
+
+// -----------------------------------------------------------------
 // ------------------------- HYPERCALLS ----------------------------
 // -----------------------------------------------------------------
 
@@ -4041,15 +4183,25 @@ int create_context() {
 
   int* registers;
   int* page_table;
+  int pc;
 
   registers = malloc(32 * 4);
   page_table = (int*) malloc( PAGE_TABLE_SIZE * 4);
+  pc = 4;
 
-  insert_context(nextFreeContextId, registers, page_table, contexts, (int*) 0);
+  context_insert(nextFreeContextId, pc, registers, page_table, contexts, (int*) 0);
+
+  nextFreeContextId = nextFreeContextId + 1;
 
 }
 
-void switch_context() {
+void switch_context(int contextId) {
+
+  print((int*) " Switching context");
+  println();
+
+  save_context();
+  restore_context(contextId);
 
 }
 
@@ -4826,6 +4978,7 @@ void run() {
     halt = 0;
 
     while (halt == 0) {
+
         fetch();
         decode();
         execute();
@@ -5097,6 +5250,9 @@ void create_process() {
 
   int context;
 
+  print((int*) "Create new process");
+  println();
+
   // Create a new context for the process
   context = create_context();
 
@@ -5104,10 +5260,7 @@ void create_process() {
 
   // Load the user program
   load();
-
-
-  // Only one process is supported at the beginning
-  proc_list = insert_process(pc, context, proc_list, 0);
+  copyBinaryToMemory();
 
   *(registers + REG_GP) = binaryLength;
   *(registers + REG_K1) = *(registers + REG_GP);
@@ -5128,11 +5281,13 @@ void kernel_process(int argc, int* argv) {
   }
 
   binaryName = (int*) *argv;
-  create_process( (int*) *argv );
+  create_process();
 
+  run();
 
   print((int*) "Kernel process is terminating ");
   println();
+
 
   exit(0);
 }
