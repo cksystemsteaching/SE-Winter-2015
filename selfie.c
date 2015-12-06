@@ -654,6 +654,8 @@ void emitGlobalsStrings();
 void emit();
 void load();
 
+void insert_context(int context_id, int* reg, int* seg, int* prev, int* next);
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int maxBinaryLength = 131072; // 128KB
@@ -738,6 +740,10 @@ int MEGABYTE = 1048576;
 int memorySize = 0; // size of memory in bytes
 
 int *memory = (int*) 0; // mipster memory
+
+int *contexts = (int*) 0; // List of contexts
+
+int nextFreeContextId = 0;
 
 // ------------------------- INITIALIZATION ------------------------
 
@@ -4031,7 +4037,15 @@ void storeMemory(int vaddr, int data) {
 // ------------------------- HYPERCALLS ----------------------------
 // -----------------------------------------------------------------
 
-void create_context() {
+int create_context() {
+
+  int* registers;
+  int* page_table;
+
+  registers = malloc(32 * 4);
+  page_table = (int*) malloc( PAGE_TABLE_SIZE * 4);
+
+  insert_context(nextFreeContextId, registers, page_table, contexts, (int*) 0);
 
 }
 
@@ -5081,11 +5095,28 @@ void emulate(int argc, int *argv) {
 
 void create_process() {
 
+  int context;
+
+  // Create a new context for the process
+  context = create_context();
+
+  switch_context(context);
+
+  // Load the user program
+  load();
+
+
+  // Only one process is supported at the beginning
+  proc_list = insert_process(pc, context, proc_list, 0);
+
+  *(registers + REG_GP) = binaryLength;
+  *(registers + REG_K1) = *(registers + REG_GP);
+
 }
 
 void kernel_process(int argc, int* argv) {
 
-  print((int*) "Starting the kernel process");
+  print((int*) "Running the kernel process");
   println();
 
   // Currently only user process is supported. However this can be increased easily.
@@ -5096,16 +5127,9 @@ void kernel_process(int argc, int* argv) {
     exit(-1);
   }
 
-  // Load the user program
   binaryName = (int*) *argv;
-  load();
+  create_process( (int*) *argv );
 
-  create_process();
-
-  copyBinaryToMemory();
-
-  *(registers + REG_GP) = binaryLength;
-  *(registers + REG_K1) = *(registers + REG_GP);
 
   print((int*) "Kernel process is terminating ");
   println();
