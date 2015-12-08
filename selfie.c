@@ -3859,6 +3859,7 @@ void loadKernel() {
 // -----------------------------------------------------------------
 
 void kernel();
+int trap (int hypercallID, int arg);
 
 // -----------------------------------------------------------------
 // --------------------------- PROCESS -----------------------------
@@ -4117,6 +4118,24 @@ void emitPutchar() {
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
+void trap(int hypercallID, int arg) {
+	print((int*) "We trapped!\n");
+	print((int*) "Hypercall/ID: ");
+	print(itoa(hypercallID, string_buffer, 10, 0, 0));
+	print((int*) "Argument: ");
+	print(itoa(arg, string_buffer, 10, 0, 0));
+	println();
+
+	// save User Process context
+	// before unsetting kernel_mode again, save kernel context (kernel_pc, essentially)
+
+	kernel_mode = 1;
+
+	// write hypercallID to shared memory
+	// write arg to *(shared memory + 1)
+}
+
+
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -4156,10 +4175,10 @@ int tlb(int vaddr) {
     } else {
 
       // TODO: Call kernel and handle the page fault
+      // Call trap here (syscall id as arg)
 
       return (int) phy_page_addr + offset;
     }
-
 }
 
 int loadMemory(int vaddr) {
@@ -4326,7 +4345,11 @@ void delete_context() {
 }
 
 void map_page_in_context() {
-
+	// update user process page table
+	// read vaddr from *(sharedMemory + 1)
+	// *(user_proc_page_table + vaddr/PAGE_FRAME_SIZE) = free_list;
+	// free_list = *free_list == 0 ? free_list + PAGE_FRAME_SIZE/4 : (int*) *free_list;
+	// if (stack ptr of kernel - free_list < PAGE_FRAME_SIZE) => page replacement...
 }
 
 void flush_page_in_context() {
@@ -4851,6 +4874,7 @@ void op_lw() {
     if (interpret) {
         vaddr = *(registers+rs) + signExtend(immediate);
 
+	// only if != -1
         *(registers+rt) = loadMemory(vaddr);
 
         // keep track of number of loads
@@ -4943,6 +4967,7 @@ void op_sw() {
     if (interpret) {
         vaddr = *(registers+rs) + signExtend(immediate);
 
+	// only if != -1
         storeMemory(vaddr, *(registers+rt));
 
         // keep track of number of stores
@@ -5094,11 +5119,14 @@ void run() {
     halt = 0;
 
     while (halt == 0) {
+	if (kernel_mode)
+		// set PC to kernelPC
+		// set PC back to User_PC when leaving kernel mode!
 
         fetch();
         decode();
         execute();
-    }
+   }
 
     halt = 0;
 
@@ -5197,6 +5225,8 @@ void copyKernelBinaryToMemory() {  // Note: Make sure that we are running in KER
 
     a = a + 4;
   }
+
+  // set free_list
 
 }
 
@@ -5354,17 +5384,16 @@ void emulate(int argc, int *argv) {
     print((int*) "Finished copying kernel binary to memory");
     println();
 
-    // Leave the kernel mode because the OS is part of the virtual memory
-  //  kernel_mode = 0;
-
     // Load the operation system
-    //copyBinaryToMemory();
+    copyBinaryToMemory();
+
+    // Leave the kernel mode because the OS is part of the virtual memory
+    kernel_mode = 0;
 
     resetInterpreter();
 
+    up_copyArguments(argc, argv);
 
-
-    //up_copyArguments(argc, argv);
     run();
 
     print(selfieName);
