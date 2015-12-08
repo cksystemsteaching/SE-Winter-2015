@@ -7,6 +7,8 @@ RTS2			:= 10
 RTS3			:= 100
 TEST_INPUT		:= test.c
 TEST_BINARY		:= myprog.mips
+OS_BINARY		:= os.mips
+KERNEL_BINARY		:= kernel.mips
 
 all: test_binary
 
@@ -22,9 +24,12 @@ cclean: clean
 test_binary:
 	$(CC) $(CC_OPT) $(EXEC).c -o $(EXEC)
 	touch $(TEST_BINARY)
+	touch $(KERNEL_BINARY)
+	touch $(OS_BINARY)
 	./$(EXEC) -c $(TEST_INPUT) -o $(TEST_BINARY)
-	./$(EXEC) -c $(EXEC).c -o $(EXEC).mips -m $(MEM_SIZE) -u $(TEST_BINARY)
-
+	./$(EXEC) -c $(EXEC).c -o $(OS_BINARY)
+	./$(EXEC) -c $(EXEC).c -o $(KERNEL_BINARY)
+	./$(EXEC) -k $(KERNEL_BINARY) -l $(OS_BINARY) -m 32
 clean:
 	rm -f *.mips*
 	rm -f $(EXEC)

@@ -634,6 +634,7 @@ void initDecoder() {
 // -----------------------------------------------------------------
 
 int  loadBinary(int addr);
+int  loadKernelBinary(int addr);
 void storeBinary(int addr, int instruction);
 
 void storeInstruction(int addr, int instruction);
@@ -653,10 +654,13 @@ void emitGlobalsStrings();
 
 void emit();
 void load();
+void loadKernel();
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int maxBinaryLength = 131072; // 128KB
+
+int maxKernelBinaryLength = 131072; // 128KB
 
 // ------------------------ GLOBAL VARIABLES -----------------------
 
@@ -672,6 +676,15 @@ int *sourceLineNumber = (int*) 0; // source line number per emitted instruction
 
 int *assemblyName = (int*) 0; // name of assembly file
 int assemblyFD    = 0;        // file descriptor of open assembly file
+
+
+int *kernelBinary = (int*) 0; // binary of the kernel
+
+int kernelBinaryLength = 0; // length of kernel binary in bytes incl. globals & strings
+
+int kernelCodeLength = 0; // length of code portion of kernel binary in bytes
+
+int *kernelBinaryName   = (int*) 0; // file name of kernel binary
 
 // -----------------------------------------------------------------
 // --------------------------- SYSCALLS ----------------------------
@@ -701,6 +714,8 @@ int SYSCALL_READ   = 4003;
 int SYSCALL_WRITE  = 4004;
 int SYSCALL_OPEN   = 4005;
 int SYSCALL_MALLOC = 5001;
+
+int TRAP = 6001; // Switches to the kernel mode
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -738,6 +753,13 @@ int* context_getRegisters(int* node);
 int* context_getPageTable(int* node);
 
 // -----------------------------------------------------------------
+// ------------------------- PAGE TABLE ---------------------------
+// -----------------------------------------------------------------
+
+int* pagetable_getAddrAtIndex(int* pagetable, int idx);
+void pagetable_setAddrAtIndex(int* pagetable, int idx, int data);
+
+// -----------------------------------------------------------------
 // -------------------- Emulator Helper Functions ------------------
 // -----------------------------------------------------------------
 
@@ -773,6 +795,8 @@ int nextFreeContextId = 0;
 int* current_page_table;
 
 int* current_context;
+
+int kernel_mode = 1; // Set to true because we boot into the kernel mode
 
 // ------------------------- INITIALIZATION ------------------------
 
@@ -831,6 +855,7 @@ int  up_copyString(int *s);
 void up_copyArguments(int argc, int *argv);
 
 void copyBinaryToMemory();
+void copyKernelBinaryToMemory();
 
 int addressWithMaxCounter(int *counters, int max);
 int fixedPointRatio(int a, int b);
@@ -3570,6 +3595,10 @@ int loadBinary(int addr) {
     return *(binary + addr / 4);
 }
 
+int loadKernelBinary(int addr) {
+    return *(kernelBinary + addr / 4);
+}
+
 void storeBinary(int addr, int instruction) {
     *(binary + addr / 4) = instruction;
 }
@@ -3740,7 +3769,7 @@ void load() {
         exit(-1);
     }
 
-    binary       = malloc(maxBinaryLength);
+    binary = malloc(maxBinaryLength);
     binaryLength = 0;
 
     codeLength = 0;
@@ -3776,11 +3805,60 @@ void load() {
     exit(-1);
 }
 
+void loadKernel() {
+    int fd;
+    int numberOfReadBytes;
+
+    fd = open(kernelBinaryName, O_RDONLY, 0);
+
+    if (fd < 0) {
+        print(selfieName);
+        print((int*) ": could not open input file ");
+        print(kernelBinaryName);
+        println();
+
+        exit(-1);
+    }
+
+    kernelBinary = malloc(maxKernelBinaryLength);
+    kernelBinaryLength = 0;
+
+    kernelCodeLength = 0;
+
+    print(selfieName);
+    print((int*) ": loading code from input file ");
+    print(kernelBinaryName);
+    println();
+
+    // read code length first
+    numberOfReadBytes = read(fd, io_buffer, 4);
+
+    if (numberOfReadBytes == 4) {
+        kernelCodeLength = *io_buffer;
+
+        // now read binary
+        numberOfReadBytes = read(fd, kernelBinary, maxKernelBinaryLength);
+
+        if (numberOfReadBytes > 0) {
+            kernelBinaryLength = numberOfReadBytes;
+
+            return;
+        }
+    }
+
+    print(selfieName);
+    print((int*) ": failed to load code from input file ");
+    print(kernelBinaryName);
+    println();
+
+    exit(-1);
+}
+
 // -----------------------------------------------------------------
 // --------------------------- KERNEL ------------------------------
 // -----------------------------------------------------------------
 
-void kernel_process(int argc, int* argv);
+void kernel();
 
 // -----------------------------------------------------------------
 // --------------------------- PROCESS -----------------------------
@@ -4050,18 +4128,44 @@ void emitPutchar() {
 // -----------------------------------------------------------------
 
 int tlb(int vaddr) {
-    if (vaddr % 4 != 0)
-        exception_handler(EXCEPTION_ADDRESSERROR);
 
-    // physical memory is word-addressed for lack of byte-sized data type
-    return vaddr / 4;
+    int offset;
+  	int index;
+  	int phy_page_addr;
+
+    if (kernel_mode == 1)
+      return vaddr/4;
+
+    if (vaddr < 0) {
+      exception_handler(EXCEPTION_ADDRESSERROR);
+    }
+    if (vaddr >= 67108863) { // 0x3FFFFFF
+      exception_handler(EXCEPTION_ADDRESSERROR);
+    }
+    if (vaddr % 4 != 0) {
+      exception_handler(EXCEPTION_ADDRESSERROR);
+    }
+
+    offset = vaddr % 4096;
+    index = vaddr / 4096;
+
+    phy_page_addr = pagetable_getAddrAtIndex(current_page_table, index);
+
+    if ((int) phy_page_addr != (-1)) {
+      return (int) phy_page_addr + offset;
+    } else {
+
+      // TODO: Call kernel and handle the page fault
+
+      return (int) phy_page_addr + offset;
+    }
+
 }
 
 int loadMemory(int vaddr) {
     int paddr;
 
     paddr = tlb(vaddr);
-
     return *(memory + paddr);
 }
 
@@ -4151,9 +4255,21 @@ int* context_getPageTable(int* node) {
   return *(node + 3);
 }
 
+// -----------------------------------------------------------------
+// ------------------------- Page Table ----------------------------
+// -----------------------------------------------------------------
+
+int* pagetable_getAddrAtIndex(int* pagetable, int idx) {
+  return *(pagetable + idx);
+}
+
+void pagetable_setAddrAtIndex(int* pagetable, int idx, int data) {
+  *(pagetable + idx) = data;
+}
+
 
 // -----------------------------------------------------------------
-// -------------------- Emulator Helper Functions ------------------
+// -------------------- Kernel Helper Functions ------------------
 // -----------------------------------------------------------------
 
 
@@ -4987,7 +5103,7 @@ void run() {
     halt = 0;
 
     interpret = 0;
-    debug     = 0;
+    debug     = 1;
 }
 
 void up_push(int value) {
@@ -5068,6 +5184,20 @@ void copyBinaryToMemory() {
 
         a = a + 4;
     }
+}
+
+void copyKernelBinaryToMemory() {  // Note: Make sure that we are running in KERNEL MODE
+
+  int a;
+
+  a = 0;
+
+  while (a < kernelBinaryLength) {
+    storeMemory(a, loadKernelBinary(a));
+
+    a = a + 4;
+  }
+
 }
 
 int addressWithMaxCounter(int *counters, int max) {
@@ -5212,10 +5342,8 @@ void emulate(int argc, int *argv) {
 
     interpret = 1;
 
-    // Load the operation system
-    copyBinaryToMemory();
-
-    resetInterpreter();
+    // Load the kernel
+    copyKernelBinaryToMemory();
 
     *(registers+REG_SP) = memorySize - 4; // initialize stack pointer
 
@@ -5223,8 +5351,20 @@ void emulate(int argc, int *argv) {
 
     *(registers+REG_K1) = *(registers+REG_GP); // initialize bump pointer
 
-    up_copyArguments(argc, argv);
+    print((int*) "Finished copying kernel binary to memory");
+    println();
 
+    // Leave the kernel mode because the OS is part of the virtual memory
+  //  kernel_mode = 0;
+
+    // Load the operation system
+    //copyBinaryToMemory();
+
+    resetInterpreter();
+
+
+
+    //up_copyArguments(argc, argv);
     run();
 
     print(selfieName);
@@ -5246,50 +5386,15 @@ void emulate(int argc, int *argv) {
 // --------------------------- KERNEL ------------------------------
 // -----------------------------------------------------------------
 
-void create_process() {
 
-  int context;
+void kernel() {
 
-  print((int*) "Create new process");
+  print((int*) "Booting kernel ...");
   println();
 
-  // Create a new context for the process
-  context = create_context();
-
-  switch_context(context);
-
-  // Load the user program
-  load();
-  copyBinaryToMemory();
-
-  *(registers + REG_GP) = binaryLength;
-  *(registers + REG_K1) = *(registers + REG_GP);
-
-}
-
-void kernel_process(int argc, int* argv) {
-
-  print((int*) "Running the kernel process");
+  print((int*) "Exiting kernel ...");
   println();
 
-  // Currently only user process is supported. However this can be increased easily.
-  if ( argc != 1 ) {
-    print((int*) "Error: Please provide a user program to execute ");
-    println();
-
-    exit(-1);
-  }
-
-  binaryName = (int*) *argv;
-  create_process();
-
-  run();
-
-  print((int*) "Kernel process is terminating ");
-  println();
-
-
-  exit(0);
 }
 
 // -----------------------------------------------------------------
@@ -5298,8 +5403,11 @@ void kernel_process(int argc, int* argv) {
 
 int selfie(int argc, int* argv) {
 
-    if (argc < 2) {
-        return -1;
+    if (argc == 1) {
+        kernel();
+    }
+    else if (argc == 2) {
+      return -1;
     }
     else {
         while (argc >= 2) {
@@ -5392,27 +5500,19 @@ int selfie(int argc, int* argv) {
                 }
 
                 return 0;
-            } else if (stringCompare((int*) *argv, (int*) "-u"))  {
-
-              argc = argc - 1;
-              argv = argv + 1;
-
-              kernel_process(argc, argv);
-
-              return 0;
-
             } else if (stringCompare((int*) *argv, (int*) "-k")) {
-                print(selfieName);
-                print((int*) ": selfie -k size ... not yet implemented");
-                println();
+                kernelBinaryName = (int*) *(argv+1);
 
-                return 0;
+                argc = argc - 2;
+                argv = argv + 2;
+
+                loadKernel();
             } else
                 return -1;
         }
     }
 
-    return 0;
+    return 10;
 }
 
 int main(int argc, int *argv) {
