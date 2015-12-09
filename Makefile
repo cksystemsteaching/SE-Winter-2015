@@ -1,5 +1,5 @@
 CC			:= clang
-CC_OPT			:= -w -m32 -D'main(a, b)=main(int argc, char **argv)'
+CC_OPT			:= -w -m32 -undefined dynamic_lookup -D'main(a, b)=main(int argc, char **argv)'
 EXEC			:= selfie
 MEM_SIZE		:= 32
 RTS1			:= 2
