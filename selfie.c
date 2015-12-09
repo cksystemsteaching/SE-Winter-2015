@@ -664,6 +664,8 @@ int maxKernelBinaryLength = 131072; // 128KB
 
 int PAGE_FRAME_SIZE = 4096; // 4kB
 
+int SHARED_MEMORY_SIZE = 4096;
+
 // ------------------------ GLOBAL VARIABLES -----------------------
 
 int *binary = (int*) 0; // binary of emitted instructions
@@ -4158,7 +4160,7 @@ int tlb(int vaddr) {
   	int phy_page_addr;
 
     if (kernel_mode == 1)
-      return vaddr/4 + memory;
+      return vaddr/4 + memory + SHARED_MEMORY_SIZE/4;
 
     if (vaddr < 0) {
       exception_handler(EXCEPTION_ADDRESSERROR);
@@ -4170,8 +4172,8 @@ int tlb(int vaddr) {
       exception_handler(EXCEPTION_ADDRESSERROR);
     }
 
-    offset = vaddr % 4096;
-    index = vaddr / 4096;
+    offset = vaddr % PAGE_FRAME_SIZE;
+    index = vaddr / PAGE_FRAME_SIZE;
 
     phy_page_addr = pagetable_getAddrAtIndex(current_page_table, index);
 
@@ -5279,8 +5281,6 @@ void copyKernelBinaryToMemory() {  // Note: Make sure that we are running in KER
     a = a + 4;
   }
 
-  // set free_list
-
 }
 
 int addressWithMaxCounter(int *counters, int max) {
@@ -5443,10 +5443,12 @@ void emulate(int argc, int *argv) {
     // Leave the kernel mode because the OS is part of the virtual memory
     //kernel_mode = 0;
 
+    *memory = 7001; // Only for testing
+
     resetInterpreter();
 
     up_copyArguments(argc, argv);
-    *(registers+32) = PAGE_FAULT;
+
     run();
 
     print(selfieName);
@@ -5471,13 +5473,19 @@ void emulate(int argc, int *argv) {
 
 void kernel() {
 
+  int* shared_memory;
+
+  shared_memory = -SHARED_MEMORY_SIZE;
+
   print((int*) "Booting kernel ...");
   println();
 
-
   while(1) {
 
-
+    if( *shared_memory == PAGE_FAULT ) {
+      print( (int*) "Damn, there's a page fault");
+      println();
+    }
   }
 
   print((int*) "Exiting kernel ...");
