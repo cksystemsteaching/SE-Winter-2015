@@ -745,6 +745,9 @@ void syscall_open();
 void emitMalloc();
 void syscall_malloc();
 
+void emitAMalloc();
+void syscall_amalloc();
+
 void emitPutchar();
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
@@ -754,6 +757,7 @@ int SYSCALL_READ = 4003;
 int SYSCALL_WRITE = 4004;
 int SYSCALL_OPEN = 4005;
 int SYSCALL_MALLOC = 5001;
+int SYSCALL_AMALLOC = 5002;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -4174,9 +4178,9 @@ void syscall_open()
     }
 }
 
-void emitMalloc()
+void emitAMalloc()
 {
-    createSymbolTableEntry(GLOBAL_TABLE, (int*)"malloc", 0, FUNCTION, INTSTAR_T, 0, binaryLength);
+    createSymbolTableEntry(GLOBAL_TABLE, (int*)"amalloc", 0, FUNCTION, INTSTAR_T, 0, binaryLength);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
     emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
@@ -4193,12 +4197,11 @@ void emitMalloc()
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
-void syscall_malloc()
+void syscall_amalloc()
 {
     int size;
     int bump;
-    int flag; // if A1 == 1 -> Align Malloc 2 -> kernelArgs
-
+    int flag;
     size = *(registers + REG_A0);
     flag = *(registers + REG_A1);
 
@@ -4206,7 +4209,6 @@ void syscall_malloc()
         size = size + 4 - size % 4;
 
     bump = *(registers + REG_K1);
-
     if (bump + size >= *(registers + REG_SP))
         exception_handler(EXCEPTION_HEAPOVERFLOW);
     if (mc_currentPId == 0) {
@@ -4217,6 +4219,50 @@ void syscall_malloc()
             }
         }
     }
+    *(registers + REG_K1) = bump + size;
+    *(registers + REG_V0) = bump;
+
+    if (debug_malloc) {
+        print(binaryName);
+        print((int*)": malloc ");
+        print(itoa(size, string_buffer, 10, 0, 0));
+        print((int*)" bytes returning address ");
+        print(itoa(bump, string_buffer, 16, 8, 0));
+        println();
+    }
+}
+void emitMalloc()
+{
+    createSymbolTableEntry(GLOBAL_TABLE, (int*)"malloc", 0, FUNCTION, INTSTAR_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_MALLOC);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_malloc()
+{
+    int size;
+    int bump;
+
+    size = *(registers + REG_A0);
+
+    if (size % 4 != 0)
+        size = size + 4 - size % 4;
+
+    bump = *(registers + REG_K1);
+
+    if (bump + size >= *(registers + REG_SP))
+        exception_handler(EXCEPTION_HEAPOVERFLOW);
     *(registers + REG_K1) = bump + size;
     *(registers + REG_V0) = bump;
 
@@ -4327,6 +4373,9 @@ void fct_syscall()
         }
         else if (*(registers + REG_V0) == SYSCALL_MALLOC) {
             syscall_malloc();
+        }
+        else if (*(registers + REG_V0) == SYSCALL_AMALLOC) {
+            syscall_amalloc();
         }
         else if (*(registers + REG_V0) == MC_HYPERCALL_CREATECONTEXT) {
             mc_hyperCall_createContext();
