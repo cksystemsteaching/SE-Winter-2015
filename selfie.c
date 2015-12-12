@@ -65,6 +65,52 @@
 // Professor Niklaus Wirth from ETH Zurich.
 
 int *selfieName = (int*) 0;
+//@TEAM
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+// -----------------------------------------------------------------
+// ----- M I C R O K E R N E L =+= F O R W A R D I N G S -----------
+// -----------------------------------------------------------------
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+
+int mc_currentPId; //Current PID of running Process
+
+//=============================
+//hypercalls
+//We Allow only PID 0 to 
+//exec this calls, a another process 
+//run into a trap and exit
+//=============================
+
+void mc_emit_hyperCall_createContext();
+int mc_hyperCall_createContext();
+
+void mc_emit_hyperCall_switchContext();
+int mc_hyperCall_switchContext();
+
+void mc_emit_hyperCall_deleteContext();
+int mc_hyperCall_deleteContext();
+
+void mc_emit_hyperCall_mapPageInContext();
+int mc_hyperCall_mapPageInContext();
+
+void mc_emit_hyperCall_flushPageInContext();
+int mc_hyperCall_flushPageInContext();
+
+int MC_HYPERCALL_SWITCHCONTEXT = 6000;
+int MC_HYPERCALL_CREATECONTEXT = 6001;
+int MC_HYPERCALL_DELETECONTEXT = 6002;
+int MC_HYPERCALL_MAPPAGEINCONTEXT = 6003;
+int MC_HYPERCALL_FLUSHPAGEINCONTEXT = 6004;
+
+int *mc_kernel_context = (int*)0; //Our kernel has his own pointer.
+int *mc_currentPageTable = (int*)0;
+int mc_switchAfterMInstructions = 1;
+
+//==============================
+//Kernel Server Forwardings
+//==============================
+void mc_prepareKernelContext();
+int* mc_getPageTableEntry(int offset);
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -3328,7 +3374,11 @@ void compile() {
     emitOpen();
     emitMalloc();
     emitPutchar();
-
+    mc_emit_hyperCall_switchContext();
+    mc_emit_hyperCall_createContext();
+    mc_emit_hyperCall_deleteContext();
+    mc_emit_hyperCall_mapPageInContext();
+    mc_emit_hyperCall_flushPageInContext();
     // parser
     gr_cstar();
 
@@ -3991,11 +4041,28 @@ void emitPutchar() {
 // -----------------------------------------------------------------
 
 int tlb(int vaddr) {
+    int *pAddr;
+    int vpn;
+    int rpn; 
+    vpn = rightShift(vaddr,12); 
+    rpn = rightShift(leftShift(vaddr, 20), 20); 
+
     if (vaddr % 4 != 0)
         exception_handler(EXCEPTION_ADDRESSERROR);
 
+    pAddr = (int*)mc_getPageTableEntry(vpn);
+    if((int)pAddr == 0){
+        if(debug){
+            print(selfieName);
+            print((int*)" Page Fault, Try to Palloc Now!");
+            println();
+        }
+        //TODO Switch to PID 0 call PageFault
+    }
+    pAddr = memory - pAddr;
+   printf("vaddr: %0X\n pAddr: %0X \n vpn: %0X \n rpn: %0X\n memStart: %0X\n SP %0X\n tlb: %0X\n memEnd: %0X\n",vaddr,pAddr,vpn,rpn,memory, *(registers + REG_SP),(pAddr + (rpn / 4)),memory+memorySize /4);
     // physical memory is word-addressed for lack of byte-sized data type
-    return vaddr / 4;
+    return (int)(pAddr + (rpn / 4));
 }
 
 int loadMemory(int vaddr) {
@@ -4035,6 +4102,16 @@ void fct_syscall() {
             syscall_open();
         } else if (*(registers+REG_V0) == SYSCALL_MALLOC) {
             syscall_malloc();
+        } else if (*(registers+REG_V0) == MC_HYPERCALL_CREATECONTEXT) {
+            mc_hyperCall_createContext();
+        } else if (*(registers+REG_V0) == MC_HYPERCALL_SWITCHCONTEXT) {
+            mc_hyperCall_switchContext();
+        } else if (*(registers+REG_V0) == MC_HYPERCALL_DELETECONTEXT) {
+            mc_hyperCall_deleteContext();
+        } else if (*(registers+REG_V0) == MC_HYPERCALL_MAPPAGEINCONTEXT) {
+            mc_hyperCall_mapPageInContext();
+        } else if (*(registers+REG_V0) == MC_HYPERCALL_FLUSHPAGEINCONTEXT) {
+            mc_hyperCall_flushPageInContext();
         } else {
             exception_handler(EXCEPTION_UNKNOWNSYSCALL);
         }
@@ -5006,6 +5083,8 @@ void emulate(int argc, int *argv) {
     println();
 
     interpret = 1;
+    
+    mc_prepareKernelContext();    
 
     copyBinaryToMemory();
 
@@ -5167,4 +5246,172 @@ int main(int argc, int *argv) {
         print((int*) ": usage: selfie { -c source | -o binary | -s assembly | -l binary } [ -m size ... | -d size ... | -k size ... ] ");
         println();
     }
+}
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+// -----------------------------------------------------------------
+// --------------------- M I C R O K E R N E L ---------------------
+// -----------------------------------------------------------------
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+
+//==================================
+//Hypercall Implementation
+//==================================
+void mc_emit_hyperCall_createContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "createContext", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+
+    emitIFormat(OP_ADDIU, REG_SP, REG_A2, 0); 
+
+    emitIFormat(OP_ADDIU, REG_SP, REG_A1, 0); 
+
+    emitIFormat(OP_ADDIU, REG_SP, REG_A0, 0); 
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, MC_HYPERCALL_SWITCHCONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    // jump back to caller, return value is in REG_V0
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+int mc_hyperCall_createContext(){
+    if(mc_currentPId != 0){
+        //TODO Implement userMode Trap
+    }
+}
+
+void mc_emit_hyperCall_switchContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "switchContext", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_LW, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);//PC
+
+    emitIFormat(OP_LW, REG_SP, REG_A2, 0); //PageTable Address
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0); //register Pointer (register are allocatet completely in the micokernel
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0); //PID
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, MC_HYPERCALL_SWITCHCONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    // jump back to caller, return value is in REG_V0
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+int mc_hyperCall_switchContext(){
+    if(mc_currentPId != 0){
+        //TODO Implement userMode Trap
+    }
+}
+
+void mc_emit_hyperCall_deleteContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "deleteContext", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+
+    emitIFormat(OP_ADDIU, REG_SP, REG_A2, 0); 
+
+    emitIFormat(OP_ADDIU, REG_SP, REG_A1, 0); 
+
+    emitIFormat(OP_ADDIU, REG_SP, REG_A0, 0); 
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, MC_HYPERCALL_SWITCHCONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    // jump back to caller, return value is in REG_V0
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+int mc_hyperCall_deleteContext(){
+    if(mc_currentPId != 0){
+        //TODO Implement userMode Trap
+    }
+
+}
+
+void mc_emit_hyperCall_mapPageInContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "mapPageInContext", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+
+    emitIFormat(OP_ADDIU, REG_SP, REG_A2, 0); 
+
+    emitIFormat(OP_ADDIU, REG_SP, REG_A1, 0); 
+
+    emitIFormat(OP_ADDIU, REG_SP, REG_A0, 0); 
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, MC_HYPERCALL_SWITCHCONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    // jump back to caller, return value is in REG_V0
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+int mc_hyperCall_mapPageInContext(){
+    if(mc_currentPId != 0){
+        //TODO Implement userMode Trap
+    }
+
+}
+
+void mc_emit_hyperCall_flushPageInContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "flushPageInContext", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+
+    emitIFormat(OP_ADDIU, REG_SP, REG_A2, 0); 
+
+    emitIFormat(OP_ADDIU, REG_SP, REG_A1, 0); 
+
+    emitIFormat(OP_ADDIU, REG_SP, REG_A0, 0); 
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, MC_HYPERCALL_SWITCHCONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    // jump back to caller, return value is in REG_V0
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+int mc_hyperCall_flushPageInContext(){
+    if(mc_currentPId != 0){
+        //TODO Implement userMode Trap
+    }
+
+}
+
+//============================================
+//Kernel Server Preperations
+//NOTE: We Implement the server in it's own 
+//binary
+//We Assume that the binary that got loaded 
+//from selfie is the kernel.
+//============================================
+
+void mc_prepareKernelContext(){
+     int *lastEntry;
+     int pSize;
+     pSize = memorySize / 4096;
+     mc_kernel_context = malloc(4*4);
+     *mc_kernel_context = pc;                               //Programcounter
+     *(mc_kernel_context + 1) = (int)registers;             //registers
+     *(mc_kernel_context + 2) = (int)malloc(pSize);  //page table
+     *(mc_kernel_context + 3) = 0;                          //pID
+     mc_currentPageTable = (int*)*(mc_kernel_context + 2);
+     mc_currentPId = 0;
+     //The first page table entries for the kernel are manually set
+     *mc_currentPageTable = (int)memory;
+     *(mc_currentPageTable + 1) = *mc_currentPageTable + 1024;   
+     lastEntry = mc_currentPageTable + pSize;
+     lastEntry = lastEntry - 1;
+     *lastEntry = *(mc_currentPageTable + 1) + 1024;   
+}
+
+int* mc_getPageTableEntry(int offset){
+    int* pTable;
+    pTable = (mc_currentPageTable + offset);
+    return (int*)*pTable;
 }
