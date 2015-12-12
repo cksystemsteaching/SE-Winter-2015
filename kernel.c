@@ -319,7 +319,7 @@ int main(){
     initLibrary();
     args = malloc(4*4);
     *(args) = 12;
-    print("test");
+    print((int*)"test");
     if(*args == 12){
         putchar('a');
 
