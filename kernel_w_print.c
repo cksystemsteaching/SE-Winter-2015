@@ -12,7 +12,7 @@
 
 int *selfieName = (int*) 0;
 int *outputName = (int*) 0;
-int outputFD    = 1;
+int outputFD = 1;
 int *args;
 int *character_buffer;
 
@@ -228,11 +228,12 @@ int stringCompare(int *s, int *t) {
 
 void print(int *s) {
     int i;
-
+    int c;
     i = 0;
+        c = loadCharacter(s,0);
+        c = loadCharacter(s,0);
     while (loadCharacter(s, i) != 0) {
         putchar(loadCharacter(s, i));
-
         i = i + 1;
     }
 }
