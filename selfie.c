@@ -103,6 +103,7 @@ int MC_HYPERCALL_MAPPAGEINCONTEXT = 6003;
 int MC_HYPERCALL_FLUSHPAGEINCONTEXT = 6004;
 
 int *mc_kernel_context = (int*)0; //Our kernel has his own pointer.
+int *mc_kernel_argsAddr = (int*)0;
 int *mc_currentPageTable = (int*)0;
 int mc_switchAfterMInstructions = 1;
 
@@ -3998,7 +3999,14 @@ void syscall_malloc() {
 
     if (bump + size >= *(registers+REG_SP))
         exception_handler(EXCEPTION_HEAPOVERFLOW);
-
+   
+    if(mc_currentPId == 0){
+    if ((int)mc_kernel_argsAddr == 0){
+        printf("bump: %0X\n tlb: %0X\n",bump,tlb(bump));
+        mc_kernel_argsAddr = bump;
+        storeMemory(mc_kernel_argsAddr,12);
+    }
+}
     *(registers+REG_K1) = bump + size;
     *(registers+REG_V0) = bump;
 
@@ -4060,7 +4068,6 @@ int tlb(int vaddr) {
         //TODO Switch to PID 0 call PageFault
     }
     pAddr = memory - pAddr;
-   printf("vaddr: %0X\n pAddr: %0X \n vpn: %0X \n rpn: %0X\n memStart: %0X\n SP %0X\n tlb: %0X\n memEnd: %0X\n",vaddr,pAddr,vpn,rpn,memory, *(registers + REG_SP),(pAddr + (rpn / 4)),memory+memorySize /4);
     // physical memory is word-addressed for lack of byte-sized data type
     return (int)(pAddr + (rpn / 4));
 }
@@ -4077,7 +4084,6 @@ void storeMemory(int vaddr, int data) {
     int paddr;
 
     paddr = tlb(vaddr);
-
     *(memory + paddr) = data;
 }
 
