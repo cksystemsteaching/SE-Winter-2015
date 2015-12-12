@@ -230,9 +230,8 @@ void print(int *s) {
     int i;
 
     i = 0;
-
     while (loadCharacter(s, i) != 0) {
-        putCharacter(loadCharacter(s, i));
+        putchar(loadCharacter(s, i));
 
         i = i + 1;
     }
@@ -317,9 +316,9 @@ int loadCharacter(int *s, int i) {
 
 int main(){
     initLibrary();
-    args = malloc(4*4);
-    *(args) = 12;
-    print((int*)"test");
+    args = amalloc(4*4,2);
+    print((int*)"b");
+    println();
     if(*args == 12){
         putchar('a');
 

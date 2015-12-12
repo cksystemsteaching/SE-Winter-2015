@@ -3539,6 +3539,7 @@ void compile()
     emitWrite();
     emitOpen();
     emitMalloc();
+    emitAMalloc();
     emitPutchar();
     mc_emit_hyperCall_switchContext();
     mc_emit_hyperCall_createContext();
@@ -4191,7 +4192,7 @@ void emitAMalloc()
     emitIFormat(OP_LW, REG_SP, REG_A0, 0);
     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
-    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_MALLOC);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_AMALLOC);
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
 
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
@@ -4224,7 +4225,7 @@ void syscall_amalloc()
 
     if (debug_malloc) {
         print(binaryName);
-        print((int*)": malloc ");
+        print((int*)": amalloc ");
         print(itoa(size, string_buffer, 10, 0, 0));
         print((int*)" bytes returning address ");
         print(itoa(bump, string_buffer, 16, 8, 0));
@@ -4325,7 +4326,7 @@ int tlb(int vaddr)
         }
         //TODO Switch to PID 0 call PageFault
     }
-    pAddr = memory - pAddr;
+    pAddr = pAddr - memory;
     // physical memory is word-addressed for lack of byte-sized data type
     return (int)(pAddr + (rpn / 4));
 }
@@ -5758,10 +5759,10 @@ void mc_prepareKernelContext()
     mc_currentPId = 0;
     //The first page table entries for the kernel are manually set
     *mc_currentPageTable = (int)memory;
-    *(mc_currentPageTable + 1) = *mc_currentPageTable + 1024;
+    *(mc_currentPageTable + 1) = *mc_currentPageTable + 4096;
     lastEntry = mc_currentPageTable + pSize;
     lastEntry = lastEntry - 1;
-    *lastEntry = *(mc_currentPageTable + 1) + 1024;
+    *lastEntry = *(mc_currentPageTable + 1) + 4096;
 }
 
 int* mc_getPageTableEntry(int offset)
