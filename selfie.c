@@ -721,6 +721,10 @@ int SYSCALL_MALLOC = 5001;
 int TRAP = 6001; // Switches to the kernel mode
 
 int PAGE_FAULT  = 7001;
+int CTXT_SWITCH = 7002;
+int ADD_CTXT	= 7003;
+int DEL_CTXT	= 7004;
+int FLUSH_PAGE	= 7005;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -776,7 +780,7 @@ void restore_context(int contextId);
 // -----------------------------------------------------------------
 
 int create_context();
-void switch_context(int contextId);
+void switch_context();
 void delete_context();
 void map_page_in_context();
 void flush_page_in_context();
@@ -3866,6 +3870,11 @@ void loadKernel() {
 void kernel();
 int trap (int hypercallID, int arg);
 
+int* kernel_current_proc = (int*) 0;
+int* kernel_process_list = (int*) 0;
+
+int kernelPC = 0;
+
 // -----------------------------------------------------------------
 // --------------------------- PROCESS -----------------------------
 // -----------------------------------------------------------------
@@ -4214,7 +4223,7 @@ int* context_insert(int contextId, int pc, int* registers, int* page_table, int*
 	node = malloc(5 * 4);
 
 	context_setId(node, contextId);
-  context_setPC(node, pc);
+  	context_setPC(node, pc);
 	context_setRegisters(node, (int) registers);
 	context_setPageTable(node, (int) page_table);
 	context_setPrev(node, (int) prev);
@@ -4288,6 +4297,10 @@ int* context_getPrev(int* node) {
 
 int* context_getNext(int* node) {
   return *(node + 4);
+}
+
+int* context_getPID(int* node) {
+  return *(node + 5);
 }
 
 // -----------------------------------------------------------------
@@ -4368,19 +4381,28 @@ int create_context() {
   page_table = (int*) malloc( PAGE_TABLE_SIZE * 4);
   pc = 0;
 
-  context_insert(nextFreeContextId, pc, registers, page_table, context_lists, (int*) 0);
+  kernel_process_list = context_insert(nextFreeContextId, pc, registers, page_table, context_lists, (int*) 0);
+
+  kernel_current_proc = kernel_process_list;
 
   nextFreeContextId = nextFreeContextId + 1;
 
+  // communicate PID back to OS
 }
 
 void switch_context(int contextId) {
-  save_context();
-  restore_context(contextId);
+  int* next_proc;
+  int next_pid;
+
+  next_proc = context_getNext(kernel_current_proc);
+
+  kernel_current_proc = next_proc;
+
+  next_pid = context_getPID(kernel_current_proc);
 }
 
 void delete_context(int pid) {
-  context_lists = remove_context(context_lists, pid);
+  kernel_process_list = remove_context(kernel_process_list, pid);
 }
 
 void map_page_in_context(int pid, int vaddr, int paddr) {
@@ -4389,7 +4411,7 @@ void map_page_in_context(int pid, int vaddr, int paddr) {
   int* page_table;
   int index;
 
-  context = context_find_context_by_pid(context_lists,pid);
+  context = context_find_context_by_pid(kernel_process_list, pid);
   page_table = context_getPageTable(context);
 
   index = vaddr / PAGE_FRAME_SIZE;
@@ -4402,8 +4424,8 @@ void flush_page_in_context(int pid, int vaddr) {
   int* page_table;
   int index;
 
-  context = context_find_context_by_pid(context_lists,pid);
-  page_table = context_getPageTable(context);
+  context = context_find_context_by_pid (kernel_process_list, pid);
+  page_table = context_getPageTable (context);
 
   index = vaddr / PAGE_FRAME_SIZE;
 
@@ -5173,10 +5195,6 @@ void run() {
     halt = 0;
 
     while (halt == 0) {
-	if (kernel_mode)
-		// set PC to kernelPC
-		// set PC back to User_PC when leaving kernel mode!
-
         fetch();
         decode();
         execute();
@@ -5273,6 +5291,8 @@ void copyKernelBinaryToMemory() {  // Note: Make sure that we are running in KER
 
   int a;
 
+  kernel_mode = 1;
+
   a = 0;
 
   while (a < kernelBinaryLength) {
@@ -5280,6 +5300,8 @@ void copyKernelBinaryToMemory() {  // Note: Make sure that we are running in KER
 
     a = a + 4;
   }
+
+  kernel_mode = 0;
 
 }
 
@@ -5437,12 +5459,6 @@ void emulate(int argc, int *argv) {
     print((int*) "Finished copying kernel binary to memory");
     println();
 
-    // Load the operation system
-    //copyBinaryToMemory();
-
-    // Leave the kernel mode because the OS is part of the virtual memory
-    //kernel_mode = 0;
-
     *memory = 7001; // Only for testing
 
     resetInterpreter();
@@ -5477,15 +5493,38 @@ void kernel() {
 
   shared_memory = -SHARED_MEMORY_SIZE;
 
+  copyBinaryToMemory();
+
   print((int*) "Booting kernel ...");
   println();
 
-  while(1) {
+  while (1) {
 
-    if( *shared_memory == PAGE_FAULT ) {
-      print( (int*) "Damn, there's a page fault");
+    if (*shared_memory == PAGE_FAULT) {
+      print((int*) "Damn, there's a page fault");
       println();
+
+//      map_page_in_context();
+    } else if (*shared_memory == CTXT_SWITCH) {
+      print((int*) "Kernel switches context!\n");
+      println();
+
+//     switch_context();
+
+    } else if (*shared_memory == DEL_CTXT) {
+      print((int*) "Kernel deletes context!\n");
+//      delete_context();
+    } else if (*shared_memory == ADD_CTXT) {
+      print((int*) "Kernel creates context!\n");
+//      create_context();
+    } else if (*shared_memory == FLUSH_PAGE) {
+      print((int*) "Kernel flushes page!\n");
+//      flush_page_in_context();
+    } else {
+      print((int*) "Kernel error!\n");
     }
+
+    // switch to User Process
   }
 
   print((int*) "Exiting kernel ...");
