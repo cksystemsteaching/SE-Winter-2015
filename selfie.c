@@ -720,9 +720,9 @@ int SYSCALL_MALLOC = 5001;
 
 int TRAP = 6001; // Switches to the kernel mode
 
+int HYPERCALL_CREATE_CONTEXT = 7003;
+int HYPERCALL_SWITCH_CONTEXT = 7002;
 int PAGE_FAULT  = 7001;
-int CTXT_SWITCH = 7002;
-int ADD_CTXT	= 7003;
 int DEL_CTXT	= 7004;
 int FLUSH_PAGE	= 7005;
 
@@ -774,13 +774,17 @@ void pagetable_setAddrAtIndex(int* pagetable, int idx, int data);
 
 void save_context();
 void restore_context(int contextId);
+int create_kernel_context();
 
 // -----------------------------------------------------------------
 // -------------------------- HYPERCALLS ---------------------------
 // -----------------------------------------------------------------
 
-int create_context();
-void switch_context();
+void emitCreateContext();
+void emitSwitchContext();
+
+void hypercall_create_context();
+void hypercall_switch_context();
 void delete_context();
 void map_page_in_context();
 void flush_page_in_context();
@@ -3407,6 +3411,8 @@ void compile() {
     emitOpen();
     emitMalloc();
     emitPutchar();
+    emitCreateContext();
+    emitSwitchContext();
 
     // parser
     gr_cstar();
@@ -3867,7 +3873,7 @@ void loadKernel() {
 // --------------------------- KERNEL ------------------------------
 // -----------------------------------------------------------------
 
-void kernel();
+void kernel(int argc, int* argv);
 int trap (int hypercallID, int arg);
 
 int* kernel_current_proc = (int*) 0;
@@ -4168,8 +4174,9 @@ int tlb(int vaddr) {
   	int index;
   	int phy_page_addr;
 
-    if (kernel_mode == 1)
+    if (kernel_mode == 1) {
       return vaddr/4 + memory + SHARED_MEMORY_SIZE/4;
+    }
 
     if (vaddr < 0) {
       exception_handler(EXCEPTION_ADDRESSERROR);
@@ -4356,7 +4363,8 @@ void save_context() {
 void restore_context(int contextId) {
 
   int* next_context;
-
+  print("asdfsadf");
+  println();
   next_context = context_find_context_by_pid(context_lists,contextId);
 
   registers = context_getRegisters(next_context);
@@ -4367,38 +4375,90 @@ void restore_context(int contextId) {
 
 }
 
-// -----------------------------------------------------------------
-// ------------------------- HYPERCALLS ----------------------------
-// -----------------------------------------------------------------
-
-int create_context() {
+int create_kernel_context() {
 
   int* registers;
   int* page_table;
   int pc;
+  int pid;
 
   registers = malloc(32 * 4);
-  page_table = (int*) malloc( PAGE_TABLE_SIZE * 4);
+  page_table = (int*) 0;
   pc = 0;
 
   kernel_process_list = context_insert(nextFreeContextId, pc, registers, page_table, context_lists, (int*) 0);
-
   kernel_current_proc = kernel_process_list;
+
+  pid = nextFreeContextId;
 
   nextFreeContextId = nextFreeContextId + 1;
 
-  // communicate PID back to OS
+  return pid;
+
 }
 
-void switch_context(int contextId) {
-  int* next_proc;
-  int next_pid;
+// -----------------------------------------------------------------
+// ------------------------- HYPERCALLS ----------------------------
+// -----------------------------------------------------------------
 
-  next_proc = context_getNext(kernel_current_proc);
+void emitCreateContext() {
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "create_context", 0, FUNCTION, INTSTAR_T, 0, binaryLength);
 
-  kernel_current_proc = next_proc;
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
-  next_pid = context_getPID(kernel_current_proc);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_CREATE_CONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void emitSwitchContext() {
+
+  createSymbolTableEntry(GLOBAL_TABLE, (int*) "switch_context", 0, FUNCTION, INTSTAR_T, 0, binaryLength);
+
+  emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+  emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+  emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_SWITCH_CONTEXT);
+  emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+  emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+
+}
+
+void hypercall_create_context() {
+
+  int* new_registers;
+  int* new_page_table;
+  int new_pc;
+
+  new_registers = malloc(32 * 4);
+  new_page_table = (int*) malloc( PAGE_TABLE_SIZE * 4);
+  new_pc = 0;
+
+  kernel_process_list = context_insert(nextFreeContextId, pc, new_registers, new_page_table, kernel_process_list, (int*) 0);
+  *(registers+REG_V0) = nextFreeContextId;
+
+  nextFreeContextId = nextFreeContextId + 1;
+
+}
+
+
+void hypercall_switch_context() {
+
+  int cid;
+  int* context;
+
+  print("asdfasdf");
+  println();
+
+  cid  = *(registers+REG_A0);
+
+  save_context();
+  restore_context(cid);
+
+
 }
 
 void delete_context(int pid) {
@@ -4454,6 +4514,10 @@ void fct_syscall() {
             syscall_open();
         } else if (*(registers+REG_V0) == SYSCALL_MALLOC) {
             syscall_malloc();
+        } else if (*(registers+REG_V0) == HYPERCALL_CREATE_CONTEXT) {
+            hypercall_create_context();
+        } else if (*(registers+REG_V0) == HYPERCALL_SWITCH_CONTEXT) {
+            hypercall_switch_context();
         } else {
             exception_handler(EXCEPTION_UNKNOWNSYSCALL);
         }
@@ -5265,7 +5329,6 @@ void up_copyArguments(int argc, int *argv) {
     up_push(vaddr);
 
     while (argc > 0) {
-
         storeMemory(vaddr, up_copyString((int*) *argv));
 
         vaddr = vaddr + 4;
@@ -5291,8 +5354,6 @@ void copyKernelBinaryToMemory() {  // Note: Make sure that we are running in KER
 
   int a;
 
-  kernel_mode = 1;
-
   a = 0;
 
   while (a < kernelBinaryLength) {
@@ -5301,7 +5362,8 @@ void copyKernelBinaryToMemory() {  // Note: Make sure that we are running in KER
     a = a + 4;
   }
 
-  kernel_mode = 0;
+  print((int*) "Finished copying kernel binary to memory");
+  println();
 
 }
 
@@ -5437,6 +5499,9 @@ void disassemble() {
 }
 
 void emulate(int argc, int *argv) {
+
+    int pid;
+
     print(selfieName);
     print((int*) ": this is selfie's mipster executing ");
     print(binaryName);
@@ -5450,16 +5515,14 @@ void emulate(int argc, int *argv) {
     // Load the kernel
     copyKernelBinaryToMemory();
 
+    // Create a context for the kernel Process
+    pid = create_kernel_context();
+
     *(registers+REG_SP) = memorySize - 4; // initialize stack pointer
 
     *(registers+REG_GP) = binaryLength; // initialize global pointer
 
     *(registers+REG_K1) = *(registers+REG_GP); // initialize bump pointer
-
-    print((int*) "Finished copying kernel binary to memory");
-    println();
-
-    *memory = 7001; // Only for testing
 
     resetInterpreter();
 
@@ -5487,48 +5550,85 @@ void emulate(int argc, int *argv) {
 // -----------------------------------------------------------------
 
 
-void kernel() {
+void kernel(int argc, int* argv) {
 
   int* shared_memory;
+  int pid;
 
-  shared_memory = -SHARED_MEMORY_SIZE;
+  interpret = 1;
 
-  copyBinaryToMemory();
-
-  print((int*) "Booting kernel ...");
+  print( (int*) "Loading kernel");
   println();
 
-  while (1) {
+  kernel_mode = 1;
 
-    if (*shared_memory == PAGE_FAULT) {
-      print((int*) "Damn, there's a page fault");
-      println();
+  // Load the kernel
+  copyKernelBinaryToMemory();
+
+  // Create a context for the kernel Process
+  pid = create_kernel_context();
+
+  print(itoa(pid,string_buffer,10,0,0));
+  println();
+
+  *(registers+REG_SP) = memorySize - 4; // initialize stack pointer
+
+  *(registers+REG_GP) = binaryLength; // initialize global pointer
+
+  *(registers+REG_K1) = *(registers+REG_GP); // initialize bump pointer
+
+  resetInterpreter();
+
+  up_copyArguments(argc, argv);
+
+  debug = 1;
+
+  run();
+
+
+  //shared_memory = -SHARED_MEMORY_SIZE;
+
+  //print((int*) "Booting kernel ...");
+  //println();
+
+  //copyBinaryToMemory();
+
+  //print((int*) "asdfasd ...");
+  //println();
+
+  //pid = create_context();
+
+  //switch_context(pid);
+
+
+//  while (1) {
+
+//    if (*shared_memory == PAGE_FAULT) {
+      //print((int*) "Damn, there's a page fault");
+      //println();
 
 //      map_page_in_context();
-    } else if (*shared_memory == CTXT_SWITCH) {
-      print((int*) "Kernel switches context!\n");
-      println();
+//    } else if (*shared_memory == HYPERCALL_SWITCH_CONTEXT) {
+      //print((int*) "Kernel switches context!\n");
+      //println();
 
 //     switch_context();
 
-    } else if (*shared_memory == DEL_CTXT) {
-      print((int*) "Kernel deletes context!\n");
+//    } else if (*shared_memory == DEL_CTXT) {
+      //print((int*) "Kernel deletes context!\n");
 //      delete_context();
-    } else if (*shared_memory == ADD_CTXT) {
-      print((int*) "Kernel creates context!\n");
-//      create_context();
-    } else if (*shared_memory == FLUSH_PAGE) {
-      print((int*) "Kernel flushes page!\n");
+//    } else if (*shared_memory == FLUSH_PAGE) {
+      //print((int*) "Kernel flushes page!\n");
 //      flush_page_in_context();
-    } else {
-      print((int*) "Kernel error!\n");
-    }
+//    } else {
+      //print((int*) "Kernel error!\n");
+//    }
 
     // switch to User Process
-  }
+//  }
 
-  print((int*) "Exiting kernel ...");
-  println();
+//  print((int*) "Exiting kernel ...");
+//  println();
 
 }
 
@@ -5538,10 +5638,7 @@ void kernel() {
 
 int selfie(int argc, int* argv) {
 
-    if (argc == 0) {
-        kernel();
-    }
-    else if (argc == 1) {
+    if (argc <= 1) {
       return -1;
     }
     else {
@@ -5637,11 +5734,14 @@ int selfie(int argc, int* argv) {
                 return 0;
             } else if (stringCompare((int*) *argv, (int*) "-k")) {
                 kernelBinaryName = (int*) *(argv+1);
+                initMemory(128 * MEGABYTE);
 
                 argc = argc - 2;
                 argv = argv + 2;
 
                 loadKernel();
+
+                kernel(argc, argv);
             } else
                 return -1;
         }
@@ -5651,6 +5751,7 @@ int selfie(int argc, int* argv) {
 }
 
 int main(int argc, int *argv) {
+
     initLibrary();
 
     initScanner();
@@ -5659,6 +5760,12 @@ int main(int argc, int *argv) {
     initDecoder();
 
     initInterpreter();
+
+    print((int*)"Hier");
+    println();
+
+    print(itoa(argc,string_buffer,10,0,0));
+    println();
 
     selfieName = (int*) *argv;
 

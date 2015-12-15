@@ -27,9 +27,9 @@ test_binary:
 	touch $(KERNEL_BINARY)
 	touch $(OS_BINARY)
 	./$(EXEC) -c $(TEST_INPUT) -o $(TEST_BINARY)
-	./$(EXEC) -c $(EXEC).c -o $(OS_BINARY)
 	./$(EXEC) -c $(EXEC).c -o $(KERNEL_BINARY)
-	./$(EXEC) -k $(KERNEL_BINARY) -l $(OS_BINARY) -m 32
+	./$(EXEC) -c $(EXEC).c -o $(OS_BINARY)
+	./$(EXEC) -k $(KERNEL_BINARY) asdf -l $(TEST_BINARY) -m 32
 clean:
 	rm -f *.mips*
 	rm -f $(EXEC)
