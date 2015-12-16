@@ -673,6 +673,7 @@ int *sourceLineNumber = (int*) 0; // source line number per emitted instruction
 int *assemblyName = (int*) 0; // name of assembly file
 int assemblyFD    = 0;        // file descriptor of open assembly file
 
+
 // -----------------------------------------------------------------
 // --------------------------- SYSCALLS ----------------------------
 // -----------------------------------------------------------------
@@ -701,6 +702,17 @@ int SYSCALL_READ   = 4003;
 int SYSCALL_WRITE  = 4004;
 int SYSCALL_OPEN   = 4005;
 int SYSCALL_MALLOC = 5001;
+
+// -----------------------------------------------------------------
+// -------------------------- HYPERCALLS ---------------------------
+// -----------------------------------------------------------------
+
+void emitSwitch_context();
+void hypercall_switch_context();
+
+// ------------------------ GLOBAL CONSTANTS -----------------------
+
+int HYPERCALL_SWITCH_CONTEXT   = 6001;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -741,6 +753,40 @@ void initMemory(int bytes) {
 
     memory = malloc(memorySize);
 }
+
+// -----------------------------------------------------------------
+// ---------------------- PROCESS MANAGEMENT -----------------------
+// -----------------------------------------------------------------
+
+// ------------------------ GLOBAL CONSTANTS -----------------------
+
+int NROFPROCESSES = 100;
+
+// ------------------------ GLOBAL VARIABLES -----------------------
+
+int* processTable = (int*) 0;
+int* nextFreeProcess;
+int OSPid;
+int currentProcessPid;
+
+// ------------------------- INITIALIZATION ------------------------
+
+void initProcessTable() {
+	int i;
+
+    processTable = malloc(NROFPROCESSES * 3 * 4);
+	nextFreeProcess = processTable;
+	
+	i = 0;
+
+	while (i < 3 * NROFPROCESSES) {
+		*(processTable + i) = i + 3;
+		i = i + 3;
+	}
+
+	*(processTable + i - 3) = 0;
+}
+
 
 // -----------------------------------------------------------------
 // ------------------------- INSTRUCTIONS --------------------------
@@ -3328,6 +3374,7 @@ void compile() {
     emitOpen();
     emitMalloc();
     emitPutchar();
+    emitSwitch_context();
 
     // parser
     gr_cstar();
@@ -3980,6 +4027,69 @@ void emitPutchar() {
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
+// -----------------------------------------------------------------
+// -------------------------- HYPERCALLS ---------------------------
+// -----------------------------------------------------------------
+
+void switchToProcess (int pid) {
+	// save
+	*(processTable + currentProcessPid * 3) = pc;
+
+	// restore
+	pc = *(processTable + pid * 3);
+	registers = (int*) *(processTable + pid * 3 + 1);
+	
+	currentProcessPid = pid;
+}
+
+void hypercall_switch_context() {
+	int pid;
+
+	if (OSPid == currentProcessPid) {
+		pid = *(registers + REG_A0);
+
+		switchToProcess(pid);
+	}
+}
+
+void emitSwitch_context() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "switch_context", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    
+	emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_SWITCH_CONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+// -----------------------------------------------------------------
+// ----------------------------   O S   ----------------------------
+// -----------------------------------------------------------------
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+
+int allocateProcess() {
+	int newPid;
+
+	if (*nextFreeProcess == 0) {
+		// TODO: kill user process -> keep second counter in OS!
+		exit(-1); //if still here, shut down machine
+	}
+
+	newPid = *nextFreeProcess / 3;
+	nextFreeProcess = (int*) *(processTable + *nextFreeProcess);
+
+	return newPid;
+}
+
+
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -4035,6 +4145,8 @@ void fct_syscall() {
             syscall_open();
         } else if (*(registers+REG_V0) == SYSCALL_MALLOC) {
             syscall_malloc();
+        } else if (*(registers+REG_V0) == HYPERCALL_SWITCH_CONTEXT) {
+            hypercall_switch_context();
         } else {
             exception_handler(EXCEPTION_UNKNOWNSYSCALL);
         }
@@ -4997,6 +5109,7 @@ void disassemble() {
 }
 
 void emulate(int argc, int *argv) {
+	int* nameOfFirstProcess;
     print(selfieName);
     print((int*) ": this is selfie's mipster executing ");
     print(binaryName);
@@ -5007,6 +5120,16 @@ void emulate(int argc, int *argv) {
 
     interpret = 1;
 
+	initProcessTable();
+
+	// 1. create context0 for OS-process
+	OSPid = allocateProcess();
+	*(processTable + OSPid * 3) = 0;
+	*(processTable + OSPid * 3 + 1) = (int) registers;
+	*(processTable + OSPid * 3 + 2) = 0;
+
+	currentProcessPid = OSPid;
+	
     copyBinaryToMemory();
 
     resetInterpreter();
@@ -5040,9 +5163,17 @@ void emulate(int argc, int *argv) {
 // -----------------------------------------------------------------
 
 int selfie(int argc, int* argv) {
-    if (argc < 2)
+	if (argc == 0) {    
+		print(selfieName);
+        print((int*) ": loading kernel :-D");
+        println();
+
+		//OSProcess();
+
+        return 0;
+	} else if (argc < 2) {
         return -1;
-    else {
+	} else {
         while (argc >= 2) {
             if (stringCompare((int*) *argv, (int*) "-c")) {
                 sourceName = (int*) *(argv+1);
@@ -5133,12 +5264,6 @@ int selfie(int argc, int* argv) {
                 }
 
                 return 0;
-            } else if (stringCompare((int*) *argv, (int*) "-k")) {
-                print(selfieName);
-                print((int*) ": selfie -k size ... not yet implemented");
-                println();
-
-                return 0;
             } else
                 return -1;
         }
@@ -5164,7 +5289,7 @@ int main(int argc, int *argv) {
 
     if (selfie(argc, (int*) argv) != 0) {
         print(selfieName);
-        print((int*) ": usage: selfie { -c source | -o binary | -s assembly | -l binary } [ -m size ... | -d size ... | -k size ... ] ");
+        print((int*) ": usage: selfie { -c source | -o binary | -s assembly | -l binary } [ -m size ... | -d size ... ] ");
         println();
     }
 }
