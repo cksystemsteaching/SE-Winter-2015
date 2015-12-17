@@ -1,5 +1,5 @@
-CC			:= clang
-CC_OPT			:= -w -m32 -g -undefined dynamic_lookup -D'main(a, b)=main(int argc, char **argv)'
+CC			:= gcc
+CC_OPT			:= -w -m32 -Wl,--unresolved-symbols=ignore-in-object-files -D'main(a, b)=main(int argc, char **argv)'
 EXEC			:= selfie
 MEM_SIZE		:= 32
 RTS1			:= 2
@@ -35,7 +35,7 @@ test_binary:
 	./$(EXEC) -k 64 $(KERNEL_BINARY) ./$(EXEC) -l $(OS_BINARY) -os 32 -m 16 $(TEST_BINARY)
 
 debug:
-		ggdb --args ./$(EXEC) -k 64 $(KERNEL_BINARY) ./$(EXEC) -l $(OS_BINARY) -os 32 -m 16 $(TEST_BINARY)
+	ggdb --args ./$(EXEC) -k 64 $(KERNEL_BINARY) ./$(EXEC) -l $(OS_BINARY) -os 32 -m 16 $(TEST_BINARY)
 
 clean:
 	rm -f *.mips*

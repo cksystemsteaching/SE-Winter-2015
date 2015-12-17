@@ -5863,7 +5863,7 @@ int selfie(int argc, int* argv) {
         }
     }
 
-    return 10;
+    return 0;
 }
 
 int main(int argc, int *argv) {
