@@ -757,7 +757,7 @@ void context_setPageTable(int* node, int page_table);
 void context_setPrev(int* node, int prev);
 void context_setNext(int* node, int next);
 
-int* context_getPC(int* node);
+int context_getPC(int* node);
 int* context_getRegisters(int* node);
 int* context_getPageTable(int* node);
 
@@ -878,6 +878,7 @@ void printProfile(int *message, int total, int *counters);
 
 void disassemble();
 void emulate(int argc, int *argv);
+void operate(int argc, int *argv);
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -3960,7 +3961,7 @@ void syscall_read() {
     vaddr = *(registers+REG_A1);
     fd    = *(registers+REG_A0);
 
-    buffer = tlb(vaddr);
+    buffer = (int*) tlb(vaddr);
 
     size = read(fd, buffer, count);
 
@@ -4008,7 +4009,7 @@ void syscall_write() {
     vaddr = *(registers+REG_A1);
     fd    = *(registers+REG_A0);
 
-    buffer = tlb(vaddr);
+    buffer = (int*) tlb(vaddr);
 
     size = write(fd, buffer, size);
 
@@ -4057,7 +4058,7 @@ void syscall_open() {
     flags = *(registers+REG_A1);
     vaddr = *(registers+REG_A0);
 
-    filename = tlb(vaddr);
+    filename = (int*) tlb(vaddr);
 
     fd = open(filename, flags, mode);
 
@@ -4175,7 +4176,7 @@ int tlb(int vaddr) {
   	int phy_page_addr;
 
     if (kernel_mode == 1) {
-      return vaddr/4 + memory + SHARED_MEMORY_SIZE/4;
+      return vaddr + (int) memory + SHARED_MEMORY_SIZE;
     }
 
     if (vaddr < 0) {
@@ -4191,7 +4192,7 @@ int tlb(int vaddr) {
     offset = vaddr % PAGE_FRAME_SIZE;
     index = vaddr / PAGE_FRAME_SIZE;
 
-    phy_page_addr = pagetable_getAddrAtIndex(current_page_table, index);
+    phy_page_addr = (int) pagetable_getAddrAtIndex(current_page_table, index);
 
     if ((int) phy_page_addr != (-1)) {
       return (int) phy_page_addr + offset;
@@ -4207,7 +4208,7 @@ int tlb(int vaddr) {
 int loadMemory(int vaddr) {
     int* paddr;
 
-    paddr = tlb(vaddr);
+    paddr = (int*) tlb(vaddr);
 
     return *paddr;
 }
@@ -4215,7 +4216,7 @@ int loadMemory(int vaddr) {
 void storeMemory(int vaddr, int data) {
     int* paddr;
 
-    paddr = tlb(vaddr);
+    paddr = (int*) tlb(vaddr);
 
     *paddr = data;
 }
@@ -4286,28 +4287,28 @@ void context_setNext(int* node, int next) {
   *(node + 4) = next;
 }
 
-int* context_getPC(int* node) {
+int context_getPC(int* node) {
   return *node;
 }
 
 int* context_getRegisters(int* node) {
-  return *(node + 1);
+  return (int*)*(node + 1);
 }
 
 int* context_getPageTable(int* node) {
-  return *(node + 2);
+  return (int*)*(node + 2);
 }
 
 int* context_getPrev(int* node) {
-  return *(node + 3);
+  return (int*)*(node + 3);
 }
 
 int* context_getNext(int* node) {
-  return *(node + 4);
+  return (int*)*(node + 4);
 }
 
 int* context_getPID(int* node) {
-  return *(node + 5);
+  return (int*)*(node + 5);
 }
 
 // -----------------------------------------------------------------
@@ -4361,10 +4362,8 @@ void save_context() {
 }
 
 void restore_context(int contextId) {
-
   int* next_context;
-  print("asdfsadf");
-  println();
+
   next_context = context_find_context_by_pid(context_lists,contextId);
 
   registers = context_getRegisters(next_context);
@@ -4372,7 +4371,6 @@ void restore_context(int contextId) {
   pc = context_getPC(next_context);
 
   current_context = next_context;
-
 }
 
 int create_kernel_context() {
@@ -4450,15 +4448,10 @@ void hypercall_switch_context() {
   int cid;
   int* context;
 
-  print("asdfasdf");
-  println();
-
   cid  = *(registers+REG_A0);
 
   save_context();
   restore_context(cid);
-
-
 }
 
 void delete_context(int pid) {
@@ -5194,7 +5187,7 @@ void execute() {
             print((int*) "$pc=");
 
     if (debug) {
-        print(itoa(pc, string_buffer, 16, 8, 0));
+        print(itoa(pc, string_buffer, 10, 0, 0));
         if (sourceLineNumber != (int*) 0) {
             print((int*) "(~");
             print(itoa(*(sourceLineNumber + pc / 4), string_buffer, 10, 0, 0));
@@ -5257,6 +5250,8 @@ void execute() {
 
 void run() {
     halt = 0;
+
+    kernel_mode = 1;
 
     while (halt == 0) {
         fetch();
@@ -5341,10 +5336,18 @@ void up_copyArguments(int argc, int *argv) {
 void copyBinaryToMemory() {
     int a;
 
-    a = 0;
+    a = binaryLength + SHARED_MEMORY_SIZE;
 
     while (a < binaryLength) {
         storeMemory(a, loadBinary(a));
+
+	print((int*) "STORE CODE: ");
+	print(itoa(loadBinary(a), string_buffer, 2, 0, 0));
+	print((int*) " --- FROM VADDR: ");
+	print(itoa(a, string_buffer, 10, 0, 0));
+	print((int*) " --- INTO PADDR: ");	
+	print(itoa(tlb(a), string_buffer, 10, 0, 0));
+	println();
 
         a = a + 4;
     }
@@ -5358,13 +5361,8 @@ void copyKernelBinaryToMemory() {  // Note: Make sure that we are running in KER
 
   while (a < kernelBinaryLength) {
     storeMemory(a, loadKernelBinary(a));
-
     a = a + 4;
   }
-
-  print((int*) "Finished copying kernel binary to memory");
-  println();
-
 }
 
 int addressWithMaxCounter(int *counters, int max) {
@@ -5503,7 +5501,7 @@ void emulate(int argc, int *argv) {
     int pid;
 
     print(selfieName);
-    print((int*) ": this is selfie's mipster executing ");
+    print((int*) ": this is selfie's mipster (really, kernel) executing ");
     print(binaryName);
     print((int*) " with ");
     print(itoa(memorySize / 1024 / 1024, string_buffer, 10, 0, 0));
@@ -5512,11 +5510,7 @@ void emulate(int argc, int *argv) {
 
     interpret = 1;
 
-    // Load the kernel
-    copyKernelBinaryToMemory();
-
-    // Create a context for the kernel Process
-    pid = create_kernel_context();
+    copyBinaryToMemory();
 
     *(registers+REG_SP) = memorySize - 4; // initialize stack pointer
 
@@ -5527,6 +5521,58 @@ void emulate(int argc, int *argv) {
     resetInterpreter();
 
     up_copyArguments(argc, argv);
+
+    kernel_mode = 0;
+
+    run();
+
+    print(selfieName);
+    print((int*) ": this is selfie's mipster terminating ");
+    print(binaryName);
+    println();
+
+    print(selfieName);
+    print((int*) ": profile: total,max(ratio%)@addr(line#),2max(ratio%)@addr(line#),3max(ratio%)@addr(line#)");
+    println();
+    printProfile((int*) ": calls: ", calls, callsPerAddress);
+    printProfile((int*) ": loops: ", loops, loopsPerAddress);
+    printProfile((int*) ": loads: ", loads, loadsPerAddress);
+    printProfile((int*) ": stores: ", stores, storesPerAddress);
+}
+
+void operate(int argc, int *argv) {
+
+    int pid;
+    int* registers_os;
+    int* pos;
+
+    print(selfieName);
+    print((int*) ": this is selfie's OS executing ");
+    print(binaryName);
+    print((int*) " with ");
+    print(itoa(memorySize / 1024 / 1024, string_buffer, 10, 0, 0));
+    print((int*) "MB of memory");
+    println();
+
+    interpret = 1;
+
+    copyBinaryToMemory();
+
+    *(registers+REG_SP) = memorySize - 4; // initialize stack pointer
+
+    *(registers+REG_GP) = binaryLength; // initialize global pointer
+
+    *(registers+REG_K1) = *(registers+REG_GP); // initialize bump pointer
+
+    resetInterpreter();
+
+    up_copyArguments(argc, argv);
+
+    kernel_mode = 0;
+    registers_os = malloc(32*4);
+    pos = malloc(PAGE_TABLE_SIZE);
+
+    context_lists = context_insert(0, registers_os, pos, context_lists, 0, 1);  
 
     run();
 
@@ -5552,15 +5598,15 @@ void emulate(int argc, int *argv) {
 
 void kernel(int argc, int* argv) {
 
-  int* shared_memory;
   int pid;
 
-  interpret = 1;
-
-  print( (int*) "Loading kernel");
-  println();
-
   kernel_mode = 1;
+
+  print(selfieName);
+  print((int*) ": starting kernel with ");
+  print(itoa(memorySize/1024/1024, string_buffer, 10, 0, 0));
+  print((int*) " MB of memory... ");
+  println();
 
   // Load the kernel
   copyKernelBinaryToMemory();
@@ -5568,12 +5614,9 @@ void kernel(int argc, int* argv) {
   // Create a context for the kernel Process
   pid = create_kernel_context();
 
-  print(itoa(pid,string_buffer,10,0,0));
-  println();
-
   *(registers+REG_SP) = memorySize - 4; // initialize stack pointer
 
-  *(registers+REG_GP) = binaryLength; // initialize global pointer
+  *(registers+REG_GP) = kernelBinaryLength; // initialize global pointer
 
   *(registers+REG_K1) = *(registers+REG_GP); // initialize bump pointer
 
@@ -5581,15 +5624,10 @@ void kernel(int argc, int* argv) {
 
   up_copyArguments(argc, argv);
 
-  debug = 1;
-
   run();
 
-
-  //shared_memory = -SHARED_MEMORY_SIZE;
-
-  //print((int*) "Booting kernel ...");
-  //println();
+  print((int*) "Booting kernel ...");
+  println();
 
   //copyBinaryToMemory();
 
@@ -5637,12 +5675,24 @@ void kernel(int argc, int* argv) {
 // -----------------------------------------------------------------
 
 int selfie(int argc, int* argv) {
+    print((int*)"argc: ");
+    print(itoa(argc,string_buffer,10,0,0));
+    println();
+
+    if (argc == 0)
+	if (kernel_mode == 1)
+		halt = 1;
 
     if (argc <= 1) {
       return -1;
     }
     else {
         while (argc >= 2) {
+    print((int*)"argc -- in loop: ");
+    print(itoa(argc,string_buffer,10,0,0));
+    println();
+
+
             if (stringCompare((int*) *argv, (int*) "-c")) {
                 sourceName = (int*) *(argv+1);
                 binaryName = sourceName;
@@ -5710,6 +5760,28 @@ int selfie(int argc, int* argv) {
                 }
 
                 return 0;
+            } else if (stringCompare((int*) *argv, (int*) "-os")) {
+                initMemory(atoi((int*) *(argv+1)) * MEGABYTE);
+
+                argc = argc - 1;
+                argv = argv + 1;
+
+                // pass binaryName as first argument replacing size
+                *argv = (int) binaryName;
+
+                if (binaryLength > 0) {
+                    debug = 0;
+
+                    operate(argc, argv);
+                } else {
+                    print(selfieName);
+                    print((int*) ": nothing to emulate");
+                    println();
+
+                    exit(-1);
+                }
+
+                return 0;
             } else if (stringCompare((int*) *argv, (int*) "-d")) {
                 initMemory(atoi((int*) *(argv+1)) * MEGABYTE);
 
@@ -5733,15 +5805,19 @@ int selfie(int argc, int* argv) {
 
                 return 0;
             } else if (stringCompare((int*) *argv, (int*) "-k")) {
-                kernelBinaryName = (int*) *(argv+1);
-                initMemory(128 * MEGABYTE);
+                kernelBinaryName = (int*) *(argv+2);
+                initMemory(128 * *(argv+1));
 
-                argc = argc - 2;
-                argv = argv + 2;
+                argc = argc - 3;
+                argv = argv + 3;
+
+		interpret = 1;
 
                 loadKernel();
 
                 kernel(argc, argv);
+
+		argc = 0;
             } else
                 return -1;
         }
@@ -5761,16 +5837,12 @@ int main(int argc, int *argv) {
 
     initInterpreter();
 
-    print((int*)"Hier");
-    println();
-
-    print(itoa(argc,string_buffer,10,0,0));
-    println();
-
     selfieName = (int*) *argv;
 
     argc = argc - 1;
     argv = argv + 1;
+
+    kernel_mode = 1;
 
     if (selfie(argc, (int*) argv) != 0) {
         print(selfieName);

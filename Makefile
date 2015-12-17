@@ -1,5 +1,5 @@
 CC			:= clang
-CC_OPT			:= -w -m32 -undefined dynamic_lookup -D'main(a, b)=main(int argc, char **argv)'
+CC_OPT			:= -w -m32 -g -undefined dynamic_lookup -D'main(a, b)=main(int argc, char **argv)'
 EXEC			:= selfie
 MEM_SIZE		:= 32
 RTS1			:= 2
@@ -21,6 +21,9 @@ calen: clean
 clea: clean
 cclean: clean
 
+compile:
+	$(CC) $(CC_OPT) $(EXEC).c -o $(EXEC)
+
 test_binary:
 	$(CC) $(CC_OPT) $(EXEC).c -o $(EXEC)
 	touch $(TEST_BINARY)
@@ -29,7 +32,7 @@ test_binary:
 	./$(EXEC) -c $(TEST_INPUT) -o $(TEST_BINARY)
 	./$(EXEC) -c $(EXEC).c -o $(KERNEL_BINARY)
 	./$(EXEC) -c $(EXEC).c -o $(OS_BINARY)
-	./$(EXEC) -k $(KERNEL_BINARY) asdf -l $(TEST_BINARY) -m 32
+	./$(EXEC) -k 64 $(KERNEL_BINARY) ./$(EXEC) -l $(OS_BINARY) -os 32 -m 16 $(TEST_BINARY)
 clean:
 	rm -f *.mips*
 	rm -f $(EXEC)
