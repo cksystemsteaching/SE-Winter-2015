@@ -1,0 +1,14 @@
+
+Our current version does a correct switch between the kernel 
+and the user process (as discussed in lecture).  Additionally, 
+we implemented a scaffold to move syscalls into the kernel- 
+process.  
+
+The initial user process is a binary that is loaded during 
+startup.  
+
+Page fault handling and process forking is currently not 
+supported. 
+
+Our demo starts a counter and shows switching between kernel and 
+user process. 
