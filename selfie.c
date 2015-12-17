@@ -823,6 +823,7 @@ int *free_list; // List of free page frames
 // ------------------------- INITIALIZATION ------------------------
 
 void initMemory(int bytes) {
+
     if (bytes < 0)
         memorySize = 64 * MEGABYTE;
     else if (bytes > 1024 * MEGABYTE)
@@ -831,7 +832,9 @@ void initMemory(int bytes) {
         memorySize = bytes;
 
     memory = malloc(memorySize);
+
 }
+
 
 // -----------------------------------------------------------------
 // ------------------------- INSTRUCTIONS --------------------------
@@ -4239,11 +4242,23 @@ int* palloc() {
 
 	free_page = free_list;
 
+  print("palloc in");
+  println();
+
   if ((int) *free_list == 0) {
+    print("null");
+    println();
     free_list = free_list + (PAGE_FRAME_SIZE/4);
   } else {
+    print("else");
+    println();
     free_list = (int*) *free_list;
 	}
+
+  print(itoa(free_list,string_buffer,10,0,0));
+  println();
+  print("palloc out");
+  println();
 
 	return free_page;
 
@@ -4259,7 +4274,7 @@ int* context_insert(int contextId, int pc, int* registers, int* page_table, int*
 	node = malloc(5 * 4);
 
 	context_setId(node, contextId);
-  	context_setPC(node, pc);
+  context_setPC(node, pc);
 	context_setRegisters(node, (int) registers);
 	context_setPageTable(node, (int) page_table);
 	context_setPrev(node, (int) prev);
@@ -4486,8 +4501,8 @@ void hypercall_create_context() {
   new_page_table = (int*) malloc( PAGE_TABLE_SIZE * 4);
   new_pc = 0;
 
-  *(new_registers + REG_SP) = *(registers+REG_A0);
-  *(new_registers + REG_GP) = *(registers+REG_A1);
+  *(new_registers + REG_SP) = *(registers+REG_A1);
+  *(new_registers + REG_GP) = *(registers+REG_A0);
   *(new_registers+REG_K1) = *(new_registers + REG_GP);
 
   kernel_process_list = context_insert(nextFreeContextId, pc, new_registers, new_page_table, kernel_process_list, (int*) 0);
@@ -4530,9 +4545,9 @@ void hypercall_map_page_in_context() {
   int index;
   int* context;
 
-  pid  = *(registers+REG_A0);
+  pid  = *(registers+REG_A2);
   paddr  = *(registers+REG_A1);
-  vaddr  = *(registers+REG_A2);
+  vaddr  = *(registers+REG_A0);
 
   context = context_find_context_by_pid(kernel_process_list, pid);
   page_table = context_getPageTable(context);
@@ -4540,6 +4555,7 @@ void hypercall_map_page_in_context() {
   index = vaddr / PAGE_FRAME_SIZE;
 
   pagetable_setAddrAtIndex(page_table, index, paddr);
+
 }
 
 void flush_page_in_context(int pid, int vaddr) {
@@ -5323,8 +5339,6 @@ void execute() {
 void run() {
     halt = 0;
 
-    kernel_mode = 1;
-
     while (halt == 0) {
         fetch();
         decode();
@@ -5416,14 +5430,16 @@ void copyBinaryToMemory() {
       if (a%PAGE_FRAME_SIZE == 0) {
         current_page = palloc();
         map_page_in_context(1,current_page,a);
-        print("adsf");
-        println();
       }
+
+      //print(itoa(current_page + a/4,string_buffer,10,0,0));
+      //println();
 
       *(current_page + a/4) = loadBinary(a);
 
       a = a + 4;
     }
+
 }
 
 void copyKernelBinaryToMemory() {  // Note: Make sure that we are running in KERNEL MODE
@@ -5627,7 +5643,7 @@ void operate(int argc, int *argv) {
 
     interpret = 1;
 
-    free_list = 101056 + SHARED_MEMORY_SIZE;
+    free_list = 3*101056 + SHARED_MEMORY_SIZE;
 
     // Create a new context for the user process
     pid = create_context(memorySize - 4, binaryLength);
@@ -5660,6 +5676,7 @@ void operate(int argc, int *argv) {
 void kernel(int argc, int* argv) {
 
   int pid;
+  int* cursor;
 
   kernel_mode = 1;
 
@@ -5668,6 +5685,12 @@ void kernel(int argc, int* argv) {
   print(itoa(memorySize/1024/1024, string_buffer, 10, 0, 0));
   print((int*) " MB of memory... ");
   println();
+
+  cursor = memory;
+  while ((int) cursor < (int) memory + memorySize) {
+    *cursor = 0;
+    cursor = cursor + 1;
+  }
 
   // Load the kernel
   copyKernelBinaryToMemory();
