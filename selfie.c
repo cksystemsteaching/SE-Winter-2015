@@ -4452,6 +4452,8 @@ void hypercall_switch_context() {
 
   save_context();
   restore_context(cid);
+  print("---");
+  println();
 }
 
 void delete_context(int pid) {
@@ -5618,6 +5620,8 @@ void kernel(int argc, int* argv) {
 
   // Create a context for the kernel Process
   pid = create_kernel_context();
+
+  current_context = context_find_context_by_pid(kernel_process_list,pid);
 
   *(registers+REG_SP) = memorySize - 4; // initialize stack pointer
 
