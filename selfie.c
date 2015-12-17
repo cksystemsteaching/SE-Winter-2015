@@ -882,7 +882,7 @@ void runKernel() {
 }
 
 
-// ---------------------   Methods   ---------------------
+// ---------------------  Methods   ---------------------
 // OS methods
 int *initList();
 void appendListElement(int *element, int *list);
