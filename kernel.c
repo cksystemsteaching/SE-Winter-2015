@@ -28,11 +28,23 @@ int main()
         loadBinary(*(node + 1), *(node + 2), *(node + 3), *(node + 4));
     }
     else if (*args == CMD_MAPPAGEINCCONTEXT) {
-        amalloc(1024 * 4, 1); //Aligned Malloc with 4KB = 1Page
+        node = (int*)*(readyQ +2);
+        node = node + *(args + 1); //vpn
+        *node = amalloc(1024 * 4, 1); //Aligned Malloc with 4KB = 1Page
+        mapPageInContext();
     }
     else if (*args == CMD_FLUSHPAGEINCCONTEXT) {
     }
     else if (*args == CMD_SWITCHCONTEXT) {
+        if((int)readyQ == 0){
+            exit(1);
+        }
+        *(readyQ +1) = *(args + 1); //Save pc
+        *(readyQ +2) = *(args + 2); //Save pT
+        *(readyQ +3) = *(args + 3); //Save registers
+        readyQ = (int*)*readyQ;
+        switchContext(*(readyQ + 1),*(readyQ + 2),*(readyQ + 3), *(readyQ + 4));
+        
     }
     else if (*args == CMD_DELETECONTEXT) {
         delete_Context();
@@ -87,7 +99,7 @@ int* create_Context()
     ptr = (int*)*(node + 2);
     *ptr = (int)amalloc(1024 * 4, 1);
     *(ptr + 1) = (int)amalloc(1024 * 4, 1);
-    *(ptr + 1023) = (int)amalloc(1024*4,1);
+    //*(ptr + 1023) = (int)amalloc(1024*4,1);
     return node;
 }
 
