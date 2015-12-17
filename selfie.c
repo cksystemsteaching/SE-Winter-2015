@@ -5759,7 +5759,7 @@ void mc_emit_hyperCall_deleteContext()
     emitIFormat(OP_LW, REG_SP, REG_A0, 0); // pc
     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
-    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, MC_HYPERCALL_SWITCHCONTEXT);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, MC_HYPERCALL_DELETECONTEXT);
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
 }
 
@@ -5775,7 +5775,7 @@ int mc_hyperCall_deleteContext()
             if (*(registers + REG_A2) == 0) {
                 if (*(registers + REG_A3) == 0) {
                     mc_restoreKernelContext();
-                    storeMemory(mc_kernel_argsAddr, 4); //Delete Context
+                    storeMemory(mc_kernel_argsAddr, 7); //Delete Context
                     storeMemory(mc_kernel_argsAddr + 4, 0);
                     storeMemory(mc_kernel_argsAddr + 8, 0);
                     storeMemory(mc_kernel_argsAddr + 12, 0);
