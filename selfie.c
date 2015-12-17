@@ -97,8 +97,11 @@ void println();
 void printCharacter(int character);
 void printString(int *s);
 
-void exit(int code);
-int* malloc(int size);
+//void exit(int code);
+//int* malloc(int size);
+
+void enqueue(int* list, int* node);
+int* dequeue(int* list);
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -652,7 +655,7 @@ int copyStringToBinary(int *s, int a);
 void emitGlobalsStrings();
 
 void emit();
-void load();
+void load(int fd);
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -710,9 +713,52 @@ int SYSCALL_MALLOC = 5001;
 void emitSwitch_context();
 void hypercall_switch_context();
 
+void emitMap_page_in_context();
+void hypercall_map_page_in_context();
+
+void emitFlush_page_in_context();
+void hypercall_flush_page_in_context();
+
+void emitCreate_context();
+void hypercall_create_context();
+
+void emitDelete_context();
+void hypercall_delete_context();
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int HYPERCALL_SWITCH_CONTEXT   = 6001;
+int HYPERCALL_MAP_PAGE_IN_CONTEXT = 6002;
+int HYPERCALL_FLUSH_PAGE_IN_CONTEXT = 6003;
+int HYPERCALL_CREATE_CONTEXT = 6004;
+int HYPERCALL_DELETE_CONTEXT = 6005;
+
+
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+// -----------------------------------------------------------------
+// ----------------------------   O S   ----------------------------
+// -----------------------------------------------------------------
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+
+// ------------------------ GLOBAL CONSTANTS -----------------------
+
+int OS_EVENT_SCHEDULE = 8001;
+int OS_EVENT_PAGE_FAULT = 8002;
+
+// ------------------------ GLOBAL VARIABLES -----------------------
+
+int* freelist = 0;
+int* readyQueue;
+int* userProcessPageFrames;
+int* communicationChunk;
+
+// OS functions
+
+void executeOS();
+void initOS();
+int* createProcess();
+int* palloc();
+
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -734,6 +780,7 @@ void storeMemory(int vaddr, int data);
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int MEGABYTE = 1048576;
+int KILOBYTE = 1024;
 
 // ------------------------ GLOBAL VARIABLES -----------------------
 
@@ -768,6 +815,7 @@ int* processTable = (int*) 0;
 int* nextFreeProcess;
 int OSPid;
 int currentProcessPid;
+int binarylengthOfFirstProcess;
 
 // ------------------------- INITIALIZATION ------------------------
 
@@ -784,8 +832,11 @@ void initProcessTable() {
 		i = i + 3;
 	}
 
-	*(processTable + i - 3) = 0;
+	*(processTable + (i - 3)) = 0;
 }
+
+int allocateProcess();
+void freeProcess(int pid);
 
 
 // -----------------------------------------------------------------
@@ -831,7 +882,9 @@ int  up_malloc(int size);
 int  up_copyString(int *s);
 void up_copyArguments(int argc, int *argv);
 
-void copyBinaryToMemory();
+void passParameterToOS(int data, int offset);
+
+void copyBinaryToMemory(int offset);
 
 int addressWithMaxCounter(int *counters, int max);
 int fixedPointRatio(int a, int b);
@@ -841,6 +894,7 @@ void printProfile(int *message, int total, int *counters);
 
 void disassemble();
 void emulate(int argc, int *argv);
+
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -864,6 +918,8 @@ int *registers; // general purpose registers
 
 int pc = 0; // program counter
 int ir = 0; // instruction record
+
+int numberOfInstructions;
 
 int reg_hi = 0; // hi register for multiplication/division
 int reg_lo = 0; // lo register for multiplication/division
@@ -1247,6 +1303,54 @@ void printString(int *s) {
     
     putCharacter(CHAR_DOUBLEQUOTE);
 }
+
+void enqueue(int* list, int* node) {
+	int* head;
+	
+	if((int) node == 0)
+		return;
+	if((int) list == 0)
+		return;
+	
+	*(node + 1) = 0;
+	*node = *list;
+
+	if (*list != 0) {
+		head = (int*) *list;
+		*(head + 1) = (int) node;
+	} 
+	
+	*list = (int) node;
+	
+    if (*(list + 1) == 0) {
+    	*(list + 1) = (int) node;
+    }
+    
+}
+
+int* dequeue(int* list) {
+	int* tail;
+	int* previous;
+	
+	if ((int) list == 0)
+		return (int*) 0;
+	if ((int) *list == 0)
+		return (int*) 0;
+	
+	tail = (int*) *(list + 1);
+	previous = (int*) *(tail + 1);
+	
+	if ((int) previous != 0) {
+		*previous = 0;
+	} else {
+		*list = 0;
+	}
+	
+	*(list + 1) = (int) previous;
+	
+	return tail;
+}
+
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -3375,6 +3479,10 @@ void compile() {
     emitMalloc();
     emitPutchar();
     emitSwitch_context();
+    emitMap_page_in_context();
+    emitFlush_page_in_context();
+    emitCreate_context();
+    emitDelete_context();
 
     // parser
     gr_cstar();
@@ -3727,11 +3835,8 @@ void emit() {
     write(fd, binary, binaryLength);
 }
 
-void load() {
-    int fd;
+void load(int fd) {
     int numberOfReadBytes;
-
-    fd = open(binaryName, O_RDONLY, 0);
 
     if (fd < 0) {
         print(selfieName);
@@ -3753,7 +3858,7 @@ void load() {
     print((int*) ": loading code from input file ");
     print(binaryName);
     println();
-
+    
     // read code length first
     numberOfReadBytes = read(fd, io_buffer, 4);
 
@@ -3804,7 +3909,6 @@ void emitExit() {
 
 void syscall_exit() {
     int exitCode;
-
     exitCode = *(registers+REG_A0);
 
     *(registers+REG_V0) = exitCode;
@@ -3815,6 +3919,7 @@ void syscall_exit() {
     println();
 
     halt = 1;
+    exit(exitCode);//TODO remove, for debugging purposes
 }
 
 void emitRead() {
@@ -3839,21 +3944,36 @@ void emitRead() {
 }
 
 void syscall_read() {
-    int count;
     int vaddr;
     int fd;
     int *buffer;
     int size;
+    int newSize;
+    int i;
+    
+    i = 0;
+    newSize = 0;
 
-    count = *(registers+REG_A2);
+    size = *(registers+REG_A2);
     vaddr = *(registers+REG_A1);
     fd    = *(registers+REG_A0);
 
-    buffer = memory + tlb(vaddr);
 
-    size = read(fd, buffer, count);
+    while (i < size / 4){
+    			        print((int*)"in read\n");
+			newSize = newSize + read(fd, memory + tlb(vaddr + i * 4), 4);
+						        print((int*)"in read1\n");
+			i = i + 1;
+			        print(itoa(i, string_buffer, 10, 0, 0));
+	}
+	
+    if (size % 4 != 0) {
+    	newSize = newSize + read(fd, memory + tlb(vaddr + i * 4), size % 4);
+    }
+		
+	
 
-    *(registers+REG_V0) = size;
+    *(registers+REG_V0) = newSize;
 
     if (debug_read) {
         print(binaryName);
@@ -3887,21 +4007,32 @@ void emitWrite() {
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
-void syscall_write() {
+void syscall_write() {//TODO handle invalid vaddr (tlb returns -1), also in open and read
     int size;
     int vaddr;
     int fd;
     int *buffer;
-
+	int i;
+	int newSize;
+	
     size  = *(registers+REG_A2);
     vaddr = *(registers+REG_A1);
     fd    = *(registers+REG_A0);
+    
+	newSize = 0;
+	
+	i = 0;
+	
+	while (i < size / 4){
+		newSize = newSize + write(fd, memory + tlb(vaddr + i * 4), 4);
+		i = i + 1;
+	}
+	
+    if (size % 4 != 0) {
+    	newSize = newSize + write(fd, memory + tlb(vaddr + i * 4), size % 4);
+    }
 
-    buffer = memory + tlb(vaddr);
-
-    size = write(fd, buffer, size);
-
-    *(registers+REG_V0) = size;
+    *(registers+REG_V0) = newSize;
 
     if (debug_write) {
         print(binaryName);
@@ -3982,7 +4113,7 @@ void emitMalloc() {
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
-void syscall_malloc() {
+void syscall_malloc() {//ATTENTION: DO NOT ZERO!
     int size;
     int bump;
 
@@ -4044,12 +4175,10 @@ void switchToProcess (int pid) {
 
 void hypercall_switch_context() {
 	int pid;
-
 	if (OSPid == currentProcessPid) {
 		pid = *(registers + REG_A0);
-
 		switchToProcess(pid);
-	}
+	} //TODO else
 }
 
 void emitSwitch_context() {
@@ -4068,6 +4197,170 @@ void emitSwitch_context() {
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
+void hypercall_map_page_in_context() {
+	int pid;
+	int page;
+	int pageFrame;
+	int* pageTable;
+
+	if (OSPid == currentProcessPid) {
+		pid = *(registers + REG_A0);
+		page = *(registers + REG_A1);
+		pageFrame = *(registers + REG_A2);
+		
+		pageTable = *(processTable + 3 * pid + 2);
+		*(pageTable + page) = pageFrame;
+	}
+}
+
+void emitMap_page_in_context() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "map_page_in_context", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    
+    emitIFormat(OP_LW, REG_SP, REG_A2, 0); // page frame
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0); // page 
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0); // pid
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_MAP_PAGE_IN_CONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void hypercall_flush_page_in_context() {
+	int pid;
+	int page;
+	int* pageTable;
+
+	if (OSPid == currentProcessPid) {
+		pid = *(registers + REG_A0);
+		page = *(registers + REG_A1);
+		
+		pageTable = *(processTable + 3 * pid + 2);
+		*(pageTable + page) = 0;
+	}
+}
+
+void emitFlush_page_in_context() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "flush_page_in_context", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0); // page 
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0); // pid
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_FLUSH_PAGE_IN_CONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void hypercall_create_context() {
+	int newPid;
+	int parentPid;
+	int i;
+	int* newRegisters;
+	int* newPageTable;
+	
+	parentPid = *(registers + REG_A0);
+	
+	newPid = allocateProcess();
+	
+	newRegisters = (int*) *(processTable + newPid * 3 + 1);
+	
+	if (newRegisters == 0) {
+		*(processTable + newPid * 3 + 1) = malloc(32 * 4);
+		newRegisters = (int*) *(processTable + newPid * 3 + 1);
+	}
+
+	if (parentPid == OSPid) {
+		*(processTable + newPid * 3) = 0;//set pc
+		i = 0;
+		while (i < 32) {
+			*(newRegisters + i) = 0;
+			i = i + 1;
+		}
+		*(newRegisters + REG_SP) = 4 * MEGABYTE - 4;
+		*(newRegisters + REG_K1) = binarylengthOfFirstProcess;
+		*(newRegisters + REG_GP) = binarylengthOfFirstProcess;
+	} else {
+		*(processTable + newPid * 3) = *(processTable + parentPid * 3);//set pc
+		
+		i = 0;
+		while (i < 32) {
+			*(newRegisters + i) = *(registers + i);
+			i = i + 1;
+		}
+	}
+	
+	newPageTable = *(processTable + newPid * 3 + 2);
+	if(newPageTable == 0) {
+		*(processTable + newPid * 3 + 2) = malloc(1024 * 4);
+		newPageTable = *(processTable + newPid * 3 + 2);
+	}
+
+	//set all mappings to 0 //TODO in fork: map all pages via map_page_in_context
+	i = 0;
+	while (i < 1024) {
+		*(newPageTable + i) = 0;
+		i = i + 1;
+	}
+	
+	*(registers + REG_V0) = newPid;
+}
+
+void emitCreate_context() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "create_context", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0); // parentPid
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_CREATE_CONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void hypercall_delete_context() {
+	int pid;
+	int* r;
+	
+	pid = *(registers + REG_A0);
+	r = *(processTable + pid * 3 + 1);
+	*r = -1;//TODO hack :D reg0 = -1, nötig?
+	
+	freeProcess(pid);
+}
+
+void emitDelete_context() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "delete_context", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0); // pid
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_DELETE_CONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -4075,18 +4368,151 @@ void emitSwitch_context() {
 // -----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 
-int allocateProcess() {
-	int newPid;
+void executeOS() {
+	int event;
+	int callerPid;
+	initOS();
+	
+	while (1) {
+		event = *communicationChunk;
+		callerPid = *(communicationChunk + 1);
+		if (event == OS_EVENT_SCHEDULE) {
+			//TODO implement event handler
+		} else if (event == OS_EVENT_PAGE_FAULT) {
+			//TODO implement event handler
+		} else {
+			switch_context(callerPid);//TODO does this make sense?
+		}
 
-	if (*nextFreeProcess == 0) {
-		// TODO: kill user process -> keep second counter in OS!
-		exit(-1); //if still here, shut down machine
+	}
+}
+
+void initOS() {
+	int spaceForUserPageFrames;
+	int* restOfPage;
+	int* firstProcess;
+	int i;
+	int pid;
+	int* pageTable;
+	int fd;
+	int nrOfCodePages;
+	int* stackPage;
+	int* next;
+	
+	communicationChunk = malloc(10 * 4);
+	
+	spaceForUserPageFrames = *communicationChunk;
+	
+	//set HP to begin of page frame
+	restOfPage = malloc(4096 - ((int) communicationChunk + 10) % 4096);
+	
+	userProcessPageFrames = malloc((spaceForUserPageFrames / 4096) * 4096);
+	
+	//build freelist
+	freelist = userProcessPageFrames;
+    
+	i = 0;
+	next = (int) userProcessPageFrames + 4096;
+	
+	while (i < spaceForUserPageFrames / 4096 * 4096) {
+		*(userProcessPageFrames + i / 4) = next;
+		next = next + 4096;
+		i = i + 4096;
+	}
+	
+	*(userProcessPageFrames + (i - 4096) / 4) = 0;
+	
+	readyQueue = malloc(2 * 4);
+    *readyQueue = 0;
+    *(readyQueue + 1) = 0;
+    
+    
+    firstProcess = createProcess();
+
+    pid = *(firstProcess + 2);
+    pageTable = (int*) *(firstProcess + 3);
+    
+    //load first process
+	fd = *(communicationChunk + 1);
+	
+	nrOfCodePages = *(communicationChunk + 2);
+	i = 0;
+	
+	*pageTable = palloc(pid);
+	
+	while (i < nrOfCodePages) {
+		*(pageTable + i) = palloc(pid);
+		map_page_in_context(pid, i, *(pageTable + i));
+	}
+    load(fd);
+
+    copyBinaryToMemory(userProcessPageFrames);
+
+    //load args
+    *(pageTable + 1023) = palloc(pid);//map one stack page
+	map_page_in_context(pid, 1023, *(pageTable + 1023));
+	stackPage = *(pageTable + 1023);
+	
+	*(stackPage + 1023) = *(communicationChunk + 3);//argc
+	
+	i = 0;
+	
+	while (i < *(communicationChunk + 3)) {
+		*(stackPage + (1022 - i)) = *(communicationChunk + (4 + i));
+		i = i + 1;
+	}
+    switch_context(pid);
+}
+
+int* createProcess() {
+	//next
+	//prev
+	//pid
+	//page table
+	//children
+	//pid of child which is waited for
+	
+	int* processEntry;
+	
+	processEntry = malloc(6 * 4);
+	*processEntry = 0;
+	*(processEntry + 1) = 0;
+	*(processEntry + 2) = create_context(0);//attention 0 is hard coded for OSPid
+	*(processEntry + 3) = malloc(1024 * 4);
+	*(processEntry + 4) = malloc(2 * 4);
+	*(processEntry + 5) = 0;
+	
+	enqueue(readyQueue, processEntry);
+	
+	return processEntry;
+}
+
+int* palloc(int pid) {
+	int* newPage;
+	int i;
+
+	if (freelist == 0) {
+		print((int*) "Physical memory full. Process with pid ");
+		print(itoa(pid, string_buffer, 10, 0, 0));
+		print((int*) " killed.");
+		println();
+		//exit(1234);
+		//syscall_exit();
+		return 0;
 	}
 
-	newPid = *nextFreeProcess / 3;
-	nextFreeProcess = (int*) *(processTable + *nextFreeProcess);
+	newPage = freelist;
 
-	return newPid;
+	freelist = *freelist;
+
+	i = 0;
+
+	while (i < 1024) {
+		*(newPage + i) = 0;		
+		i = i + 1;
+	}
+	
+	return newPage;
 }
 
 
@@ -4101,19 +4527,69 @@ int allocateProcess() {
 // -----------------------------------------------------------------
 
 int tlb(int vaddr) {
+	int* pagetable;
+	int* pageTableEntry;
+	int* OSregisters;
+	
     if (vaddr % 4 != 0)
         exception_handler(EXCEPTION_ADDRESSERROR);
+        
+    if (interpret == 0)
+		return vaddr / 4;
+		
+	pagetable = (int*) *(processTable + (currentProcessPid * 3 + 2));
+	
+	if (currentProcessPid == OSPid) {
+		if (vaddr < 0) { 
+			print((int*) "our Segmentation fault");
+			exit(-1);
+		} else if (vaddr >= memorySize) {
+			print((int*) "our Segmentation fault");
+			exit(-1);
+		}
+		return vaddr / 4;		
+	} 
+	
+	if (vaddr < 0) { 
+		print((int*) "Segmentation fault");
+		//syscall_exit();//TODO kill only current process
+		//return -1;
+		exit(-1);
+	} else if (vaddr >= 4 * MEGABYTE) {
+		print((int*) "Segmentation fault");
+		//syscall_exit();//TODO kill only current process
+		//return -1;
+		exit(-1);
+	}
 
-    // physical memory is word-addressed for lack of byte-sized data type
-    return vaddr / 4;
+	pageTableEntry = pagetable + vaddr / (4 * KILOBYTE);
+
+	if (*pageTableEntry == 0) {
+		// page fault
+		//switch to OS pager
+		passParameterToOS(OS_EVENT_PAGE_FAULT, 0);
+		passParameterToOS(currentProcessPid, 1);
+		passParameterToOS(vaddr / (4 * KILOBYTE), 3);
+		
+		OSregisters = *(processTable + (OSPid * 3 + 1));
+		*pageTableEntry = *(OSregisters + REG_V0);//TODO geht das wirklich so oder sollt ma lieber wieder communicationChunk verwenden?
+		//*pageTableEntry = palloc();
+		//if(*pageTableEntry == 0)//TODO kill process in os if no memory left
+			//TODO invoke scheduler
+			//return -1; //hierarchie raufgehen bis run()
+		
+	}
+
+	return (*pageTableEntry + vaddr % (4 * KILOBYTE) - (int) memory) / 4;
 }
 
 int loadMemory(int vaddr) {
     int paddr;
-
+	int returnValue;
+	
     paddr = tlb(vaddr);
-
-    return *(memory + paddr);
+    
+	return *(memory + paddr);	
 }
 
 void storeMemory(int vaddr, int data) {
@@ -4125,10 +4601,34 @@ void storeMemory(int vaddr, int data) {
 }
 
 // -----------------------------------------------------------------
+// ---------------------- PROCESS MANAGEMENT -----------------------
+// -----------------------------------------------------------------
+
+int allocateProcess() {
+	int newPid;
+
+	if (nextFreeProcess == 0) {
+		// TODO: kill user process -> keep second counter in OS!
+		exit(-1); //if still here, shut down machine
+	}
+
+	newPid = ((int) nextFreeProcess - (int) processTable) / 3;
+	nextFreeProcess = processTable + *nextFreeProcess;
+
+	return newPid;
+}
+
+void freeProcess(int pid) {
+	*(processTable + 3 * pid) = nextFreeProcess;
+	nextFreeProcess = processTable + 3 * pid;//TODO correct?
+}
+
+// -----------------------------------------------------------------
 // ------------------------- INSTRUCTIONS --------------------------
 // -----------------------------------------------------------------
 
 void fct_syscall() {
+
     if (debug) {
         printFunction(function);
         println();
@@ -4147,6 +4647,14 @@ void fct_syscall() {
             syscall_malloc();
         } else if (*(registers+REG_V0) == HYPERCALL_SWITCH_CONTEXT) {
             hypercall_switch_context();
+        } else if (*(registers+REG_V0) == HYPERCALL_MAP_PAGE_IN_CONTEXT) {
+            hypercall_map_page_in_context();
+        } else if (*(registers+REG_V0) == HYPERCALL_FLUSH_PAGE_IN_CONTEXT) {
+            hypercall_flush_page_in_context();
+        } else if (*(registers+REG_V0) == HYPERCALL_CREATE_CONTEXT) {
+            hypercall_create_context();
+        } else if (*(registers+REG_V0) == HYPERCALL_DELETE_CONTEXT) {
+            hypercall_delete_context();
         } else {
             exception_handler(EXCEPTION_UNKNOWNSYSCALL);
         }
@@ -4642,9 +5150,7 @@ void op_lw() {
 
     if (interpret) {
         vaddr = *(registers+rs) + signExtend(immediate);
-
         *(registers+rt) = loadMemory(vaddr);
-
         // keep track of number of loads
         loads = loads + 1;
 
@@ -4860,13 +5366,13 @@ void execute() {
         op_addiu();
     } else if (opcode == OP_LW) {
         op_lw();
-    } else if (opcode == OP_SW) {
+    } else if (opcode == OP_SW) {    
         op_sw();
     } else if (opcode == OP_BEQ) {
         op_beq();
-    } else if (opcode == OP_BNE) {
+    } else if (opcode == OP_BNE) {        			    		
         op_bne();
-    } else if (opcode == OP_JAL) {
+    } else if (opcode == OP_JAL) {        			    		
         op_jal();
     } else if (opcode == OP_J) {
         op_j();
@@ -4883,18 +5389,25 @@ void execute() {
 }
 
 void run() {
-    halt = 0;
+    //halt = 0;
+	int nrOfInstr;
 
-    while (halt == 0) {
+	nrOfInstr = numberOfInstructions;
+    while (nrOfInstr > 0) {
         fetch();
+        if(ir == -1)
+        	return;
         decode();
         execute();
+        if(currentProcessPid != OSPid)
+        	nrOfInstr = nrOfInstr - 1;
+        
     }
 
-    halt = 0;
+    //halt = 0;
 
-    interpret = 0;
-    debug     = 0;
+    //interpret = 0;
+    //debug     = 0;
 }
 
 void up_push(int value) {
@@ -4965,13 +5478,21 @@ void up_copyArguments(int argc, int *argv) {
     }
 }
 
-void copyBinaryToMemory() {
+void passParameterToOS(int data, int offset) {
+	int* OSregisters;
+	int* begin;
+	OSregisters = *(processTable + 3 * OSPid + 1);
+	begin = memory + *(OSregisters + REG_GP) / 4;
+	*(begin + offset) = data;
+}
+
+void copyBinaryToMemory(int offset) {
     int a;
 
     a = 0;
 
     while (a < binaryLength) {
-        storeMemory(a, loadBinary(a));
+        storeMemory(offset + a, loadBinary(a));
 
         a = a + 4;
     }
@@ -5098,11 +5619,13 @@ void disassemble() {
     interpret = 0;
     debug     = 1;
 
-    copyBinaryToMemory();
+    copyBinaryToMemory(0);
     
     resetInterpreter();
 
-    run();
+    run();//TODO does this still work?
+    
+    debug = 0;
 
     outputName = (int*) 0;
     outputFD   = 1;
@@ -5110,6 +5633,11 @@ void disassemble() {
 
 void emulate(int argc, int *argv) {
 	int* nameOfFirstProcess;
+	int spaceForUserPageFrames; 
+	int processesLeft;
+	int nrOfMappingsForFirstProcess;
+	int i;
+	
     print(selfieName);
     print((int*) ": this is selfie's mipster executing ");
     print(binaryName);
@@ -5130,7 +5658,18 @@ void emulate(int argc, int *argv) {
 
 	currentProcessPid = OSPid;
 	
-    copyBinaryToMemory();
+	nameOfFirstProcess = binaryName;
+	
+	binarylengthOfFirstProcess = binaryLength;
+	
+	//write current content of binary to file
+	emit();
+	
+	binaryName = (int*) "selfie1.mips";
+
+	load(open(binaryName, O_RDONLY, 0));	
+
+    copyBinaryToMemory(0);
 
     resetInterpreter();
 
@@ -5139,11 +5678,40 @@ void emulate(int argc, int *argv) {
     *(registers+REG_GP) = binaryLength; // initialize global pointer
 
     *(registers+REG_K1) = *(registers+REG_GP); // initialize bump pointer
+    
 
-    up_copyArguments(argc, argv);
+    //up_copyArguments(argc, argv);
+	up_copyArguments(1, argv);//wrong name
+    spaceForUserPageFrames = memorySize - 4 - binaryLength - 4 * 1024;
+    
+    nrOfMappingsForFirstProcess = binarylengthOfFirstProcess / 4096;
+    
+    if(binarylengthOfFirstProcess % 4096 != 0)
+    	nrOfMappingsForFirstProcess = nrOfMappingsForFirstProcess + 1;
 
-    run();
+    passParameterToOS(spaceForUserPageFrames, 0);
+	passParameterToOS(open(nameOfFirstProcess, O_RDONLY, 0), 1);	
+	passParameterToOS(nrOfMappingsForFirstProcess, 2);
+	passParameterToOS(argc, 3);
 
+	//maximal 6 commandline args
+	i = 4;
+	while (i < 10) {
+		passParameterToOS(*(argv + i - 4), i);
+		i = i + 1;
+	}
+
+	switchToProcess(OSPid); //init OS
+	run();
+	while (1) {//TODO implement syscall_halt which is called by OS if no more processes are in the ready queue
+		passParameterToOS(OS_EVENT_SCHEDULE, 0);	
+		passParameterToOS(currentProcessPid, 1);
+		switchToProcess(OSPid); 
+    	run();
+	}
+	
+	interpret = 0;
+	
     print(selfieName);
     print((int*) ": this is selfie's mipster terminating ");
     print(binaryName);
@@ -5158,26 +5726,29 @@ void emulate(int argc, int *argv) {
     printProfile((int*) ": stores: ", stores, storesPerAddress);
 }
 
+
 // -----------------------------------------------------------------
 // ----------------------------- MAIN ------------------------------
 // -----------------------------------------------------------------
 
 int selfie(int argc, int* argv) {
-	if (argc == 0) {    
+	if (argc == 0) {   
 		print(selfieName);
         print((int*) ": loading kernel :-D");
         println();
-
-		//OSProcess();
+        
+		executeOS();
 
         return 0;
 	} else if (argc < 2) {
         return -1;
 	} else {
+		numberOfInstructions = 1000;
+		
         while (argc >= 2) {
             if (stringCompare((int*) *argv, (int*) "-c")) {
                 sourceName = (int*) *(argv+1);
-                binaryName = sourceName;
+                binaryName = "a.out";
 
                 argc = argc - 2;
                 argv = argv + 2;
@@ -5198,6 +5769,7 @@ int selfie(int argc, int* argv) {
                     println();
                 }
             } else if (stringCompare((int*) *argv, (int*) "-s")) {
+            	numberOfInstructions = codeLength;
                 assemblyName = (int*) *(argv+1);
 
                 argc = argc - 2;
@@ -5219,7 +5791,7 @@ int selfie(int argc, int* argv) {
                 argc = argc - 2;
                 argv = argv + 2;
 
-                load();
+                load(open(binaryName, O_RDONLY, 0));
             } else if (stringCompare((int*) *argv, (int*) "-m")) {
                 initMemory(atoi((int*) *(argv+1)) * MEGABYTE);
 
