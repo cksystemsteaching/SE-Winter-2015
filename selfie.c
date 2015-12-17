@@ -5345,7 +5345,7 @@ void copyBinaryToMemory() {
 	print(itoa(loadBinary(a), string_buffer, 2, 0, 0));
 	print((int*) " --- FROM VADDR: ");
 	print(itoa(a, string_buffer, 10, 0, 0));
-	print((int*) " --- INTO PADDR: ");	
+	print((int*) " --- INTO PADDR: ");
 	print(itoa(tlb(a), string_buffer, 10, 0, 0));
 	println();
 
@@ -5568,13 +5568,18 @@ void operate(int argc, int *argv) {
 
     up_copyArguments(argc, argv);
 
+    pid = create_context();
+
     kernel_mode = 0;
     registers_os = malloc(32*4);
     pos = malloc(PAGE_TABLE_SIZE);
 
-    context_lists = context_insert(0, registers_os, pos, context_lists, 0, 1);  
+    context_lists = context_insert(pid, registers_os, pos, context_lists, 0, 1);
 
-    run();
+    print((int*) "---");
+    println();
+
+    switch_context(pid);
 
     print(selfieName);
     print((int*) ": this is selfie's mipster terminating ");
