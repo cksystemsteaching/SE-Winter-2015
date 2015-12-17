@@ -73,7 +73,7 @@ int* selfieName = (int*)0;
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 
 int mc_currentPId; //Current PID of running Process
-
+int mc_kProccesDebug = 1;
 //=============================
 //hypercalls
 //We Allow only PID 0 to
@@ -96,11 +96,15 @@ int mc_hyperCall_mapPageInContext();
 void mc_emit_hyperCall_flushPageInContext();
 int mc_hyperCall_flushPageInContext();
 
+void mc_emit_hyperCall_loadBinary();
+int mc_hyperCall_loadBinary();
+
 int MC_HYPERCALL_SWITCHCONTEXT = 6000;
 int MC_HYPERCALL_CREATECONTEXT = 6001;
 int MC_HYPERCALL_DELETECONTEXT = 6002;
 int MC_HYPERCALL_MAPPAGEINCONTEXT = 6003;
 int MC_HYPERCALL_FLUSHPAGEINCONTEXT = 6004;
+int MC_HYPERCALL_LOADBINARY = 6005; //Loads binary p1.mips32 hardcoded for now
 
 int* mc_kernel_context = (int*)0; //Our kernel has his own pointer.
 int mc_kernel_argsAddr = 0;
@@ -112,6 +116,7 @@ int mc_switchAfterMInstructions = 1;
 //==============================
 void mc_prepareKernelContext();
 int* mc_getPageTableEntry(int offset);
+void mc_setPageTableEntry(int offset,int value);
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -4216,7 +4221,25 @@ void syscall_amalloc()
         if ((int)mc_kernel_argsAddr == 0) {
             if (flag == 2) {
                 mc_kernel_argsAddr = bump;
-                storeMemory(mc_kernel_argsAddr, 12);
+                storeMemory(mc_kernel_argsAddr, 1); //Boot
+                storeMemory(mc_kernel_argsAddr + 4, mc_currentPageTable);
+                storeMemory(mc_kernel_argsAddr + 8, memorySize);
+                storeMemory(mc_kernel_argsAddr + 12, mc_kProccesDebug);
+            }
+        }
+        if (flag == 1) { //Aligned Malloc
+            while ((bump % 4096) != 0) {
+                if (debug) {
+                    print(binaryName);
+                    print((int*)" Alligned malloc, bump Pointer not aligned,aligne now!");
+                    println();
+                }
+                bump = bump + 4;
+            }
+            if (debug) {
+                print(binaryName);
+                print((int*)" Alligned malloc, bump Pointer is alligned");
+                println();
             }
         }
     }
@@ -4308,27 +4331,28 @@ void emitPutchar()
 
 int tlb(int vaddr)
 {
-    int* pAddr;
+    int pAddr;
     int vpn;
     int rpn;
     vpn = rightShift(vaddr, 12);
     rpn = rightShift(leftShift(vaddr, 20), 20);
-
+    
     if (vaddr % 4 != 0)
         exception_handler(EXCEPTION_ADDRESSERROR);
-
-    pAddr = (int*)mc_getPageTableEntry(vpn);
-    if ((int)pAddr == 0) {
+    pAddr = mc_getPageTableEntry(vpn);
+    if (pAddr == 0) {
         if (debug) {
             print(selfieName);
             print((int*)" Page Fault, Try to Palloc Now!");
             println();
         }
+        printf("VPN: %0X\n",vpn);
+        exit(100);
         //TODO Switch to PID 0 call PageFault
     }
-    pAddr = pAddr - memory;
+    pAddr = pAddr - (int)memory;
     // physical memory is word-addressed for lack of byte-sized data type
-    return (int)(pAddr + (rpn / 4));
+    return (int)(pAddr + rpn) / 4;
 }
 
 int loadMemory(int vaddr)
@@ -4392,6 +4416,9 @@ void fct_syscall()
         }
         else if (*(registers + REG_V0) == MC_HYPERCALL_FLUSHPAGEINCONTEXT) {
             mc_hyperCall_flushPageInContext();
+        }
+        else if (*(registers + REG_V0) == MC_HYPERCALL_LOADBINARY) {
+            mc_hyperCall_loadBinary();
         }
         else {
             exception_handler(EXCEPTION_UNKNOWNSYSCALL);
@@ -5590,7 +5617,7 @@ int main(int argc, int* argv)
 
     if (selfie(argc, (int*)argv) != 0) {
         print(selfieName);
-        print((int*)": usage: selfie { -c source | -o binary | -s assembly | -l binary } [ -m size ... | -d size ... | -k size ... ] ");
+        print((int*)": usage: selfie { -c source | -o binary | -s assembly | -l binary } [ -m size ... | -d size ... | -k size ... ] -kd (kernel process debug mode)");
         println();
     }
 }
@@ -5628,6 +5655,39 @@ int mc_hyperCall_createContext()
         //TODO Implement userMode Trap
     }
 }
+
+void mc_emit_hyperCall_loadBinary()
+{
+    createSymbolTableEntry(GLOBAL_TABLE, (int*)"loadBinary", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+
+    emitIFormat(OP_ADDIU, REG_SP, REG_A2, 0);
+
+    emitIFormat(OP_ADDIU, REG_SP, REG_A1, 0);
+
+    emitIFormat(OP_ADDIU, REG_SP, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, MC_HYPERCALL_LOADBINARY);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    // jump back to caller, return value is in REG_V0
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+int mc_hyperCall_loadBinary()
+{
+    if (mc_currentPId != 0) {
+        //TODO Implement userMode Trap
+    }
+    pc = 540; //Restore PC to first IF in kernel p
+    int *binName;
+    binName = binaryName;
+    binaryName = malloc(12*4);
+    binaryName = (int*)"p1.mips32";
+    
+}
+
 
 void mc_emit_hyperCall_switchContext()
 {
@@ -5709,6 +5769,11 @@ int mc_hyperCall_mapPageInContext()
     if (mc_currentPId != 0) {
         //TODO Implement userMode Trap
     }
+    if (debug) {
+        print(binaryName);
+        print((int*)"Hypercall mapPageInContext");
+        println();
+    }
 }
 
 void mc_emit_hyperCall_flushPageInContext()
@@ -5749,20 +5814,25 @@ void mc_prepareKernelContext()
 {
     int* lastEntry;
     int pSize;
+    int i;
+    int count;
+    count = 1024;
     pSize = memorySize / 4096;
     mc_kernel_context = malloc(4 * 4);
     *mc_kernel_context = pc;                       //Programcounter
     *(mc_kernel_context + 1) = (int)registers;     //registers
-    *(mc_kernel_context + 2) = (int)malloc(pSize); //page table
+    *(mc_kernel_context + 2) = (int)malloc(pSize*4); //page table
     *(mc_kernel_context + 3) = 0;                  //pID
     mc_currentPageTable = (int*)*(mc_kernel_context + 2);
     mc_currentPId = 0;
-    //The first page table entries for the kernel are manually set
+    //The kernel proccess get a fully filled pageTable
     *mc_currentPageTable = (int)memory;
-    *(mc_currentPageTable + 1) = *mc_currentPageTable + 4096;
-    lastEntry = mc_currentPageTable + pSize;
-    lastEntry = lastEntry - 1;
-    *lastEntry = *(mc_currentPageTable + 1) + 4096;
+    i = 1;
+    while (count < memorySize / 4) {
+        mc_setPageTableEntry(i,memory + count);
+        count = count + 1024;
+        i = i + 1;
+    }
 }
 
 int* mc_getPageTableEntry(int offset)
@@ -5771,3 +5841,10 @@ int* mc_getPageTableEntry(int offset)
     pTable = (mc_currentPageTable + offset);
     return (int*)*pTable;
 }
+
+void mc_setPageTableEntry(int offset,int value){
+    int* pTable;
+    pTable = (int*)(mc_currentPageTable + offset);
+    *pTable = value;
+}
+
