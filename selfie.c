@@ -5634,15 +5634,19 @@ void mc_emit_hyperCall_createContext()
 {
     createSymbolTableEntry(GLOBAL_TABLE, (int*)"createContext", 0, FUNCTION, INT_T, 0, binaryLength);
 
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_LW, REG_SP, REG_A3, 0); //pid
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+    
+    emitIFormat(OP_LW, REG_SP, REG_A2, 0); //reg
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+   
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0); //pt
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+    
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0); // pc
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
-    emitIFormat(OP_ADDIU, REG_SP, REG_A2, 0);
-
-    emitIFormat(OP_ADDIU, REG_SP, REG_A1, 0);
-
-    emitIFormat(OP_ADDIU, REG_SP, REG_A0, 0);
-
-    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, MC_HYPERCALL_SWITCHCONTEXT);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, MC_HYPERCALL_CREATECONTEXT);
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
 
     // jump back to caller, return value is in REG_V0
