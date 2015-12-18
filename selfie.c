@@ -4376,11 +4376,16 @@ int tlb(int vaddr)
         halt = 0;
         interpret = it;
         debug = db;
+        pAddr = mc_getPageTableEntry(vpn);
+    }
+    if(pAddr == 0){
+        //TODO Trap something went wrong with paging
+        exit(200);
     }
     pAddr = pAddr - (int)memory;
     // physical memory is word-addressed for lack of byte-sized data type
     return (int)(pAddr + rpn) / 4;
-    };
+};
 
 int loadMemory(int vaddr)
 {
@@ -5806,19 +5811,16 @@ void mc_emit_hyperCall_mapPageInContext()
 {
     createSymbolTableEntry(GLOBAL_TABLE, (int*)"mapPageInContext", 0, FUNCTION, INT_T, 0, binaryLength);
 
-    emitIFormat(OP_LW, REG_SP, REG_A3, 0); //pid
-    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
 
-    emitIFormat(OP_LW, REG_SP, REG_A2, 0); //reg
-    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+    emitIFormat(OP_ADDIU, REG_SP, REG_A2, 0);
 
-    emitIFormat(OP_LW, REG_SP, REG_A1, 0); //pt
-    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+    emitIFormat(OP_ADDIU, REG_SP, REG_A1, 0);
 
-    emitIFormat(OP_LW, REG_SP, REG_A0, 0); // pc
-    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+    emitIFormat(OP_ADDIU, REG_SP, REG_A0, 0);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_V0, MC_HYPERCALL_MAPPAGEINCONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
 }
 
 int mc_hyperCall_mapPageInContext()
@@ -5833,7 +5835,6 @@ int mc_hyperCall_mapPageInContext()
     }
     mc_restoreUserContext();
     halt = 1;
-    printf("Map Page In Context\n");
 }
 
 void mc_emit_hyperCall_flushPageInContext()
@@ -5850,7 +5851,6 @@ void mc_emit_hyperCall_flushPageInContext()
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_V0, MC_HYPERCALL_FLUSHPAGEINCONTEXT);
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
-
 }
 
 int mc_hyperCall_flushPageInContext()
@@ -5914,13 +5914,14 @@ void mc_restoreKernelContext()
     *(mc_currentUserProcess + 1) = (int)registers;      //registers
     *(mc_currentUserProcess + 2) = mc_currentPageTable; //page table
     *(mc_currentUserProcess + 3) = mc_currentPId;       //pID
-    pc = 616;
+    pc = 608;
     registers = (int*)*(mc_kernel_context + 1);
     mc_currentPageTable = (int*)*(mc_kernel_context + 2);
     mc_currentPId = *(mc_kernel_context + 3);
 }
 
-void mc_restoreUserContext(){
+void mc_restoreUserContext()
+{
     pc = *mc_currentUserProcess;
     registers = (int*)*(mc_currentUserProcess + 1);
     mc_currentPageTable = (int*)*(mc_currentUserProcess + 2);
