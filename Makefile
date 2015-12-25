@@ -1,7 +1,9 @@
-CC			:= gcc
-CC_OPT			:= -w -m32 -Wl,--unresolved-symbols=ignore-in-object-files -D'main(a, b)=main(int argc, char **argv)'
+CC_OSX				:= clang
+CC_OPT_OSX		:= -w -m32 -g -undefined dynamic_lookup -D'main(a, b)=main(int argc, char **argv)'
+CC_LINUX			:= gcc
+CC_OPT_LINUX	:= -w -m32 -Wl,--unresolved-symbols=ignore-in-object-files -D'main(a, b)=main(int argc, char **argv)'
 EXEC			:= selfie
-MEM_SIZE		:= 32
+MEM_SIZE	:= 32
 RTS1			:= 2
 RTS2			:= 10
 RTS3			:= 100
@@ -10,7 +12,7 @@ TEST_BINARY		:= myprog.mips
 OS_BINARY		:= os.mips
 KERNEL_BINARY		:= kernel.mips
 
-all: test_binary
+all: test_binary_linux
 
 clena: clean
 clan: clean
@@ -21,11 +23,24 @@ calen: clean
 clea: clean
 cclean: clean
 
-compile:
-	$(CC) $(CC_OPT) $(EXEC).c -o $(EXEC)
+compile_osx:
+	$(CC_OSX) $(CC_OPT_OSX) $(EXEC).c -o $(EXEC)
 
-test_binary:
-	$(CC) $(CC_OPT) $(EXEC).c -o $(EXEC)
+test_binary_osx:
+	$(CC_OSX) $(CC_OPT_OSX) $(EXEC).c -o $(EXEC)
+	touch $(TEST_BINARY)
+	touch $(KERNEL_BINARY)
+	touch $(OS_BINARY)
+	./$(EXEC) -c $(TEST_INPUT) -o $(TEST_BINARY)
+	./$(EXEC) -c $(EXEC).c -o $(KERNEL_BINARY)
+	./$(EXEC) -c $(EXEC).c -o $(OS_BINARY)
+	./$(EXEC) -k 64 $(KERNEL_BINARY) ./$(EXEC) -l $(OS_BINARY) -os 32 -m 16 $(TEST_BINARY)
+
+compile_linux:
+	$(CC_LINUX) $(CC_OPT_LINUX) $(EXEC).c -o $(EXEC)
+
+test_binary_linux:
+	$(CC_LINUX) $(CC_OPT_LINUX) $(EXEC).c -o $(EXEC)
 	touch $(TEST_BINARY)
 	touch $(KERNEL_BINARY)
 	touch $(OS_BINARY)
