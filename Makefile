@@ -34,7 +34,7 @@ test_binary_osx:
 	./$(EXEC) -c $(TEST_INPUT) -o $(TEST_BINARY)
 	./$(EXEC) -c $(EXEC).c -o $(KERNEL_BINARY)
 	./$(EXEC) -c $(EXEC).c -o $(OS_BINARY)
-	./$(EXEC) -k 64 $(KERNEL_BINARY) ./$(EXEC) -l $(OS_BINARY) -os 32 -m 16 $(TEST_BINARY)
+	./$(EXEC) -k 64 $(KERNEL_BINARY) ./$(EXEC) -l $(TEST_BINARY) -m 16
 
 compile_linux:
 	$(CC_LINUX) $(CC_OPT_LINUX) $(EXEC).c -o $(EXEC)
@@ -47,10 +47,10 @@ test_binary_linux:
 	./$(EXEC) -c $(TEST_INPUT) -o $(TEST_BINARY)
 	./$(EXEC) -c $(EXEC).c -o $(KERNEL_BINARY)
 	./$(EXEC) -c $(EXEC).c -o $(OS_BINARY)
-	./$(EXEC) -k 64 $(KERNEL_BINARY) ./$(EXEC) -l $(OS_BINARY) -os 32 -m 16 $(TEST_BINARY)
+	./$(EXEC) -k 64 $(KERNEL_BINARY) ./$(EXEC) -l $(TEST_BINARY) -m 16
 
 debug:
-	ggdb --args ./$(EXEC) -k 64 $(KERNEL_BINARY) ./$(EXEC) -l $(OS_BINARY) -os 32 -m 16 $(TEST_BINARY)
+	ggdb --args ./$(EXEC) -k 64 $(KERNEL_BINARY) ./$(EXEC) -l $(TEST_BINARY) -m 16
 
 clean:
 	rm -f *.mips*
