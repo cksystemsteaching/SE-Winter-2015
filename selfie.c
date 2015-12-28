@@ -90,7 +90,7 @@ int  stringCompare(int *s, int *t);
 int  atoi(int *s);
 int* itoa(int n, int *s, int b, int a, int p);
 
-void putCharacter(int character);
+void putcharacter(int character);
 
 void print(int *s);
 void println();
@@ -690,7 +690,7 @@ void syscall_open();
 void emitMalloc();
 void syscall_malloc();
 
-void emitPutChar();
+void emitPutchar();
 //+++++++ recycling and complete old file for A6  +++++++++++++++++++ 
 void emitGetPID();
 void syscall_getPID();
@@ -733,7 +733,7 @@ int SYSCALL_EXIT   = 4001;
 int SYSCALL_READ   = 4003;
 int SYSCALL_WRITE  = 4004;
 int SYSCALL_OPEN   = 4005;
-//int SYSCALL_PUTCHAR = 4006;
+//int SYSCALL_putchar = 4006;
 //+++++++ recycling and complete old file for A6  +++++++++++++++++++
 int SYSCALL_MALLOC  = 5001;
 int SYSCALL_WAIT    = 5002;
@@ -1188,7 +1188,7 @@ int* itoa(int n, int *s, int b, int a, int p) {
     return s;
 }
 
-void putCharacter(int character) {
+void putcharacter(int character) {
     if (outputFD == 1)
         putchar(character);
     else {
@@ -1213,18 +1213,18 @@ void print(int *s) {
     i = 0;
 
     while (loadCharacter(s, i) != 0) {
-        putCharacter(loadCharacter(s, i));
+        putcharacter(loadCharacter(s, i));
 
         i = i + 1;
     }
 }
 
 void println() {
-    putCharacter(CHAR_LF);
+    putcharacter(CHAR_LF);
 }
 
 void printCharacter(int character) {
-    putCharacter(CHAR_SINGLEQUOTE);
+    putcharacter(CHAR_SINGLEQUOTE);
 
     if (character == CHAR_EOF)
         print((int*) "end of file");
@@ -1235,17 +1235,17 @@ void printCharacter(int character) {
     else if (character == CHAR_CR)
         print((int*) "carriage return");
     else
-        putCharacter(character);
+        putcharacter(character);
 
-    putCharacter(CHAR_SINGLEQUOTE);
+    putcharacter(CHAR_SINGLEQUOTE);
 }
 
 void printString(int *s) {
-    putCharacter(CHAR_DOUBLEQUOTE);
+    putcharacter(CHAR_DOUBLEQUOTE);
 
     print(s);
     
-    putCharacter(CHAR_DOUBLEQUOTE);
+    putcharacter(CHAR_DOUBLEQUOTE);
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -1259,14 +1259,14 @@ void printString(int *s) {
 // -----------------------------------------------------------------
 
 void printSymbol(int symbol) {
-    putCharacter(CHAR_DOUBLEQUOTE);
+    putcharacter(CHAR_DOUBLEQUOTE);
 
     if (symbol == SYM_EOF)
         print((int*) "end of file");
     else
         print((int*) *(SYMBOLS + symbol));
 
-    putCharacter(CHAR_DOUBLEQUOTE);
+    putcharacter(CHAR_DOUBLEQUOTE);
 }
 
 void printLineNumber(int* message, int line) {
@@ -3272,17 +3272,14 @@ void emitLeftShiftBy(int b) {
 }
 
 void emitMainEntry() {
-    // instruction at address zero cannot be fixed up, so just put a NOP there
+    // instruction at address zero cannot be fixed up
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_NOP);
 
     createSymbolTableEntry(GLOBAL_TABLE, (int*) "main", binaryLength, FUNCTION, INT_T, 0);
 
-    // jump and link to main, will return here only if there is no exit call
-    emitJFormat(OP_JAL, 0);
+    mainJumpAddress = binaryLength;
 
-    // we exit cleanly with error code 0 pushed onto the stack
-    emitIFormat(OP_ADDIU, REG_SP, REG_SP, -4);
-    emitIFormat(OP_SW, REG_SP, REG_ZR, 0);
+    emitJFormat(OP_JAL, 0);
 }
 
 // -----------------------------------------------------------------
@@ -3333,7 +3330,7 @@ void compile() {
     emitWrite();
     emitOpen();
     emitMalloc();
-   // emitPutChar();
+    emitPutchar();
     
     emitGetPID();
     emitYield();
@@ -3344,7 +3341,7 @@ void compile() {
     
     emitSwitchContext();
 	emitCreateContext();
-	//emitDeleteContext();
+	emitDeleteContext();
 	//emitMapePageInContext();
 	//emitFlushPageInContext();
 
@@ -4984,8 +4981,8 @@ void syscall_wait(){
 }
 
 
-void emitPutChar() {
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "putchar", 0, FUNCTION, INT_T, 0);
+void emitPutchar() {
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "putchar", binaryLength, FUNCTION, INT_T, 0);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
 
@@ -5079,6 +5076,37 @@ void hypercall_createContext() {
 
 }
 
+void emitDeleteContext() {
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "delete_ctx", binaryLength, FUNCTION, VOID_T, 0);
+	
+	print((int*) "... emiting hypercall delete context ...");
+	println();
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_DELETECONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void hypercall_deleteContext() {
+    int pid;
+
+    pid = *(registers+REG_A0);
+
+    print((int*) "delete context with PID ");
+    print(pid);
+    println();
+
+    exit(0);
+
+}
+
 
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -5140,8 +5168,6 @@ void fct_syscall() {
             syscall_lock();
         } else if (*(registers+REG_V0) == SYSCALL_UNLOCK) {
             syscall_unlock();
-        //} else if (*(registers+REG_V0) == SYSCALL_PUTCHAR) {
-           // syscall_putChar();
         } else if (*(registers+REG_V0) == SYSCALL_FORK) {
             syscall_fork();
         } else if (*(registers+REG_V0) == SYSCALL_YIELD) {
@@ -5152,8 +5178,8 @@ void fct_syscall() {
              hypercall_createContext();
         } else if (*(registers+REG_V0) ==  HYPERCALL_SWITCHCONTEXT) {
            hypercall_switchContext();
-       // } else if (*(registers+REG_V0) ==  HYPERCALL_DELETECONTEXT) {
-       //    hypercall_deleteContext();
+        } else if (*(registers+REG_V0) ==  HYPERCALL_DELETECONTEXT) {
+           hypercall_deleteContext();
        // } else if (*(registers+REG_V0) ==  HYPERCALL_MAPPAGEINCONTEXT) {
        //    hypercall_mapPageInContext();
        // } else if (*(registers+REG_V0) ==  HYPERCALL_FLUSHPAGEINCONTEXT) {

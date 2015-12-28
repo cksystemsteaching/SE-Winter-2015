@@ -63,7 +63,7 @@ int main(){
 	putchar(10);
 	putchar(10);
 	//if(pid < 0){
-//	unlock();
+	//unlock();
 	exit(0);
 }
 
