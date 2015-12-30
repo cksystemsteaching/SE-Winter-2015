@@ -754,7 +754,7 @@ int* communicationChunk;
 
 // OS functions
 
-void executeOS();
+void executeOS(int argc, int* argv);
 void initOS();
 int* createProcess();
 int* palloc();
@@ -816,6 +816,7 @@ int* nextFreeProcess;
 int OSPid;
 int currentProcessPid;
 int binarylengthOfFirstProcess;
+int spaceForArgs;
 
 // ------------------------- INITIALIZATION ------------------------
 
@@ -1071,7 +1072,7 @@ int stringCompare(int *s, int *t) {
 
     i = 0;
 
-    while (1)
+    while (1) 
         if (loadCharacter(s, i) == 0)
             if (loadCharacter(t, i) == 0)
                 return 1;
@@ -1081,6 +1082,7 @@ int stringCompare(int *s, int *t) {
             i = i + 1;
         else
             return 0;
+
 }
 
 int atoi(int *s) {
@@ -1617,7 +1619,7 @@ int getSymbol() {
 
         symbol = SYM_INTEGER;
 
-    } else if (character == CHAR_SINGLEQUOTE) {
+    } else if (character == CHAR_SINGLEQUOTE) {//TODO allow things like \n
         getCharacter();
 
         constant = 0;
@@ -3837,7 +3839,7 @@ void emit() {
 
 void load(int fd) {
     int numberOfReadBytes;
-
+	
     if (fd < 0) {
         print(selfieName);
         print((int*) ": could not open input file ");
@@ -3870,7 +3872,8 @@ void load(int fd) {
 
         if (numberOfReadBytes > 0) {
             binaryLength = numberOfReadBytes;
-
+			
+			
             return;
         }
     }
@@ -3960,17 +3963,16 @@ void syscall_read() {
 
 
     while (i < size / 4){
-    			        print((int*)"in read\n");
 			newSize = newSize + read(fd, memory + tlb(vaddr + i * 4), 4);
-						        print((int*)"in read1\n");
+			
 			i = i + 1;
-			        print(itoa(i, string_buffer, 10, 0, 0));
 	}
 	
     if (size % 4 != 0) {
     	newSize = newSize + read(fd, memory + tlb(vaddr + i * 4), size % 4);
     }
-		
+	
+	
 	
 
     *(registers+REG_V0) = newSize;
@@ -4124,9 +4126,10 @@ void syscall_malloc() {//ATTENTION: DO NOT ZERO!
 
     bump = *(registers+REG_K1);
 
-    if (bump + size >= *(registers+REG_SP))
+    if (bump + size >= *(registers+REG_SP)) {
         exception_handler(EXCEPTION_HEAPOVERFLOW);
-
+	}
+	
     *(registers+REG_K1) = bump + size;
     *(registers+REG_V0) = bump;
 
@@ -4175,10 +4178,12 @@ void switchToProcess (int pid) {
 
 void hypercall_switch_context() {
 	int pid;
+	
 	if (OSPid == currentProcessPid) {
 		pid = *(registers + REG_A0);
 		switchToProcess(pid);
 	} //TODO else
+
 }
 
 void emitSwitch_context() {
@@ -4207,7 +4212,6 @@ void hypercall_map_page_in_context() {
 		pid = *(registers + REG_A0);
 		page = *(registers + REG_A1);
 		pageFrame = *(registers + REG_A2);
-		
 		pageTable = *(processTable + 3 * pid + 2);
 		*(pageTable + page) = pageFrame;
 	}
@@ -4368,18 +4372,22 @@ void emitDelete_context() {
 // -----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 
-void executeOS() {
+void executeOS(int argc, int* argv) {
 	int event;
 	int callerPid;
-	initOS();
+	initOS(argc, argv);
 	
 	while (1) {
+	print((int*) "<<<<<<<<<<<<<<<<<<<<");
+    	println();
 		event = *communicationChunk;
 		callerPid = *(communicationChunk + 1);
 		if (event == OS_EVENT_SCHEDULE) {
 			//TODO implement event handler
+			exit(23);
 		} else if (event == OS_EVENT_PAGE_FAULT) {
 			//TODO implement event handler
+			exit(23);
 		} else {
 			switch_context(callerPid);//TODO does this make sense?
 		}
@@ -4387,17 +4395,17 @@ void executeOS() {
 	}
 }
 
-void initOS() {
+void initOS(int argc, int* argv) {
 	int spaceForUserPageFrames;
 	int* restOfPage;
 	int* firstProcess;
 	int i;
 	int pid;
 	int* pageTable;
-	int fd;
+	int* nameOfFirstProcess;
 	int nrOfCodePages;
 	int* stackPage;
-	int* next;
+	int next;
 	
 	communicationChunk = malloc(10 * 4);
 	
@@ -4431,37 +4439,41 @@ void initOS() {
 
     pid = *(firstProcess + 2);
     pageTable = (int*) *(firstProcess + 3);
-    
+
     //load first process
-	fd = *(communicationChunk + 1);
-	
+	//fd = *(communicationChunk + 1);
+	nameOfFirstProcess = *argv;
+
 	nrOfCodePages = *(communicationChunk + 2);
 	i = 0;
-	
-	*pageTable = palloc(pid);
 	
 	while (i < nrOfCodePages) {
 		*(pageTable + i) = palloc(pid);
 		map_page_in_context(pid, i, *(pageTable + i));
+		i = i + 1;
 	}
-    load(fd);
+	
+    //print(itoa(fd, string_buffer, 10, 0, 0));
+	load(open(nameOfFirstProcess, O_RDONLY, 0));
 
     copyBinaryToMemory(userProcessPageFrames);
-
+	
     //load args
     *(pageTable + 1023) = palloc(pid);//map one stack page
 	map_page_in_context(pid, 1023, *(pageTable + 1023));
 	stackPage = *(pageTable + 1023);
 	
-	*(stackPage + 1023) = *(communicationChunk + 3);//argc
+	//*(stackPage + 1023) = *(communicationChunk + 3);//argc//TODO argumente auf stack legen 
 	
-	i = 0;
+	//i = 0;
+
+	//while (i < *(communicationChunk + 3)) {
+		//*(stackPage + (1022 - i)) = *(argv + (1 + i));
+		//i = i + 1;
+	//}
 	
-	while (i < *(communicationChunk + 3)) {
-		*(stackPage + (1022 - i)) = *(communicationChunk + (4 + i));
-		i = i + 1;
-	}
     switch_context(pid);
+	
 }
 
 int* createProcess() {
@@ -4497,7 +4509,7 @@ int* palloc(int pid) {
 		print((int*) " killed.");
 		println();
 		//exit(1234);
-		//syscall_exit();
+		//syscall_exit();//TODO
 		return 0;
 	}
 
@@ -4531,9 +4543,10 @@ int tlb(int vaddr) {
 	int* pageTableEntry;
 	int* OSregisters;
 	
-    if (vaddr % 4 != 0)
+    if (vaddr % 4 != 0){
         exception_handler(EXCEPTION_ADDRESSERROR);
-        
+    }  
+    
     if (interpret == 0)
 		return vaddr / 4;
 		
@@ -4541,10 +4554,10 @@ int tlb(int vaddr) {
 	
 	if (currentProcessPid == OSPid) {
 		if (vaddr < 0) { 
-			print((int*) "our Segmentation fault");
+			print((int*) "Segmentation fault");
 			exit(-1);
 		} else if (vaddr >= memorySize) {
-			print((int*) "our Segmentation fault");
+			print((int*) "Segmentation fault");
 			exit(-1);
 		}
 		return vaddr / 4;		
@@ -4571,8 +4584,9 @@ int tlb(int vaddr) {
 		passParameterToOS(currentProcessPid, 1);
 		passParameterToOS(vaddr / (4 * KILOBYTE), 3);
 		
-		OSregisters = *(processTable + (OSPid * 3 + 1));
-		*pageTableEntry = *(OSregisters + REG_V0);//TODO geht das wirklich so oder sollt ma lieber wieder communicationChunk verwenden?
+		switchToProcess(OSPid);
+		//OSregisters = *(processTable + (OSPid * 3 + 1));
+		//*pageTableEntry = *(OSregisters + REG_V0);//TODO geht das wirklich so oder sollt ma lieber wieder communicationChunk verwenden?
 		//*pageTableEntry = palloc();
 		//if(*pageTableEntry == 0)//TODO kill process in os if no memory left
 			//TODO invoke scheduler
@@ -4580,7 +4594,7 @@ int tlb(int vaddr) {
 		
 	}
 
-	return (*pageTableEntry + vaddr % (4 * KILOBYTE) - (int) memory) / 4;
+	return (*pageTableEntry + vaddr % (4 * KILOBYTE)) / 4;
 }
 
 int loadMemory(int vaddr) {
@@ -4588,7 +4602,9 @@ int loadMemory(int vaddr) {
 	int returnValue;
 	
     paddr = tlb(vaddr);
-    
+    //print((int*)"paddr:\n");
+    //print(itoa(paddr, string_buffer, 10, 0, 0));
+    //println();
 	return *(memory + paddr);	
 }
 
@@ -4612,7 +4628,7 @@ int allocateProcess() {
 		exit(-1); //if still here, shut down machine
 	}
 
-	newPid = ((int) nextFreeProcess - (int) processTable) / 3;
+	newPid = ((int) nextFreeProcess - (int) processTable) / 3 / 4; //korrekt???
 	nextFreeProcess = processTable + *nextFreeProcess;
 
 	return newPid;
@@ -5394,6 +5410,10 @@ void run() {
 
 	nrOfInstr = numberOfInstructions;
     while (nrOfInstr > 0) {
+    	//println();
+    	//print((int*)"currentProcessPid");
+    	//print(itoa(currentProcessPid, string_buffer, 10, 0, 0));
+    	//println();
         fetch();
         if(ir == -1)
         	return;
@@ -5401,7 +5421,6 @@ void run() {
         execute();
         if(currentProcessPid != OSPid)
         	nrOfInstr = nrOfInstr - 1;
-        
     }
 
     //halt = 0;
@@ -5427,6 +5446,11 @@ int up_malloc(int size) {
     *(registers+REG_A0) = size;
 
     syscall_malloc();
+    
+    if(size % 4 != 0)
+    	size = size + 4 - size % 4;
+    
+    spaceForArgs = spaceForArgs + size;
 
     return *(registers+REG_V0);
 }
@@ -5461,7 +5485,7 @@ int up_copyString(int *s) {
 
 void up_copyArguments(int argc, int *argv) {
     int vaddr;
-
+    
     up_push(argc);
 
     vaddr = up_malloc(argc * 4);
@@ -5481,8 +5505,10 @@ void up_copyArguments(int argc, int *argv) {
 void passParameterToOS(int data, int offset) {
 	int* OSregisters;
 	int* begin;
+	
 	OSregisters = *(processTable + 3 * OSPid + 1);
-	begin = memory + *(OSregisters + REG_GP) / 4;
+	begin = memory + (*(OSregisters + REG_GP) + spaceForArgs + 952)  / 4;//don't ask...
+
 	*(begin + offset) = data;
 }
 
@@ -5632,12 +5658,14 @@ void disassemble() {
 }
 
 void emulate(int argc, int *argv) {
-	int* nameOfFirstProcess;
+	//int* nameOfFirstProcess;
 	int spaceForUserPageFrames; 
 	int processesLeft;
 	int nrOfMappingsForFirstProcess;
 	int i;
-	
+	int kernelArgc;// 2 + argcFirstProcess
+	int* kernelArgv;//selfie1.mips -k argvfirstProcess (nameOfFirstProcess in argv!)
+		
     print(selfieName);
     print((int*) ": this is selfie's mipster executing ");
     print(binaryName);
@@ -5658,10 +5686,10 @@ void emulate(int argc, int *argv) {
 
 	currentProcessPid = OSPid;
 	
-	nameOfFirstProcess = binaryName;
+	//nameOfFirstProcess = binaryName;
 	
 	binarylengthOfFirstProcess = binaryLength;
-	
+
 	//write current content of binary to file
 	emit();
 	
@@ -5680,29 +5708,47 @@ void emulate(int argc, int *argv) {
     *(registers+REG_K1) = *(registers+REG_GP); // initialize bump pointer
     
 
-    //up_copyArguments(argc, argv);
-	up_copyArguments(1, argv);//wrong name
-    spaceForUserPageFrames = memorySize - 4 - binaryLength - 4 * 1024;
+	kernelArgc = argc + 2;//nur strings so mitgeben?
+	kernelArgv = malloc((2+argc)*4);
+	*kernelArgv = (int) binaryName;
+	*(kernelArgv + 1) = "-k";
+	//*(kernelArgv + 2) = nameOfFirstProcess;
+	i = 2;
+	while ((i - 2) < argc) {
+		*(kernelArgv + i) = *(argv + i - 2);
+		i = i + 1;
+	}
+
+    up_copyArguments(kernelArgc, kernelArgv);
+	//up_copyArguments(1, argv);//wrong name //TODO
+	
+    spaceForUserPageFrames = memorySize - 4 - binaryLength - 4 * 1024 * 50;
     
     nrOfMappingsForFirstProcess = binarylengthOfFirstProcess / 4096;
     
     if(binarylengthOfFirstProcess % 4096 != 0)
     	nrOfMappingsForFirstProcess = nrOfMappingsForFirstProcess + 1;
-
+    	
+	//fd =open(nameOfFirstProcess, O_RDONLY, 0);//PROBLEM
+		
+    //print(itoa(fd, string_buffer, 10, 0, 0));
+    
     passParameterToOS(spaceForUserPageFrames, 0);
-	passParameterToOS(open(nameOfFirstProcess, O_RDONLY, 0), 1);	
+	//passParameterToOS(nameOfFirstProcess, 1);	
 	passParameterToOS(nrOfMappingsForFirstProcess, 2);
 	passParameterToOS(argc, 3);
 
 	//maximal 6 commandline args
-	i = 4;
-	while (i < 10) {
-		passParameterToOS(*(argv + i - 4), i);
-		i = i + 1;
-	}
+	//i = 4;
+	//while (i < 10) {
+		//passParameterToOS(*(argv + i - 4), i);
+		//i = i + 1;
+	//}
 
 	switchToProcess(OSPid); //init OS
+
 	run();
+
 	while (1) {//TODO implement syscall_halt which is called by OS if no more processes are in the ready queue
 		passParameterToOS(OS_EVENT_SCHEDULE, 0);	
 		passParameterToOS(currentProcessPid, 1);
@@ -5732,15 +5778,16 @@ void emulate(int argc, int *argv) {
 // -----------------------------------------------------------------
 
 int selfie(int argc, int* argv) {
-	if (argc == 0) {   
-		print(selfieName);
-        print((int*) ": loading kernel :-D");
-        println();
+	//if (argc == 0) {   
+		//print(selfieName);
+        //print((int*) ": loading kernel :-D");
+        //println();
         
-		executeOS();
+		//executeOS();
 
-        return 0;
-	} else if (argc < 2) {
+        //return 0;
+	//} else
+	if (argc < 2) {
         return -1;
 	} else {
 		numberOfInstructions = 1000;
@@ -5836,6 +5883,15 @@ int selfie(int argc, int* argv) {
                 }
 
                 return 0;
+            } else if (stringCompare((int*) *argv, (int*) "-k")) {
+            	argc = argc - 1;
+                argv = argv + 1;
+                
+                print(selfieName);
+        		print((int*) ": loading kernel :-D");
+        		println();
+                
+                executeOS(argc, argv);
             } else
                 return -1;
         }
@@ -5845,7 +5901,7 @@ int selfie(int argc, int* argv) {
 }
 
 int main(int argc, int *argv) {
-    initLibrary();
+	initLibrary();
 
     initScanner();
     
