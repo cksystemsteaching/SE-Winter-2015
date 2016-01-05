@@ -21,4 +21,8 @@ p1:
 run:
 	./selfie -l kernel.mips32 -m 12
 
+debug:
+	clang -w -m32 -D'main(a, b)=main(int argc, char **argv)' selfie.c -o selfie -g && gdb selfie
 
+selftest: 
+	clang -w -m32 -D'main(a, b)=main(int argc, char **argv)' selfie.c -o selfie -g && ./selfie -c selfie.c -o selfie.mips32
