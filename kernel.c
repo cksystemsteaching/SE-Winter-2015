@@ -25,12 +25,12 @@ int main()
         pMemSize = *(args + 2);
         printBoot();
         node = create_Context();
-        loadBinary(*(node + 1), *(node + 2), *(node + 3), *(node + 4));
+        mc_loadBinary(*(node + 1), *(node + 2), *(node + 3), *(node + 4));
     }
     else if (*args == CMD_MAPPAGEINCCONTEXT) {
         node = (int*)*(readyQ +2);
         node = node + *(args + 1); //vpn
-        *node = amalloc(1024 * 4, 1); //Aligned Malloc with 4KB = 1Page
+        *node = (int)amalloc(1024 * 4, 1); //Aligned Malloc with 4KB = 1Page
         mapPageInContext();
     }
     else if (*args == CMD_FLUSHPAGEINCCONTEXT) {

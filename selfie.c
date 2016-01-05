@@ -110,7 +110,7 @@ int MC_HYPERCALL_LOADBINARY = 6005; //Loads binary p1.mips32 hardcoded for now
 int* mc_kernel_context = (int*)0; //Our kernel has his own pointer.
 int mc_kernel_argsAddr = 0;
 int* mc_currentPageTable = (int*)0;
-int mc_switchAfterMInstructions = 1;
+int mc_switchAfterMInstructions = 10;
 int* mc_currentUserProcess;
 void mc_restoreUserContext();
 //==============================
@@ -4258,7 +4258,7 @@ void syscall_amalloc()
                 println();
             }
             *(registers + REG_K1) = bump + size;
-            *(registers + REG_V0) = (memory + bump);
+            *(registers + REG_V0) = (int)(memory + bump);
         }
     }
 
@@ -4357,7 +4357,7 @@ int tlb(int vaddr)
 
     if (vaddr % 4 != 0)
         exception_handler(EXCEPTION_ADDRESSERROR);
-    pAddr = mc_getPageTableEntry(vpn);
+    pAddr = (int)mc_getPageTableEntry(vpn);
     pagefault = 0;
     if (pAddr == 0) {
         if (debug) {
@@ -4376,7 +4376,7 @@ int tlb(int vaddr)
         halt = 0;
         interpret = it;
         debug = db;
-        pAddr = mc_getPageTableEntry(vpn);
+        pAddr = (int)mc_getPageTableEntry(vpn);
     }
     if(pAddr == 0){
         //TODO Trap something went wrong with paging
@@ -4385,7 +4385,7 @@ int tlb(int vaddr)
     pAddr = pAddr - (int)memory;
     // physical memory is word-addressed for lack of byte-sized data type
     return (int)(pAddr + rpn) / 4;
-};
+}
 
 int loadMemory(int vaddr)
 {
@@ -5229,12 +5229,27 @@ void execute()
 
 void run()
 {
+    int iCount;
+    iCount = 0;
     halt = 0;
 
     while (halt == 0) {
         fetch();
         decode();
         execute();
+        if(mc_currentPId > 0){
+           if(mc_switchAfterMInstructions == iCount){
+                mc_restoreKernelContext();
+                
+                storeMemory(mc_kernel_argsAddr, 3); //Switch Context
+                storeMemory(mc_kernel_argsAddr + 4, *mc_currentUserProcess);
+                storeMemory(mc_kernel_argsAddr + 8, (*(mc_currentUserProcess + 2) - (int)memory));
+                storeMemory(mc_kernel_argsAddr + 12,(*(mc_currentUserProcess + 1) - (int)memory));
+                iCount = 0;
+           }else{
+               iCount = iCount + 1;
+           }
+        }
     }
 
     halt = 0;
@@ -5649,7 +5664,7 @@ int main(int argc, int* argv)
 
     if (selfie(argc, (int*)argv) != 0) {
         print(selfieName);
-        print((int*)": usage: selfie { -c source | -o binary | -s assembly | -l binary } [ -m size ... | -d size ... | -k size ... ] -kd (kernel process debug mode)");
+        print((int*)": usage: selfie { -c source | -o binary | -s assembly | -l binary } [ -m size ... | -d size ... | -k size ... ]");
         println();
     }
 }
@@ -5694,7 +5709,7 @@ int mc_hyperCall_createContext()
 
 void mc_emit_hyperCall_loadBinary()
 {
-    createSymbolTableEntry(GLOBAL_TABLE, (int*)"loadBinary", 0, FUNCTION, INT_T, 0, binaryLength);
+    createSymbolTableEntry(GLOBAL_TABLE, (int*)"mc_loadBinary", 0, FUNCTION, INT_T, 0, binaryLength);
     emitIFormat(OP_LW, REG_SP, REG_A3, 0); //pid
     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
@@ -5710,12 +5725,11 @@ void mc_emit_hyperCall_loadBinary()
     emitIFormat(OP_ADDIU, REG_ZR, REG_V0, MC_HYPERCALL_LOADBINARY);
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
 
-    // jump back to caller, return value is in REG_V0
-    //emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
 int mc_hyperCall_loadBinary()
 {
+    int* binName;
     if (mc_currentPId != 0) {
         //TODO Implement userMode Trap
     }
@@ -5724,7 +5738,6 @@ int mc_hyperCall_loadBinary()
     mc_currentPageTable = (int*)(memory + (*(registers + REG_A1) / 4));
     mc_currentPId = *(registers + REG_A3);
     registers = (int*)(memory + (*(registers + REG_A2) / 4));
-    int* binName;
     binName = binaryName;
     binaryName = malloc(12 * 4);
     binaryName = (int*)"p1.mips32";
@@ -5738,17 +5751,17 @@ int mc_hyperCall_loadBinary()
 void mc_emit_hyperCall_switchContext()
 {
     createSymbolTableEntry(GLOBAL_TABLE, (int*)"switchContext", 0, FUNCTION, INT_T, 0, binaryLength);
-
-    emitIFormat(OP_LW, REG_ZR, REG_A3, 0);
-    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4); //PC
-
-    emitIFormat(OP_LW, REG_SP, REG_A2, 0); //PageTable Address
+    
+    emitIFormat(OP_LW, REG_SP, REG_A3, 0); 
     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
-    emitIFormat(OP_LW, REG_SP, REG_A1, 0); //register Pointer (register are allocatet completely in the micokernel
+    emitIFormat(OP_LW, REG_SP, REG_A2, 0); 
     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
-    emitIFormat(OP_LW, REG_SP, REG_A0, 0); //PID
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0); 
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0); 
     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_V0, MC_HYPERCALL_SWITCHCONTEXT);
@@ -5760,9 +5773,9 @@ int mc_hyperCall_switchContext()
     if (mc_currentPId != 0) {
         //TODO Implement userMode Trap
     }
+    mc_currentPId = *(registers + REG_A3);
     pc = *(registers + REG_A0);
     mc_currentPageTable = (int*)(memory + (*(registers + REG_A1) / 4));
-    mc_currentPId = *(registers + REG_A3);
     registers = (int*)(memory + (*(registers + REG_A2) / 4));
 }
 
@@ -5813,11 +5826,11 @@ void mc_emit_hyperCall_mapPageInContext()
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
 
-    emitIFormat(OP_ADDIU, REG_SP, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
 
-    emitIFormat(OP_ADDIU, REG_SP, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
 
-    emitIFormat(OP_ADDIU, REG_SP, REG_A0, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_V0, MC_HYPERCALL_MAPPAGEINCONTEXT);
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
@@ -5843,11 +5856,11 @@ void mc_emit_hyperCall_flushPageInContext()
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
 
-    emitIFormat(OP_ADDIU, REG_SP, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
 
-    emitIFormat(OP_ADDIU, REG_SP, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
 
-    emitIFormat(OP_ADDIU, REG_SP, REG_A0, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_V0, MC_HYPERCALL_FLUSHPAGEINCONTEXT);
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
@@ -5910,9 +5923,9 @@ void mc_setPageTableEntry(int offset, int value)
 
 void mc_restoreKernelContext()
 {
-    *mc_currentUserProcess = pc;                        //Programcounter
+    *mc_currentUserProcess = pc-4;                        //Programcounter
     *(mc_currentUserProcess + 1) = (int)registers;      //registers
-    *(mc_currentUserProcess + 2) = mc_currentPageTable; //page table
+    *(mc_currentUserProcess + 2) = (int)mc_currentPageTable; //page table
     *(mc_currentUserProcess + 3) = mc_currentPId;       //pID
     pc = 608;
     registers = (int*)*(mc_kernel_context + 1);
