@@ -5733,27 +5733,45 @@ void kernel_event_loop() {
 
   sharedMemory = -SHARED_MEMORY_SIZE;
 
-  eventType = *sharedMemory;
-  arg = *(sharedMemory+1);
-  callerPid = *(sharedMemory+2);
-
   while (1) {
+
+  	eventType = *sharedMemory;
+  	arg = *(sharedMemory+1);
+  	callerPid = *(sharedMemory+2);
+
     if (eventType == PAGE_FAULT) {
 
       print("OS - Handle page fault");
       println();
-      
+ 
       page = palloc();
       map_page_in_context(callerPid, arg/PAGE_FRAME_SIZE, page);
+
+      switch_context(callerPid);
+
     }
     else {
       print("Unknown event type");
       println();
     }
 
-    switch_context(callerPid);
   }
 
+}
+
+int srv_schedule() {
+	int* next;
+
+	next = context_getNext(kernel_current_proc);
+
+	if ((int) next == 0) {
+		next = kernel_process_list;
+		next = context_getNext(kernel_process_list);
+	}
+
+	kernel_current_proc = next;
+
+	return context_getPID(next);
 }
 
 // -----------------------------------------------------------------
