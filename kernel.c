@@ -3,7 +3,9 @@ int* args;
 int debug = 0;    //Set from microkernel
 int pMemSize = 0; //Set from microkernel
 int bootPrep = 1;
+int* node;
 int* readyQ = (int*)0;
+int* pFree = (int*)0;
 int pId = 1;
 int VMEMSIZE = 4194304;
 int CMD_BOOT = 1;
@@ -13,10 +15,12 @@ int CMD_DELETECONTEXT = 4;
 int CMD_MAPPAGEINCCONTEXT = 5;
 int CMD_FLUSHPAGEINCCONTEXT = 6;
 int CMD_HALT = 7;
+
 void printBoot();
 int* create_Context();
 void delete_Context();
-int* node;
+int* getPFree();
+void addPFree(int* addr);
 
 int main()
 {
@@ -33,8 +37,13 @@ int main()
     }
     else if (*args == CMD_MAPPAGEINCCONTEXT) {
         node = (int*)*(readyQ + 2);
-        node = node + *(args + 1);         //vpn
-        *node = (int)amalloc(1024 * 4, 1); //Aligned Malloc with 4KB = 1Page
+        node = node + *(args + 1); //vpn
+        if ((int)pFree == 0) {
+            *node = (int)amalloc(1024 * 4, 1); //Aligned Malloc with 4KB = 1Page
+        }
+        else {
+            *node = getPFree();
+        }
         mapPageInContext();
     }
     else if (*args == CMD_FLUSHPAGEINCCONTEXT) {
@@ -103,7 +112,6 @@ int* create_Context()
     ptr = (int*)*(node + 2);
     *ptr = (int)amalloc(1024 * 4, 1);
     *(ptr + 1) = (int)amalloc(1024 * 4, 1);
-    //*(ptr + 1023) = (int)amalloc(1024*4,1);
     return node;
 }
 
@@ -111,8 +119,18 @@ void delete_Context()
 {
     int* ptr;
     int* newStart;
-
+    int i;
+    int* pTable;
+    i = 0;
     ptr = readyQ;
+    pTable = (int*)*(ptr + 2);
+    //Recycle pages
+    while (i < 1024) {
+        if (*(pTable + i) != 0) {
+            addPFree(pTable + i);
+        }
+        i = i + 1;
+    }
     //Is last entry?
     if (*ptr == (int)ptr) {
         readyQ = (int*)0;
@@ -151,4 +169,40 @@ void printBoot()
         l_print((int*)"Debug: False");
     }
     putchar(10);
+}
+
+//Freelist
+//|Next|
+//|addr|
+
+int* getPFree()
+{
+    int* addr;
+    if ((int)pFree != 0) {
+        addr = (int*)*(pFree + 1);
+        pFree = (int*)*pFree;
+        return addr;
+    }
+    return (int*)0;
+}
+
+void addPFree(int* addr)
+{
+    int* node;
+    int* ptr;
+    if ((int)pFree == 0) {
+        pFree = malloc(2 * 4);
+        *pFree = 0;
+        *(pFree + 1) = (int)addr;
+    }
+    else {
+        node = malloc(2 * 4);
+        *(node + 1) = (int)addr;
+        *node = 0;
+        ptr = pFree;
+        while (*ptr != 0) {
+            ptr = (int*)*ptr;
+        }
+        *ptr = (int)node;
+    }
 }
