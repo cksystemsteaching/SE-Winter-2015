@@ -114,6 +114,22 @@ int mc_switchAfterMInstructions = 10;
 int* mc_currentUserProcess;
 void mc_restoreUserContext();
 //==============================
+//Print and itoa syscall
+//==============================
+void l_emit_syscall_print();
+void l_syscall_print();
+void l_emit_syscall_itoa();
+int l_syscall_itoa();
+//==============================
+//Print and itoa syscall
+//==============================
+void l_emit_print();
+int l_print();
+void l_emit_itoa();
+int l_itoa();
+
+
+//==============================
 //Kernel Server Forwardings
 //==============================
 void mc_prepareKernelContext();
@@ -766,6 +782,9 @@ int SYSCALL_WRITE = 4004;
 int SYSCALL_OPEN = 4005;
 int SYSCALL_MALLOC = 5001;
 int SYSCALL_AMALLOC = 5002;
+
+int SYSCALL_PRINT = 5003;
+int SYSCALL_ITOA = 5004;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -3549,6 +3568,8 @@ void compile()
     emitMalloc();
     emitAMalloc();
     emitPutchar();
+    l_emit_syscall_itoa();
+    l_emit_syscall_print();
     mc_emit_hyperCall_switchContext();
     mc_emit_hyperCall_createContext();
     mc_emit_hyperCall_deleteContext();
@@ -4335,6 +4356,63 @@ void emitPutchar()
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
+void l_emit_syscall_print()
+{
+    createSymbolTableEntry(GLOBAL_TABLE, (int*)"l_print", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0); //String
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_PRINT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void l_syscall_print()
+{
+    print(memory + *(registers + REG_A0)/4);
+    println(); //Prints only after println() O.o
+}
+
+void l_emit_syscall_itoa()
+{
+    createSymbolTableEntry(GLOBAL_TABLE, (int*)"l_print", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_LW, REG_SP, REG_A3, 0); //String
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A2, 0); //String
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0); //String
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0); //String
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_PRINT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+int l_syscall_itoa()
+{
+    int* buffer;
+
+    buffer = *(registers + REG_A0);
+    print(buffer);
+}
+
+
+
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -4451,6 +4529,12 @@ void fct_syscall()
         }
         else if (*(registers + REG_V0) == MC_HYPERCALL_LOADBINARY) {
             mc_hyperCall_loadBinary();
+        }
+        else if (*(registers + REG_V0) == SYSCALL_PRINT) {
+            l_syscall_print();
+        }
+        else if (*(registers + REG_V0) == SYSCALL_ITOA) {
+            l_syscall_itoa();
         }
         else {
             exception_handler(EXCEPTION_UNKNOWNSYSCALL);
@@ -5927,7 +6011,7 @@ void mc_restoreKernelContext()
     *(mc_currentUserProcess + 1) = (int)registers;      //registers
     *(mc_currentUserProcess + 2) = (int)mc_currentPageTable; //page table
     *(mc_currentUserProcess + 3) = mc_currentPId;       //pID
-    pc = 608;
+    pc = 0;
     registers = (int*)*(mc_kernel_context + 1);
     mc_currentPageTable = (int*)*(mc_kernel_context + 2);
     mc_currentPId = *(mc_kernel_context + 3);
