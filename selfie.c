@@ -709,7 +709,7 @@ void syscall_fork();
 
 void emitWait();
 void syscall_wait();
-
+// --------- Hypercalls A6
 void emitSwitchContext();
 void hypercall_switchContext();
 
@@ -719,12 +719,14 @@ void hypercall_createContext();
 void emitDeleteContext();
 void hypercall_deleteContext();
 
-void emitMapePageInContext();
+void emitMapPageInContext();
 void hypercall_mapPageInContext();
 
 void emitFlushPageInContext();
 void hypercall_flushPageInContext();
 
+void emitMode();
+void syscall_mode();
 
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
@@ -733,7 +735,7 @@ int SYSCALL_EXIT   = 4001;
 int SYSCALL_READ   = 4003;
 int SYSCALL_WRITE  = 4004;
 int SYSCALL_OPEN   = 4005;
-//int SYSCALL_putchar = 4006;
+
 //+++++++ recycling and complete old file for A6  +++++++++++++++++++
 int SYSCALL_MALLOC  = 5001;
 int SYSCALL_WAIT    = 5002;
@@ -743,6 +745,8 @@ int SYSCALL_LOCK    = 5005;
 int SYSCALL_UNLOCK  = 5006;
 int SYSCALL_FORK    = 5007;
 
+int SYSCALL_MODE    = 5008;
+
 int HYPERCALL_SWITCHCONTEXT = 1;
 int HYPERCALL_CREATECONTEXT = 2;
 int HYPERCALL_DELETECONTEXT = 3;
@@ -750,10 +754,44 @@ int HYPERCALL_MAPPAGEINCONTEXT = 4;
 int HYPERCALL_FLUSHPAGEINCONTEXT = 5;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
-// -----------------------------------------------------------------
-// ---------------------     E M U L A T O R   ---------------------
-// -----------------------------------------------------------------
+// ----------------------------------------------------------------
+// ---------------------     E M U L A T O R   --------------------
+// ----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+
+// --------------------  context -----------------------------------
+// ----duplicate all operations of ProcessList -----------
+// -----------------------------------------------------------------
+
+int* insertContext(int contextId, int pc, int* registers, int* pageTable);
+int* removeContext(int* context_list, int pid);
+int* findContext(int* contextList, int Id);
+
+void setContextID(int* node, int Id);
+void setContextPC(int* node, int pc);
+void setContextRegisters(int* node, int registers);
+void setContextPageTable(int* node, int pageTable);
+void setContextPrev(int* node, int prev);
+void setContextNext(int* node, int next);
+
+int getContextPC(int* node);
+int* getContextRegisters(int* node);
+int* getContextPageTable(int* node);
+int* getContextPrev(int* node);
+int* getContextNext(int* node);
+int getContextID(int* node);
+
+int *contextList ; // List of contexts
+int nextContextId = 0;
+int* currPageTable;
+int* currContext;
+
+// -----------------------------------------------------------------
+// ------------------------- PAGE TABLE ---------------------------
+// -----------------------------------------------------------------
+
+int* getPageTableElt(int* pagetable, int idx);
+void setPageTableAtIndex(int* pagetable, int idx, int data);
 
 // -----------------------------------------------------------------
 // ---------------------------- MEMORY -----------------------------
@@ -768,7 +806,7 @@ void storeMemory(int vaddr, int data);
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
-int MEGABYTE = 1048576;
+int MEGABYTE = 1048576; // 1024*1024
 
 // ------------------------ GLOBAL VARIABLES -----------------------
 
@@ -777,15 +815,14 @@ int *memory = (int*) 0; // mipster memory
 
 // ------------------------- INITIALIZATION ------------------------
 
-void initMemory(int bytes) {
-    if (bytes < 0)
-        memorySize = 64 * MEGABYTE;
-    else if (bytes > 1024 * MEGABYTE)
-        memorySize = 1024 * MEGABYTE;
-    else
-        memorySize = bytes;
+void initMemory(int megabytes) {
+    if (megabytes < 0)
+        megabytes = 64;
+    else if (megabytes > 1024)
+        megabytes = 1024;
 
-    memory = malloc(memorySize);
+    memorySize = megabytes * MEGABYTE; // MEGABYTE = 1024*1024
+    memory     = malloc(memorySize);
 }
 
 // -----------------------------------------------------------------
@@ -3339,11 +3376,13 @@ void compile() {
     emitFork();
     emitWait();
     
+    emitMode();
+    // A6
     emitSwitchContext();
 	emitCreateContext();
 	emitDeleteContext();
-	//emitMapePageInContext();
-	//emitFlushPageInContext();
+	emitMapPageInContext();
+	emitFlushPageInContext();
 
     // parser
     gr_cstar();
@@ -3784,11 +3823,17 @@ int lockCounter = 0;		// counts syscall_lock calls of process that holds lock, l
 int nextValidPID = 0;		// unique id for next process
 int maxNrProcesses = 3;	// maximum number of processes;
 int counterInstr = 0;		// currently processed instruction counter
-int maxInstr = 1000;		// syscall_yield should be invoked every 'maxInstr'
+int maxInstrPerContext ;		// syscall_yield should be invoked every 'maxInstrPerContext'
 int kernelGP;
 int *kernelProcess;
 int kernelMode = 0;
 int userMode = 0;
+
+int *processTable;
+int pageFault;
+int pageFaultVadr;
+int *vMemory;
+int *pMemory;
 
 // --- global variables needed for memory management ------
 int yieldCaller = 0;		// 0...yield, 1...syscall_lock, 2...syscall_exit, 3...syscall_wait
@@ -3803,8 +3848,14 @@ int allocatedPages = 0;
 int freepages;
 int invalidPage = 0;
 int *pageframeptr;
+int pageFlag;  
 
 //=============================== OS-Methods ============================
+
+// --- some helpfull methods
+int *createArray(int size);
+int *getArrayElt(int *array, int pos);
+void setArrayElt(int *array, int pos, int *elt);
 
 // --- methods needed for outputs and debugs------
 void printList(int *list, int verbose);
@@ -3856,8 +3907,6 @@ void copyRegisters(int *copyTo, int *copyFrom);
 void copyPageTable(int *copyTo, int *copyFrom);
 void duplicatePageFrame(int *copyTo, int *copyFrom);
 
-void restoreContext(int *process);
-void saveContext(int *process);
 void contextSwitch(int notTerminated);
 void fifo();
 
@@ -3879,7 +3928,7 @@ int getPageFlag(int* process, int vpn); // vpn = virtual page number
 int getRPNfromPageTable(int* process, int vpn);
 void insertIntoPageTable(int* process, int vpn, int rpn, int mode);
 void copyPageFrame(int fromRpn, int toRpn); // rpn = real page number 
-int  pageFrameLookup(int vaddr, int readOrWrite);
+int pageFrameLookup(int vaddr);
 int getProcessPageFault(int* process);
 int addProcessPageFault(int* process);
 int getProcessExitCode(int* process);
@@ -3887,9 +3936,16 @@ int processTerminated(int* process);
 
 void bootStrap();
 void os_loadFirstUserProcess(int *argv);
-void setupProcessPtr(int *process);
+void manualSetupPtrs(int *process);
 void saveContext(int *process);
 void restoreContext(int *process);
+
+void switchMode();
+void switchToKernel() ;
+void switchToProcess();
+void allocPageFault(int pid, int vaddr, int memory_pos);
+void loadPage(int *vaddr, int *paddr);
+
 
 // a process has following structure:
 //
@@ -3952,6 +4008,17 @@ int* createPageTable(){
 	}
 	
 	return pageTable;
+}
+int *createArray(int size){
+	int *ptr;
+	ptr = (int *)malloc(size*4);
+	return ptr;
+}
+int* getArrayElt(int *array, int pos ){
+	return (int *)*(array + pos);
+}
+void setArrayElt(int *array, int pos, int *elt){
+	*(array +pos) = (int)elt;
 }
 int* initList(){
 	int *list;
@@ -4095,6 +4162,15 @@ int* createChildProcess(int pid){
 }
 void saveProcessState(){
 	setPC(currProcess, pc);
+	setRegisters(currProcess, pc);
+	   
+	    print((int*) "id: ");
+        print(getProcessID(currProcess));
+        println();
+
+        print((int*) "PC: ");
+        print(getPC(currProcess));
+        println();
 }
 void setProcessState(){
 	registers = getRegisters(currProcess);
@@ -4104,9 +4180,9 @@ void setProcessState(){
 void saveContext(int *process){
 	setPC(process, pc);
 }
-void restoreContext(){
-	int *process;
-	process = removeFirst(readyQueue);
+void restoreContext(int *process){
+	//int *process;
+	//process = removeFirst(readyQueue);
 	if(process != 0){
 		pc = getPC(process);
 		registers = getRegisters(process);
@@ -4117,6 +4193,61 @@ void restoreContext(){
 		exit(0);
 	}
 }
+
+void switchToKernel() {
+    print((int*) "context switch to kernel: ");
+    saveContext(currProcess);
+	switchMode();
+    pc = getPC(kernelProcess);
+	registers = getRegisters(kernelProcess);	
+}
+
+void switchToProcess(int *process) {
+	 saveContext(kernelProcess);
+     currProcess = process;
+     pc = getPC(currProcess);
+     registers = getRegisters(currProcess);
+     switchMode();
+}
+
+void allocPageFault(int pid, int vaddr, int memoryPos) {
+    int *process;
+    int *pagetable;
+    int *pageFrameNr;
+    int pageNr;
+
+    process = findElementInList(processTable, pid);
+    currPageTable = getPageTable(process);
+    pageFrameNr = malloc(1 * 4);
+    *pageFrameNr = memoryPos;
+
+    // Get the position of the frame in the virtual memory
+    pageNr = vaddr/pageSize;
+
+    // Map the virtual into the physical memory
+   setArrayElt(currPageTable, pageNr, pageFrameNr);
+}
+
+void loadPage(int *vaddr, int *paddr) {
+    int i;
+    i = 0;
+    while(i < pageSize/4) {
+        *(paddr + i) = *(vaddr + i);
+        i = i + 1;
+    }
+}
+void runKernel() {
+    int mode;
+    while(1) {
+        if(mode == kernelMode) 
+            switchToKernel();
+         else{
+         	currProcess = removeFirst(readyQueue);
+         	switchToProcess(currProcess);
+         }
+    }
+}
+
 
 //@return: first "not waiting" process in blockedQueue
 //			if such a process does not exist it returns the the first process from readyQueue
@@ -4445,7 +4576,7 @@ void bootStrap(){
 
     modeEmulator = 1;
     pageframeptr = (int*)malloc(4*(memorySize/pageSize));
-    vmemorySize = 4*1024*1024;
+    vmemorySize = 4*1024*1024;  //4 MB
     maxPages = vmemorySize/pageSize;
 
  //  freepages = 0;
@@ -4454,26 +4585,23 @@ void bootStrap(){
     blockedQueue = initList();
     zombieQueue  = initList();
     waitQueue    = initList();
+    processTable = initList();
+    currPageTable    = createArray(maxPages - 1);
 
     kernelProcess = createProcess();
     *(kernelProcess+9) = 0;
 
     copyBinaryToMemory();
-   setupProcessPtr(kernelProcess);
+   manualSetupPtrs(kernelProcess);
 }
 
-void setupProcessPtr(int *process){
+void manualSetupPtrs(int *process){
 	int initStackptr;
-	// share Memory between user space and kernel space
-    initStackptr = memorySize / 2;
+    initStackptr = memorySize / 2;//user space and kernel space 
     registers = (int*)*(process + 4);
-    // initialize stack pointer
-    *(registers+REG_SP) = initStackptr; 
-    // initialize global pointer
-    *(registers+REG_GP) = binaryLength;
-    // initialize heap/bump pointer (malloc)
-    *(registers+REG_K1) = *(registers+REG_GP);
-
+    *(registers+REG_SP) = initStackptr; // initialize stack pointer
+    *(registers+REG_GP) = binaryLength; // initialize global pointer
+    *(registers+REG_K1) = *(registers+REG_GP);// initialize heap/bump pointer
     initStackptr = initStackptr - 4;
     *(memory + initStackptr/4) = memorySize;
     *(registers+REG_SP) = *(registers+REG_SP) - 4;
@@ -4884,7 +5012,10 @@ void emitGetPID(){
 }
 
 void syscall_getPID(){
-	*(registers+REG_V0) = *(currProcess+2);
+	//*(registers+REG_V0) = *(currProcess+2);
+	int pid;
+	pid = getProcessID(currProcess);
+	*(registers+REG_V0) = pid;
 }
 
 void emitFork(){
@@ -4903,32 +5034,24 @@ void emitFork(){
 }
 
 void syscall_fork(){
-	int *childProcess;
-	int *childRegisters;
-	int *child;
-	saveProcessState();
-	*(registers+REG_V0) = -1;
-	if (nextValidPID < maxNrProcesses){
-		childProcess = createProcess();
-		if((int)childProcess != 0){
-			setPC(childProcess, pc);
-			child = createChildProcess(getProcessID(childProcess));
-			if((int)child != 0){
+		
+	int *process;
+    int *newProcess;
+    int *newProcessRegs;
 
-				copyRegisters(getRegisters(childProcess), registers);
-				copyPageTable(getPageTable(childProcess), currPageTable),
-				
-				childRegisters = getRegisters(childProcess);
-				setPPID(childProcess, getProcessID(currProcess));
-				
-				*(registers+REG_V0) = getProcessID(childProcess); 	//return value for parent is childID
-				*(childRegisters+REG_V0) = 0;						//return value for child is 0
-				
-				appendListElement(child, getChildren(currProcess));
-				appendListElement(childProcess, readyQueue);
-			}
-		}
-	}
+    process = currProcess;
+    newProcess = createProcess();
+
+    *(newProcess+3) = pc;
+    *(newProcess+6) = (int)process;
+    appendListElement(readyQueue, newProcess);
+    newProcessRegs = getRegister(newProcess);
+
+    copyRegisters(process, newProcess);
+    copyPageTable(process, newProcess);
+
+    *(registers + REG_V0) = getProcessID(newProcess);
+    *(newProcessRegs + REG_V0) = 0;
 }
 
 void emitWait(){
@@ -4999,25 +5122,25 @@ void emitPutchar() {
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
+// -----------------------------------------------------------------
+// -------------------------- HYPERCALLS A6 ---------------------------
+// -----------------------------------------------------------------
+
 void emitSwitchContext() {
     createSymbolTableEntry(GLOBAL_TABLE, (int*) "switch_context", binaryLength, FUNCTION, VOID_T, 0);
     
-	print((int*) "... emiting hypercall context switch ...");
-	println();
+	//print((int*) "... emiting hypercall context switch ...");
+	//println();
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
     emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
     emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
-    
     // load argument for switch ctx: id of new process
     emitIFormat(OP_LW, REG_SP, REG_A0, 0);
-
     // remove the argument from the stack
     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
-
     // load the correct syscall number and invoke syscall
     emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_SWITCHCONTEXT);
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
-
     // jump back to caller, return value is in REG_V0
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
@@ -5026,32 +5149,36 @@ void hypercall_switchContext() {
 
     int context;
     int *process;
-
-    print((int*) "executing hypercall context switch ");
-    println();
+    //print((int*) "executing hypercall context switch ");
+    //println();
     context = *(registers+REG_A0);
-
-    saveContext(kernelProcess);
-
+    saveContext(currProcess);
+    //saveContext(kernelProcess);
     process = findElementInList(readyQueue, context);
     if ((int)process != 0) {
         restoreContext(process);
-    } else {
-        
+    } else {        
         print((int*) "switch context failed...no such process found");
         println();
         exit(0);
     }
+   switchMode();
+   
+}
 
-   kernelMode = 0;     // leave kernel mode
-   counterInstr = 0;  // reset instruction counter
+void switchMode(){
+	if (kernelMode)
+		kernelMode = 0; // reset kernelmode to zero
+	else 
+	    kernelMode = 1; // reset kernelmode to one
+	counterInstr = 0;  // reset instruction counter to zero in every case
 }
 
 void emitCreateContext() {
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "create_context", binaryLength, FUNCTION, VOID_T, 0);
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "createContext", binaryLength, FUNCTION, VOID_T, 0);
 	
-	print((int*) "... emiting hypercall create context ...");
-	println();
+	//print((int*) "... emiting hypercall create context ...");
+	//println();
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
     emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
     emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
@@ -5064,23 +5191,38 @@ void emitCreateContext() {
 }
 
 void hypercall_createContext() {
-    int context;
-    int *process;
+     
+	int context;
+	int* newReg;
+	int* newPageTable;
+	int newPC;
 
-    print((int*) "create new context");
-    println();
+	newReg = malloc(32 * 4);
+	newPageTable = createPageTable();
+	newPC = 0;
 
-    process = createProcess();
-    context = getProcessID(process);
-    exit(0);
+	*(newReg + REG_SP) = *(registers+REG_A1);
+	*(newReg + REG_GP) = *(registers+REG_A0);
+	*(newReg + REG_K1) = *(newReg + REG_GP);
+	// add to list of contexts
+	insertContext(nextContextId, newPC, newReg, newPageTable );
+	// return the UID
+	*(registers+REG_V0) = nextContextId;
+	//increment to next Uid
+	nextContextId = nextContextId + 1;
+	
+	print((int*) "sucessfully create new context : ");
+	print(nextContextId);
+	println();
+	exit(0);
 
 }
 
 void emitDeleteContext() {
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "delete_ctx", binaryLength, FUNCTION, VOID_T, 0);
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "deleteContext", binaryLength, FUNCTION, VOID_T, 0);
 	
-	print((int*) "... emiting hypercall delete context ...");
-	println();
+	//print((int*) "... emiting hypercall delete context ...");
+	//println();
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
     emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
     emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
@@ -5098,7 +5240,8 @@ void hypercall_deleteContext() {
     int pid;
 
     pid = *(registers+REG_A0);
-
+	removeContext(contextList, pid);
+    
     print((int*) "delete context with PID ");
     print(pid);
     println();
@@ -5107,7 +5250,99 @@ void hypercall_deleteContext() {
 
 }
 
+void emitMapPageInContext() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "mapPageInContext", binaryLength, FUNCTION, VOID_T, 0);
 
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    
+    emitIFormat(OP_LW, REG_SP, REG_A2, 0); // page frame
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0); // page 
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0); // pid
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_MAPPAGEINCONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void hypercall_mapPageInContext() {
+	int pid;
+	int paddr;
+	int pageIndex;
+	int* pageTable;
+	int* context;
+	// get the parameter
+	pid  = *(registers+REG_A2);
+	pageIndex  = *(registers+REG_A1);
+	paddr  = *(registers+REG_A0);
+	// find the context by pid in the list of context
+	context = findContext(contextList, pid);
+	// get the page table of found context
+	pageTable = getContextPageTable (context);
+	setPageTableAtIndex(pageTable, pageIndex, paddr);
+}
+
+void emitFlushPageInContext() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "flushPageInContext()", binaryLength, FUNCTION, VOID_T, 0);
+	
+	 emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0); // page 
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0); // pid
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_FLUSHPAGEINCONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void hypercall_flushPageInContext() {
+	
+	int* context;
+	int* pageTable;
+	int pageIndex;
+	int pid;
+	
+	pid = *(registers + REG_A0);
+	pageIndex = *(registers + REG_A1);
+	// find the context by pid in the list of context
+	context = findContext(contextList, pid);
+	// get the page table of found context
+	pageTable = getContextPageTable (context);
+	// mark the pageTable at the given index with invalid value
+	setPageTableAtIndex(pageTable, pageIndex, -1);	
+}
+
+void emitMode() {
+    // Create the symbol table entry fpr sched_yield
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "mode", binaryLength, FUNCTION, INT_T, 0);
+    
+    // sched_yield doesn't have any arguments
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_MODE);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    // We don't have a return value so we just jump back
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR); // REG_RA instead of REG_LINK
+}
+
+void syscall_mode() {
+    *(registers+REG_V0) = kernelMode;
+    print((int*) "...sucessfull call of syscall_mode ...");
+	println();
+}
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -5120,10 +5355,23 @@ void hypercall_deleteContext() {
 // -----------------------------------------------------------------
 
 int tlb(int vaddr) {
+    int *pagetable;
+    int pageNr;
+    int *pageFramePtr;
+    int pageFrame;
+    int offset;
+
     if (vaddr % 4 != 0)
         exception_handler(EXCEPTION_ADDRESSERROR);
 
-    // physical memory is word-addressed for lack of byte-sized data type
+    if(pageFlag) {
+        pageNr = vaddr/pageSize; // Get the page number in the virtual memory
+        offset = vaddr % pageSize;  // get the offset
+        pagetable = getPageTable(currProcess);
+        pageFramePtr = getArrayElt(pagetable, pageNr);
+        vaddr = *pageFramePtr + offset; // physical adress
+    }
+
     return vaddr / 4;
 }
 
@@ -5134,6 +5382,27 @@ int loadMemory(int vaddr) {
 
     return *(memory + paddr);
 }
+int pageFrameLookup(int vaddr){
+	int *pagetable;
+    int pageNr;
+    int *pageFramePtr;
+    int pageFrame;
+    int offset;
+
+     pageNr = vaddr/pageSize; 
+    offset = vaddr % pageSize; 
+    pagetable = getPageTable(currProcess);
+    pageFramePtr = getArrayElt(pagetable, pageNr);
+
+    if(pageFramePtr == (int*)0) {
+        print((int*) "No page frame failed at vaddr: ");
+        print(vaddr);
+        print((int*) " pid: ");
+    
+	return 1;
+	}
+	return 0;
+}
 
 void storeMemory(int vaddr, int data) {
     int paddr;
@@ -5142,6 +5411,78 @@ void storeMemory(int vaddr, int data) {
 
     *(memory + paddr) = data;
 }
+
+// ----duplicate all operations of ProcessList for context-----------
+// --------------------------------------------------------
+
+int* insertContext(int contextId, int pc, int* registers, int* pageTable ) {
+	
+	int* ptr;
+	ptr = malloc(6 * 4);
+	setContextID(ptr, contextId);
+    setContextPC(ptr, pc);
+	setContextRegisters(ptr, (int) registers);
+	setContextPageTable(ptr, (int) pageTable);
+	appendListElement(contextList, ptr);
+	return ptr;
+}
+
+int* findContext(int* contextList, int Id){
+	findElementInList(contextList, Id);
+}
+
+int* removeContext(int* contextList, int pid){
+	 removeListElementByPID(contextList, pid);
+}
+
+void setContextID(int* node, int Id){
+	node = Id;
+}
+void setContextPrev(int* node, int prev){
+	*(node + 1) = prev; 	
+}
+void setContextNext(int* node, int next){
+	*(node + 2) = next;
+}
+
+void setContextPC(int* node, int pc){
+	*(node + 3) = pc;
+}
+void setContextRegisters(int* node, int registers){
+	*(node + 4) = registers;
+}
+void setContextPageTable(int* node, int pageTable){
+	*(node + 5) = pageTable;
+}
+
+int* getContextPrev(int* node){
+	return *(node + 1);	
+}
+int* getContextNext(int* node){
+	return *(node + 2);
+}
+
+int getContextPC(int* node){
+	return *(node + 3);
+}
+int* getContextRegisters(int* node){
+	return *(node + 4);
+}
+int* getContextPageTable(int* node){
+	return *(node + 5);
+}
+
+int getContextID(int* node){
+	
+}
+
+void setPageTableAtIndex(int* pagetable, int index, int data) {
+  *(pagetable + index) = data;
+}
+int* getpageTableElt(int* pagetable, int index) {
+  return *(pagetable + index);
+}
+
 
 // -----------------------------------------------------------------
 // ------------------------- INSTRUCTIONS --------------------------
@@ -5180,10 +5521,12 @@ void fct_syscall() {
            hypercall_switchContext();
         } else if (*(registers+REG_V0) ==  HYPERCALL_DELETECONTEXT) {
            hypercall_deleteContext();
-       // } else if (*(registers+REG_V0) ==  HYPERCALL_MAPPAGEINCONTEXT) {
-       //    hypercall_mapPageInContext();
-       // } else if (*(registers+REG_V0) ==  HYPERCALL_FLUSHPAGEINCONTEXT) {
-       //     hypercall_flushPageIContext();
+        } else if (*(registers+REG_V0) ==  SYSCALL_MODE) {
+          syscall_mode();
+        } else if (*(registers+REG_V0) ==  HYPERCALL_MAPPAGEINCONTEXT) {
+           hypercall_mapPageInContext();
+        } else if (*(registers+REG_V0) ==  HYPERCALL_FLUSHPAGEINCONTEXT) {
+            hypercall_flushPageInContext();
         }else {
             exception_handler(EXCEPTION_UNKNOWNSYSCALL);
         }
@@ -5920,18 +6263,27 @@ void execute() {
 }
 
 void run() {
+	
+	maxInstrPerContext = 10;
+	counterInstr = 0;
+	//restoreContext(kernelProcess);
     halt = 0;
 
     while (halt == 0) {
+		if(kernelMode != 0){
+			if (counterInstr == maxInstrPerContext) {
+		   	     //switchToKernel();
+			} 
+		}	       
         fetch();
         decode();
         execute();
     }
-
+	
     halt = 0;
 
-    interpret = 0;
-    debug     = 0;
+    //interpret = 0;
+    //debug     = 0;
 }
 
 void up_push(int value) {
