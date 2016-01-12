@@ -18,7 +18,15 @@ int main() {
 
   pid = fork();
 
-  putchar('p');
+  if( pid == 0) {
+
+    pid = fork()
+
+    if ( pid == 0) {
+      exit(20);
+    }
+    exit(10);
+  }
 
   exit(5);
 

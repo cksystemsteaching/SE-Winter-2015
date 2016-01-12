@@ -791,6 +791,8 @@ int* context_getNext(int* node);
 int context_getPID(int* node);
 
 int* osCreateProcess(int pid, int* prev, int* next);
+int* osDeleteProcess(int* node, int* processList);
+int* osFindProcess(int pid, int* processList);
 
 // -----------------------------------------------------------------
 // ------------------------- PAGE TABLE ---------------------------
@@ -4016,20 +4018,18 @@ void syscall_exit() {
 	int exitCode;
 
 	exitCode = *(registers + REG_A0);
-
 	*(registers + REG_V0) = exitCode;
 
-	println();
-	print((int*) "exiting with error code ");
-	print(itoa(exitCode, string_buffer, 10, 0, 0));
-	println();
+	if (context_getPID(current_context) == 0) {
+		halt = 1;
+	}
 
-	halt = 1;
+	trap(SYSCALL_EXIT,exitCode);
+
 }
 
 void emitRead() {
-	createSymbolTableEntry(GLOBAL_TABLE, (int*) "read", 0, FUNCTION, INT_T, 0,
-			binaryLength);
+	createSymbolTableEntry(GLOBAL_TABLE, (int*) "read", 0, FUNCTION, INT_T, 0, binaryLength);
 
 	emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
 
@@ -4298,6 +4298,7 @@ void copyRegisters (int* oldRegisters, int* newRegisters) {
 	}
 }
 
+
 void syscall_fork() {
 	int childPID;
 	int* childRegisters;
@@ -4305,32 +4306,26 @@ void syscall_fork() {
 	int childPC;
 
 	childRegisters = malloc(32*4);
+	childPageTable = pagetable_create();
 
 	copyRegisters(registers, childRegisters);
 
-        childPageTable = pagetable_create();
-        childPC = *(registers + REG_RA);
-
+	childPC = *(registers + REG_RA);
 	childPID = nextFreeContextId;
 
-        *(childRegisters + REG_SP) = *(registers + REG_A1);
-        *(childRegisters + REG_GP) = *(registers + REG_A0);
-        *(childRegisters + REG_K1) = *(childRegisters + REG_GP);
-
-        *(registers + REG_V0) = childPID;
+	*(registers + REG_V0) = childPID;
 	*(childRegisters + REG_V0) = 0;
 
-        kernel_process_list = contextInsert(childPID, childPC,
-                        childRegisters, childPageTable, kernel_process_list, (int*) 0);
+	kernel_process_list = contextInsert(childPID, childPC, childRegisters, childPageTable, kernel_process_list, (int*) 0);
 
-        nextFreeContextId = nextFreeContextId + 1;
+	nextFreeContextId = nextFreeContextId + 1;
 
 	trap(HYPERCALL_CREATE_CONTEXT, childPID);
+
 }
 
 void emitWait() {
-	createSymbolTableEntry(GLOBAL_TABLE, (int*) "wait", 0, FUNCTION, INTSTAR_T,
-			0, binaryLength);
+	createSymbolTableEntry(GLOBAL_TABLE, (int*) "wait", 0, FUNCTION, INTSTAR_T, 0, binaryLength);
 
 	emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
 	emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
@@ -4525,16 +4520,6 @@ int* contextFindContextByPID(int* contexts, int contextId) {
 
 	cursor = contexts;
 
-        while ((int) cursor != 0) {
-
-                if (context_getPID(cursor) == contextId) {
-                        return cursor;
-                }
-
-                cursor = (int*) *(cursor + 4);
-        }
-
-
 	return (int*) 0;
 }
 
@@ -4660,28 +4645,9 @@ void pagetable_setAddrAtIndex(int* pagetable, int idx, int data) {
 }
 
 // -----------------------------------------------------------------
-// -------------------- Kernel Helper Functions ------------------
+// -------------------- Kernel Helper Functions --------------------
 // -----------------------------------------------------------------
 
-void printPageTable(int* pt) {
-	int* cursor;
-	int count;
-
-	cursor = pt;
-	count = 0;
-
-	while ((int) cursor != pt + PAGE_TABLE_SIZE) {
-		if (*cursor != -1) {
-			print(itoa(count * PAGE_FRAME_SIZE, string_buffer, 10, 0, 0));
-			print(" --> ");
-			print(itoa(*cursor, string_buffer, 10, 0, 0));
-			println();
-		}
-
-		cursor = cursor + 1;
-		count = count + 1;
-	}
-}
 
 void saveContext() {
 	context_setPC(current_context, pc);
@@ -4702,6 +4668,7 @@ void restoreContext(int contextId) {
 	pc = context_getPC(next_context);
 
 	current_context = next_context;
+
 }
 
 int createKernelContext() {
@@ -4713,8 +4680,7 @@ int createKernelContext() {
 	page_table = (int*) 0;
 	pc = 0;
 
-	kernel_process_list = contextInsert(nextFreeContextId, pc, registers,
-			page_table, kernel_process_list, (int*) 0);
+	kernel_process_list = contextInsert(nextFreeContextId, pc, registers, page_table, kernel_process_list, (int*) 0);
 	kernel_current_proc = kernel_process_list;
 
 	pid = nextFreeContextId;
@@ -4794,6 +4760,50 @@ int* osCreateProcess(int pid, int* prev, int* next) {
 	return node;
 }
 
+int* osDeleteProcess(int* node, int* processList) {
+
+	int* next;
+	int* prev;
+
+	if ((int) node == 0)
+		return processList;
+
+	next = (int*) *(node + 3);
+	prev = (int*) *(node + 2);
+
+	if ((int) prev != 0) {
+		*(prev+3) = next;
+	} else {
+		processList = next;
+	}
+
+	if ((int) next != 0) {
+		*(next+2) = prev;
+	}
+
+	return processList;
+
+}
+
+int* osFindProcess(int pid, int* processList) {
+
+	int* cursor;
+
+	cursor = processList;
+
+	while ((int) cursor != 0) {
+		if (*cursor == pid) {
+			return cursor;
+		}
+
+		cursor = (int*) *(cursor + 3);
+	}
+
+	return (int*) 0;
+
+
+}
+
 void hypercall_create_context() {
 
 	int* new_registers;
@@ -4808,8 +4818,7 @@ void hypercall_create_context() {
 	*(new_registers + REG_GP) = *(registers + REG_A0);
 	*(new_registers + REG_K1) = *(new_registers + REG_GP);
 
-	kernel_process_list = contextInsert(nextFreeContextId, new_pc,
-			new_registers, new_page_table, kernel_process_list, (int*) 0);
+	kernel_process_list = contextInsert(nextFreeContextId, new_pc, new_registers, new_page_table, kernel_process_list, (int*) 0);
 
 	*(registers + REG_V0) = nextFreeContextId;
 
@@ -4818,10 +4827,6 @@ void hypercall_create_context() {
 }
 
 void hypercall_switch_context() {
-
-	//print((int*) "Switching to...: ");
-	//print(itoa(srv_schedule(), string_buffer,10,0,0));
-	//println();
 
 	nextContextId = *(registers + REG_A0);
 }
@@ -4843,7 +4848,6 @@ void hypercall_map_page_in_context() {
 	paddr = *(registers + REG_A0);
 
 	context = contextFindContextByPID(kernel_process_list, pid);
-
 	page_table = context_getPageTable(context);
 	pagetable_setAddrAtIndex(page_table, index, paddr);
 }
@@ -5748,8 +5752,11 @@ void copyBinaryToMemory() {
 	int* page;
 	int offset;
 	int index;
+	int* pageTable;
 
 	a = 0;
+
+	pageTable = (int*) *(processFindByPID(1) + 1);
 
 	while (a < binaryLength) {
 
@@ -5759,6 +5766,7 @@ void copyBinaryToMemory() {
 		if (offset == 0) {
 			page = palloc();
 			map_page_in_context(1, index, page);
+			pagetable_setAddrAtIndex(pageTable, index, page);
 		}
 
 		*(page + offset / 4) = loadBinary(a);
@@ -5951,8 +5959,7 @@ void emulate(int argc, int *argv) {
 	println();
 
 	print(selfieName);
-	print(
-			(int*) ": profile: total,max(ratio%)@addr(line#),2max(ratio%)@addr(line#),3max(ratio%)@addr(line#)");
+	print((int*) ": profile: total,max(ratio%)@addr(line#),2max(ratio%)@addr(line#),3max(ratio%)@addr(line#)");
 	println();
 	printProfile((int*) ": calls: ", calls, callsPerAddress);
 	printProfile((int*) ": loops: ", loops, loopsPerAddress);
@@ -6023,13 +6030,14 @@ void kernel_event_loop() {
 	int* childProcessPageTable;
 
 	int* cursor;
-
 	int count;
+
+	int stop = 0;
 
 
 	sharedMemory = -SHARED_MEMORY_SIZE;
 
-	while (1) {
+	while ( stop == 0) {
 		eventType = *sharedMemory;
 		arg = *(sharedMemory + 1);
 		callerPid = *(sharedMemory + 2);
@@ -6058,7 +6066,8 @@ void kernel_event_loop() {
 
 			switch_context(callerPid);
 		} else if (eventType == HYPERCALL_CREATE_CONTEXT) {
-			print("OS - Create Context: FORK\n");
+			print("OS - Create Context: FORK");
+			println();
 
 			context_lists = osCreateProcess(arg, (int*) 0, context_lists);
 
@@ -6070,24 +6079,41 @@ void kernel_event_loop() {
 			childProcess = processFindByPID(arg);
 			childProcessPageTable = *(childProcess + 1);
 
-			print(itoa(arg, string_buffer, 10, 0, 0));
-			println();
-
-			while ((int) cursor != pageTable + PAGE_TABLE_SIZE) {
+			while (count < PAGE_TABLE_SIZE) {
 				if (*cursor != -1) {
 					page = palloc();
-					copyPageFrame(cursor, page);
+					copyPageFrame(*cursor, page);
 					pagetable_setAddrAtIndex(childProcessPageTable, count, page);
 					map_page_in_context(arg, count, page);
 				}
 
 				count = count + 1;
-				childProcessPageTable = childProcessPageTable + 1;
 				cursor = cursor + 1;
 			}
 
 			switch_context(arg);
-		} else {
+		}
+		else if (eventType == SYSCALL_EXIT) {
+			print("OS - Exit");
+
+			println();
+			print((int*) "exiting with error code ");
+			print(itoa(arg, string_buffer, 10, 0, 0));
+			println();
+
+			parentProcess = osFindProcess(callerPid,context_lists);
+			context_lists = osDeleteProcess(parentProcess,context_lists);
+			delete_context(callerPid);
+
+			if (context_lists == 0) {
+				stop = 1;
+			}
+			else {
+				switch_context(*context_lists);
+			}
+
+		}
+		else {
 			print("Unknown event type");
 			println();
 
@@ -6103,9 +6129,9 @@ void copyPageFrame(int* parentFrame, int* childFrame) {
 
 	while ((int) cursor != parentFrame + PAGE_FRAME_SIZE) {
 		*childFrame = *cursor;
-
 		childFrame = childFrame + 1;
 		cursor = cursor + 1;
+
 	}
 }
 
@@ -6214,6 +6240,7 @@ int selfie(int argc, int* argv) {
 				}
 
 				return 0;
+
 			} else if (stringCompare((int*) *argv, (int*) "-d")) {
 				initMemory(atoi((int*) *(argv + 1)) * MEGABYTE);
 
@@ -6276,8 +6303,8 @@ int main(int argc, int *argv) {
 
 	if (selfie(argc, (int*) argv) != 0) {
 		print(selfieName);
-		print(
-				(int*) ": usage: selfie { -c source | -o binary | -s assembly | -l binary } [ -m size ... | -d size ... | -k size ... ] ");
+		print((int*) ": usage: selfie { -c source | -o binary | -s assembly | -l binary } [ -m size ... | -d size ... | -k size ... ] ");
 		println();
 	}
+
 }
