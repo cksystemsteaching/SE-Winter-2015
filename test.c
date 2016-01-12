@@ -1,6 +1,7 @@
 int main() {
 
   int* a;
+  int pid;
 
   a = malloc(4096);
 
@@ -14,6 +15,10 @@ int main() {
   putchar('l');
   putchar('o');
   putchar(' ');
+
+  pid = fork();
+
+  putchar('p');
 
   exit(5);
 
