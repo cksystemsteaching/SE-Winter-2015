@@ -193,7 +193,7 @@ void initScanner();
 void resetScanner();
 
 void printSymbol(int symbol);
-void printLineNumber(int* message, int line);
+void printLineNumber(int* message);
 
 void syntaxErrorMessage(int *message);
 void syntaxErrorCharacter(int character);
@@ -321,28 +321,23 @@ void resetScanner() {
 
 void resetGlobalSymbolTable();
 
-void createSymbolTableEntry(int which, int *string, int line, int class, int type, int value, int reference);
+void createSymbolTableEntry(int which, int *string, int data, int class, int type, int value);
 int* getSymbolTableEntry(int *string, int class, int *symbol_table);
-
-int isUndefinedProcedure(int *entry);
-int reportUndefinedProcedures(int *symbol_table);
 
 int* getNext(int *entry);
 int* getString(int *entry);
-int  getLineNumber(int *entry);
+int  getData(int *entry);
 int  getClass(int *entry);
 int  getType(int *entry);
 int  getValue(int *entry);
-int  getReference(int *entry);
 int  getRegister(int *entry);
 
 void setNext(int *entry, int *next);
 void setString(int *entry, int *identifier);
-void setLineNumber(int *entry, int line);
+void setData(int *entry, int data);
 void setClass(int *entry, int class);
 void setType(int *entry, int type);
 void setValue(int *entry, int value);
-void setReference(int *entry, int reference);
 void setRegister(int *entry, int reg);
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
@@ -425,6 +420,7 @@ int allocatedTemporaries = 0; // number of allocated temporaries
 
 int allocatedMemory = 0; // number of bytes for global variables and strings
 
+int mainJumpAddress = 0; // address of main function
 int returnBranches  = 0; // fixup chain for return statements
 
 int *currentProcedureName = (int*) 0; // name of currently parsed procedure
@@ -630,6 +626,7 @@ void initDecoder() {
 }
 
 // -----------------------------------------------------------------
+// ---------------------------- BINARY -----------------------------
 // ----------------------------- CODE ------------------------------
 // -----------------------------------------------------------------
 
@@ -694,6 +691,39 @@ void syscall_malloc();
 
 void emitPutchar();
 
+//void emitGetPID();
+//void syscall_getPID();
+
+void emitAllocCMD();
+void syscall_allocCMD();
+
+
+void emitAlignedAlloc();
+void syscall_alignedAlloc();
+
+
+// -----------------------------------------------------------------
+// -------------------------- HYPERCALLS ---------------------------
+// -----------------------------------------------------------------
+
+void emitCreateContext();
+void hc_createContext();
+
+void emitSwitchContext();
+void hc_switchContext();
+
+void emitDeleteContext();
+void hc_deleteContext();
+
+void emitMapPageInContext();
+void hc_mapPageInContext();
+
+void emitFlushPageInContext();
+void hc_flushPageInContext();
+
+void emitLoadBinary();
+void hc_loadBinary();
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int SYSCALL_EXIT   = 4001;
@@ -701,6 +731,81 @@ int SYSCALL_READ   = 4003;
 int SYSCALL_WRITE  = 4004;
 int SYSCALL_OPEN   = 4005;
 int SYSCALL_MALLOC = 5001;
+int SYSCALL_ALLOCCMD = 5002;
+int SYSCALL_ALIGNEDALLOC = 5003;
+
+int SYSCALL_YIELD = 6000;
+int SYSCALL_LOCK  = 6001;
+int SYSCALL_UNLOCK= 6002;
+int SYSCALL_GETPID= 6003;
+int SYSCALL_FORK  = 6004;
+int SYSCALL_WAIT  = 6005;
+
+int HYPERCALL_CREATECONTEXT		= 7001;
+int HYPERCALL_SWITCHCONTEXT		= 7002;
+int HYPERCALL_DELETECONTEXT		= 7003;
+int HYPERCALL_MAPPAGEINCONTEXT	= 7004;
+int HYPERCALL_FLUSHPAGEINCONTEXT= 7005;
+int HYPERCALL_LOADBINARY		= 7006;
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+// -----------------------------------------------------------------
+// ---------------------    Operating System   ---------------------
+// -----------------------------------------------------------------
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+
+// ------------------------ constants -----------------------
+
+int VMEMORYSIZE = 4194304;	// Byte, 4MB
+int PAGESIZE = 4096;		// Byte, 4KB
+int PAGEFRAMESIZE = 4096;	// Byte, 4KB
+// ------------------------ variables -----------------------
+int *readyQueue = (int*)0;
+int *kernelProcess = (int*)0;
+int *currProcess = (int*)0;
+int *currPageTable = (int*)0;
+int  nextValidUID = 1;
+int  counterInstr = 0;		// currently processed instruction counter
+int  maxInstr = 1000;		// syscall_yield should be invoked every 'maxInstr'
+int  cmd = 0;	// address in memory of IPC
+
+// ------------------------ methods -----------------------
+void storeIPC(int arg0, int arg1, int arg2, int arg3);
+
+void createKernelProcess();
+int* createEmptyPageTable();
+int* createKernelPageTable();
+int* createProcess();
+int* palloc();
+void printPageTable(int *process);
+void printPT(int *pageTable);
+void printProcess();
+int *initFreeList();
+
+int* initList();
+void appendListElement(int *element, int *list);
+int isListEmpty(int *list);
+int* removeFirst(int *list);
+
+void saveUserState();
+void setUserState();
+void setKernelState();
+void saveKernelState();
+
+// --- GETTER ---
+int* getPrevProcess(int *process);
+int* getNextProcess(int *process);
+int  getUID(int *process);
+int  getPC(int *process);
+int* getRegisters(int *process);
+int* getPageTable(int *process);
+
+// --- SETTER ---
+void setPrevProcess(int *process, int *prev);
+void setNextProcess(int *process, int *next);
+void setUID(int *process, int uid);
+void setPC(int *process, int pc);
+void setRegisters(int *process, int *regs);
+void setPageTable(int *process, int *pt);
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -714,7 +819,7 @@ int SYSCALL_MALLOC = 5001;
 
 void initMemory(int bytes);
 
-int tlb(int vaddr);
+int* tlb(int vaddr);
 
 int  loadMemory(int vaddr);
 void storeMemory(int vaddr, int data);
@@ -728,7 +833,7 @@ int MEGABYTE = 1048576;
 int memorySize = 0; // size of memory in bytes
 
 int *memory = (int*) 0; // mipster memory
-
+int *pfreeList = (int*)0;
 // ------------------------- INITIALIZATION ------------------------
 
 void initMemory(int bytes) {
@@ -739,7 +844,48 @@ void initMemory(int bytes) {
     else
         memorySize = bytes;
 
-    memory = malloc(memorySize);
+    memory     = malloc(memorySize);
+	pfreeList = initFreeList();
+//	printFreeList();
+}
+
+int* initFreeList(){
+	int counterPages;
+	int *curr;
+	int i;
+	i = 0;
+	counterPages = memorySize / PAGEFRAMESIZE;
+	curr = memory;
+	while(i < counterPages){
+		if(i == counterPages - 1)
+			*curr = 0;
+		else
+			*curr = (int)curr + (PAGEFRAMESIZE);
+		
+		curr = (int*)((int)curr + (PAGEFRAMESIZE));
+		i = i + 1;
+	}
+	return memory;
+}
+void printFreeList(){
+	int i;
+	int *curr;
+	i = 0;
+	curr = pfreeList;
+	print((int*)"freeList\n");
+	
+	while(i< 10){//(int)curr != 0){
+		print((int*)"content of pageFrame [");
+		print(itoa(i, string_buffer, 10, 0, 0));
+		print((int*)"] at position [");
+		print(itoa((int)curr, string_buffer, 10, 0, 0));
+		print((int*)"]: [");
+		print(itoa(*curr, string_buffer, 10, 0, 0));
+		print((int*)"]\n");
+		i = i+1;
+		curr = (int*)*curr; 
+	}
+	print((int*)"freeList end\n");
 }
 
 // -----------------------------------------------------------------
@@ -763,7 +909,7 @@ void fct_subu();
 void op_lw();
 void fct_slt();
 void op_sw();
-void fct_teq();
+void op_teq();
 
 // -----------------------------------------------------------------
 // -------------------------- INTERPRETER --------------------------
@@ -795,6 +941,7 @@ void printProfile(int *message, int total, int *counters);
 
 void disassemble();
 void emulate(int argc, int *argv);
+void emulateKernel(int argc, int *argv);
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -809,6 +956,10 @@ int EXCEPTION_UNKNOWNINSTRUCTION = 3;
 int EXCEPTION_HEAPOVERFLOW       = 4;
 int EXCEPTION_UNKNOWNSYSCALL     = 5;
 int EXCEPTION_UNKNOWNFUNCTION    = 6;
+int EXCEPTION_SEGMENTATIONFAULT  = 7;
+int EXCEPTION_OUTOFMEMORY	     = 8;
+int EXCEPTION_PAGEFAULT			 = 9;
+
 
 int *EXCEPTIONS; // array of strings representing exceptions
 
@@ -843,7 +994,7 @@ int *storesPerAddress = (int*) 0; // number of executed stores per store operati
 // ------------------------- INITIALIZATION ------------------------
 
 void initInterpreter() {
-    EXCEPTIONS = malloc(7*4);
+    EXCEPTIONS = malloc(10*4);
 
     *(EXCEPTIONS + EXCEPTION_SIGNAL)             = (int) "signal";
     *(EXCEPTIONS + EXCEPTION_ADDRESSERROR)       = (int) "address error";
@@ -851,6 +1002,9 @@ void initInterpreter() {
     *(EXCEPTIONS + EXCEPTION_HEAPOVERFLOW)       = (int) "heap overflow";
     *(EXCEPTIONS + EXCEPTION_UNKNOWNSYSCALL)     = (int) "unknown syscall";
     *(EXCEPTIONS + EXCEPTION_UNKNOWNFUNCTION)    = (int) "unknown function";
+    *(EXCEPTIONS + EXCEPTION_SEGMENTATIONFAULT)  = (int) "segmentation fault [added]";
+    *(EXCEPTIONS + EXCEPTION_OUTOFMEMORY)		 = (int) "out of memory [added]";
+	*(EXCEPTIONS + EXCEPTION_PAGEFAULT)			 = (int) "page fault [added]";
 
     registers = malloc(32*4);
 }
@@ -1223,19 +1377,19 @@ void printSymbol(int symbol) {
     putCharacter(CHAR_DOUBLEQUOTE);
 }
 
-void printLineNumber(int* message, int line) {
+void printLineNumber(int* message) {
     print(selfieName);
     print((int*) ": ");
     print(message);
     print((int*) " in ");
     print(sourceName);
     print((int*) " in line ");
-    print(itoa(line, string_buffer, 10, 0, 0));
+    print(itoa(lineNumber, string_buffer, 10, 0, 0));
     print((int*) ": ");
 }
 
 void syntaxErrorMessage(int *message) {
-    printLineNumber((int*) "error", lineNumber);
+    printLineNumber((int*) "error");
 
     print(message);
     
@@ -1243,7 +1397,7 @@ void syntaxErrorMessage(int *message) {
 }
 
 void syntaxErrorCharacter(int expected) {
-    printLineNumber((int*) "error", lineNumber);
+    printLineNumber((int*) "error");
 
     printCharacter(expected);
     print((int*) " expected but ");
@@ -1615,7 +1769,7 @@ int getSymbol() {
         symbol = SYM_MOD;
 
     } else {
-        printLineNumber((int*) "error", lineNumber);
+        printLineNumber((int*) "error");
         print((int*) "found unknown character ");
         printCharacter(character);
         
@@ -1631,30 +1785,28 @@ int getSymbol() {
 // ------------------------- SYMBOL TABLE --------------------------
 // -----------------------------------------------------------------
 
-void createSymbolTableEntry(int whichTable, int *string, int line, int class, int type, int value, int reference) {
+void createSymbolTableEntry(int whichTable, int *string, int data, int class, int type, int value) {
     int *newEntry;
 
     // symbol table entry:
-    // +----+-----------+
-    // |  0 | next      | pointer to next entry
-    // |  1 | string    | identifier string, string constant
-    // |  2 | line      | source line number
-    // |  3 | class     | VARIABLE, FUNCTION, STRING
-    // |  4 | type      | INT_T, INTSTAR_T, VOID_T
-    // |  5 | value     | VARIABLE: constant value
-    // |  6 | reference | VARIABLE: offset, FUNCTION: address, STRING: offset
-    // |  7 | register  | REG_GP, REG_FP
-    // +----+-----------+
+    // +----+----------+
+    // |  0 | next     | pointer to next entry
+    // |  1 | string   | identifier string, string constant
+    // |  2 | data     | VARIABLE: offset, FUNCTION: address, STRING: offset
+    // |  3 | class    | VARIABLE, FUNCTION, STRING
+    // |  4 | type     | INT_T, INTSTAR_T, VOID_T
+    // |  5 | value    | VARIABLE: constant value
+    // |  6 | register | REG_GP, REG_FP
+    // +----+----------+
 
-    newEntry = malloc(8 * 4);
+    newEntry = malloc(7 * 4);
 
     setString(newEntry, string);
-    setLineNumber(newEntry, line);
+    setData(newEntry, data);
     setClass(newEntry, class);
     setType(newEntry, type);
     setValue(newEntry, value);
-    setReference(newEntry, reference);
-    
+
     // create entry at head of symbol table
     if (whichTable == GLOBAL_TABLE) {
         setRegister(newEntry, REG_GP);
@@ -1680,39 +1832,6 @@ int* getSymbolTableEntry(int *string, int class, int *symbol_table) {
     return (int*) 0;
 }
 
-int isUndefinedProcedure(int *entry) {
-    if (getClass(entry) == FUNCTION) {
-        if (getReference(entry) == 0)
-            return 1;
-        else if (getOpcode(loadBinary(getReference(entry))) == OP_JAL)
-            return 1;
-    }
-    
-    return 0;
-}
-
-int reportUndefinedProcedures(int *symbol_table) {
-    int undefined;
-
-    undefined = 0;
-
-    while ((int) symbol_table != 0) {
-        if (isUndefinedProcedure(symbol_table)) {
-            undefined = 1;
-
-            printLineNumber((int*) "error", getLineNumber(symbol_table));
-            print(getString(symbol_table));
-            print((int*) " undefined");
-            println();
-        }
-
-        // keep looking
-        symbol_table = getNext(symbol_table);
-    }
-
-    return undefined;
-}
-
 int* getNext(int *entry) {
     // cast only works if size of int and int* is equivalent
     return (int*) *entry;
@@ -1723,7 +1842,7 @@ int* getString(int *entry) {
     return (int*) *(entry + 1);
 }
 
-int getLineNumber(int *entry) {
+int getData(int *entry) {
     return *(entry + 2);
 }
 
@@ -1739,12 +1858,8 @@ int getValue(int *entry) {
     return *(entry + 5);
 }
 
-int getReference(int *entry) {
-    return *(entry + 6);
-}
-
 int getRegister(int *entry) {
-    return *(entry + 7);
+    return *(entry + 6);
 }
 
 void setNext(int *entry, int *next) {
@@ -1757,8 +1872,8 @@ void setString(int *entry, int *identifier) {
     *(entry + 1) = (int) identifier;
 }
 
-void setLineNumber(int *entry, int line) {
-    *(entry + 2) = line;
+void setData(int *entry, int data) {
+    *(entry + 2) = data;
 }
 
 void setClass(int *entry, int class) {
@@ -1773,12 +1888,8 @@ void setValue(int *entry, int value) {
     *(entry + 5) = value;
 }
 
-void setReference(int *entry, int reference) {
-    *(entry + 6) = reference;
-}
-
 void setRegister(int *entry, int reg) {
-    *(entry + 7) = reg;
+    *(entry + 6) = reg;
 }
 
 // -----------------------------------------------------------------
@@ -1907,8 +2018,8 @@ int lookForType() {
 }
 
 void talloc() {
-    // we use registers REG_T0-REG_T7 for temporaries
-    if (allocatedTemporaries < REG_T7 - REG_A3)
+    // we use registers REG_T0-REG_T9 and REG_S0-REG_S7 for temporaries
+    if (allocatedTemporaries < REG_T9 - REG_A3)
         allocatedTemporaries = allocatedTemporaries + 1;
     else {
         syntaxErrorMessage((int*) "out of registers");
@@ -1938,7 +2049,7 @@ int previousTemporary() {
 }
 
 int nextTemporary() {
-    if (allocatedTemporaries < REG_T7 - REG_A3)
+    if (allocatedTemporaries < REG_T9 - REG_A3)
         return currentTemporary() + 1;
     else {
         syntaxErrorMessage((int*) "out of registers");
@@ -1978,7 +2089,7 @@ void restore_temporaries(int numberOfTemporaries) {
 }
 
 void syntaxErrorSymbol(int expected) {
-    printLineNumber((int*) "error", lineNumber);
+    printLineNumber((int*) "error");
 
     printSymbol(expected);
     print((int*) " expected but ");
@@ -1990,7 +2101,7 @@ void syntaxErrorSymbol(int expected) {
 }
 
 void syntaxErrorUnexpected() {
-    printLineNumber((int*) "error", lineNumber);
+    printLineNumber((int*) "error");
 
     print((int*) "unexpected symbol ");
     printSymbol(symbol);
@@ -2011,7 +2122,7 @@ int* putType(int type) {
 }
 
 void typeWarning(int expected, int found) {
-    printLineNumber((int*) "warning", lineNumber);
+    printLineNumber((int*) "warning");
 
     print((int*) "type mismatch, ");
 
@@ -2035,8 +2146,10 @@ int* getVariable(int *variable) {
         entry = getSymbolTableEntry(variable, VARIABLE, global_symbol_table);
 
         if (entry == (int*) 0) {
-            printLineNumber((int*) "error", lineNumber);
+            printLineNumber((int*) "error");
+
             print(variable);
+
             print((int*) " undeclared");
             println();
 
@@ -2054,7 +2167,7 @@ int load_variable(int *variable) {
 
     talloc();
 
-    emitIFormat(OP_LW, getRegister(entry), currentTemporary(), getReference(entry));
+    emitIFormat(OP_LW, getRegister(entry), currentTemporary(), getData(entry));
 
     return getType(entry);
 }
@@ -2111,7 +2224,7 @@ void load_string() {
     if (l % 4 != 0)
         allocatedMemory = allocatedMemory + 4 - l % 4;
 
-    createSymbolTableEntry(GLOBAL_TABLE, string, lineNumber, STRING, INTSTAR_T, 0, -allocatedMemory);
+    createSymbolTableEntry(GLOBAL_TABLE, string, -allocatedMemory, STRING, INTSTAR_T, 0);
 
     talloc();
 
@@ -2123,7 +2236,7 @@ int help_call_codegen(int *entry, int *procedure) {
 
     if (entry == (int*) 0) {
         // CASE 1: function call, no definition, no declaration.
-        createSymbolTableEntry(GLOBAL_TABLE, procedure, lineNumber, FUNCTION, INT_T, 0, binaryLength);
+        createSymbolTableEntry(GLOBAL_TABLE, procedure, binaryLength, FUNCTION, INT_T, 0);
 
         emitJFormat(OP_JAL, 0);
 
@@ -2132,19 +2245,19 @@ int help_call_codegen(int *entry, int *procedure) {
     } else {
         type = getType(entry);
 
-        if (getReference(entry) == 0) {
+        if (getData(entry) == 0) {
             // CASE 2: function call, no definition, but declared.
-            setReference(entry, binaryLength);
+            setData(entry, binaryLength);
 
             emitJFormat(OP_JAL, 0);
-        } else if (getOpcode(loadBinary(getReference(entry))) == OP_JAL) {
+        } else if (getOpcode(loadBinary(getData(entry))) == OP_JAL) {
             // CASE 3: function call, no declaration
-            emitJFormat(OP_JAL, getReference(entry) / 4);
+            emitJFormat(OP_JAL, getData(entry) / 4);
 
-            setReference(entry, binaryLength - 8);
+            setData(entry, binaryLength - 8);
         } else
             // CASE 4: function defined, use the address
-            emitJFormat(OP_JAL, getReference(entry) / 4);
+            emitJFormat(OP_JAL, getData(entry) / 4);
     }
 
     return type;
@@ -2920,7 +3033,7 @@ void gr_statement() {
             if (ltype != rtype)
                 typeWarning(ltype, rtype);
 
-            emitIFormat(OP_SW, getRegister(entry), currentTemporary(), getReference(entry));
+            emitIFormat(OP_SW, getRegister(entry), currentTemporary(), getData(entry));
 
             tfree(1);
 
@@ -2977,29 +3090,28 @@ void gr_variable(int offset) {
     type = gr_type();
 
     if (symbol == SYM_IDENTIFIER) {
-        createSymbolTableEntry(LOCAL_TABLE, identifier, lineNumber, VARIABLE, type, 0, offset);
+        createSymbolTableEntry(LOCAL_TABLE, identifier, offset, VARIABLE, type, 0);
 
         getSymbol();
     } else {
         syntaxErrorSymbol(SYM_IDENTIFIER);
 
-        createSymbolTableEntry(LOCAL_TABLE, (int*) "missing variable name", lineNumber, VARIABLE, type, 0, offset);
+        createSymbolTableEntry(LOCAL_TABLE, (int*) "missing variable name", offset, VARIABLE, type, 0);
     }
 }
 
 void gr_initialization(int *name, int offset, int type) {
-    int actualLineNumber;
     int hasCast;
     int cast;
     int sign;
-
-    actualLineNumber = lineNumber;
 
     initialValue = 0;
 
     hasCast = 0;
 
-    if (symbol == SYM_ASSIGN) {
+    if (symbol == SYM_SEMICOLON)
+        getSymbol();
+    else if (symbol == SYM_ASSIGN) {
         getSymbol();
 
         // optional cast: [ cast ]
@@ -3052,7 +3164,7 @@ void gr_initialization(int *name, int offset, int type) {
         else
             syntaxErrorSymbol(SYM_SEMICOLON);
     } else
-        syntaxErrorSymbol(SYM_ASSIGN);
+        syntaxErrorUnexpected();
 
     if (hasCast) {
         if (type != cast)
@@ -3060,7 +3172,7 @@ void gr_initialization(int *name, int offset, int type) {
     } else if (type != INT_T)
         typeWarning(type, INT_T);
 
-    createSymbolTableEntry(GLOBAL_TABLE, name, actualLineNumber, VARIABLE, type, initialValue, offset);
+    createSymbolTableEntry(GLOBAL_TABLE, name, offset, VARIABLE, type, initialValue);
 }
 
 void gr_procedure(int *procedure, int returnType) {
@@ -3097,7 +3209,7 @@ void gr_procedure(int *procedure, int returnType) {
 
             while (parameters < numberOfParameters) {
                 // 8 bytes offset to skip frame pointer and link
-                setReference(entry, parameters * 4 + 8);
+                setData(entry, parameters * 4 + 8);
 
                 parameters = parameters + 1;
                 entry      = getNext(entry);
@@ -3116,7 +3228,7 @@ void gr_procedure(int *procedure, int returnType) {
         entry = getSymbolTableEntry(currentProcedureName, FUNCTION, global_symbol_table);
 
         if (entry == (int*) 0)
-            createSymbolTableEntry(GLOBAL_TABLE, currentProcedureName, lineNumber, FUNCTION, returnType, 0, 0);
+            createSymbolTableEntry(GLOBAL_TABLE, currentProcedureName, 0, FUNCTION, returnType, 0);
 
         getSymbol();
 
@@ -3124,32 +3236,34 @@ void gr_procedure(int *procedure, int returnType) {
     } else if (symbol == SYM_LBRACE) {
         functionStart = binaryLength;
         
+        getSymbol();
+
         entry = getSymbolTableEntry(currentProcedureName, FUNCTION, global_symbol_table);
 
         if (entry == (int*) 0)
-            createSymbolTableEntry(GLOBAL_TABLE, currentProcedureName, lineNumber, FUNCTION, returnType, 0, binaryLength);
+            createSymbolTableEntry(GLOBAL_TABLE, currentProcedureName, binaryLength, FUNCTION, returnType, 0);
         else {
-            if (getReference(entry) != 0) {
-                if (getOpcode(loadBinary(getReference(entry))) == OP_JAL)
-                    fixlink_absolute(getReference(entry), functionStart);
+            if (getData(entry) != 0) {
+                if (getOpcode(loadBinary(getData(entry))) == OP_JAL)
+                    fixlink_absolute(getData(entry), functionStart);
                 else {
-                    printLineNumber((int*) "error", lineNumber);
+                    printLineNumber((int*) "error");
+
                     print((int*) "multiple definitions of ");
+
                     print(currentProcedureName);
+
                     println();
                 }
             }
 
-            setLineNumber(entry, lineNumber);
-            setReference(entry, functionStart);
+            setData(entry, functionStart);
 
             if (getType(entry) != returnType)
                 typeWarning(getType(entry), returnType);
 
             setType(entry, returnType);
         }
-
-        getSymbol();
 
         localVariables = 0;
 
@@ -3238,9 +3352,9 @@ void gr_cstar() {
 
                     // type identifier ";" global variable declaration
                     if (symbol == SYM_SEMICOLON) {
-                        createSymbolTableEntry(GLOBAL_TABLE, variableOrProcedureName, lineNumber, VARIABLE, type, 0, -allocatedMemory);
-
                         getSymbol();
+
+                        createSymbolTableEntry(GLOBAL_TABLE, variableOrProcedureName, -allocatedMemory, VARIABLE, type, 0);
 
                     // type identifier "=" global variable definition
                     } else
@@ -3269,7 +3383,9 @@ void emitMainEntry() {
     // instruction at address zero cannot be fixed up, so just put a NOP there
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_NOP);
 
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "main", 0, FUNCTION, INT_T, 0, binaryLength);
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "main", binaryLength, FUNCTION, INT_T, 0);
+
+    mainJumpAddress = binaryLength;
 
     // jump and link to main, will return here only if there is no exit call
     emitJFormat(OP_JAL, 0);
@@ -3328,6 +3444,16 @@ void compile() {
     emitOpen();
     emitMalloc();
     emitPutchar();
+//    emitGetPID();
+	emitAllocCMD();
+	emitAlignedAlloc();
+
+	emitCreateContext();
+	emitSwitchContext();
+	emitDeleteContext();
+	emitMapPageInContext();
+	emitFlushPageInContext();
+	emitLoadBinary();
 
     // parser
     gr_cstar();
@@ -3338,8 +3464,14 @@ void compile() {
     // emit global variables and strings
     emitGlobalsStrings();
 
-    if (reportUndefinedProcedures(global_symbol_table))
+    if (getInstrIndex(loadBinary(mainJumpAddress)) == 0) {
+        print(selfieName);
+        print((int*) ": main function missing in ");
+        print(sourceName);
+        println();
+
         exit(-1);
+    }
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -3457,8 +3589,36 @@ void printFunction(int function) {
 }
 
 void decode() {
+	int debug_decode;
+	debug_decode = 0;
+	if(debug_decode){
+	 	print((int*)"ir: ");
+		print(itoa(ir, string_buffer, 10, 0, 0));
+		println();
+	  	print((int*)"pc: ");
+		print(itoa(pc, string_buffer, 10, 0, 0));
+		println();
+	}
     opcode = getOpcode(ir);
+    if(0){
+		print((int*)"ir: ");
+		print(itoa(ir, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"pc: ");
+		print(itoa(pc, string_buffer, 10, 0, 0));
+		println();
+    
+    }
+	if(debug_decode){
 
+		print((int*)"opcode: ");
+		print(itoa(opcode, string_buffer, 10, 0, 0));
+		println();
+
+		print((int*)"function: ");
+		print(itoa(function, string_buffer, 10, 0, 0));
+		println();
+	}
     if (opcode == 0)
         decodeRFormat();
     else if (opcode == OP_JAL)
@@ -3522,6 +3682,7 @@ void decodeJFormat() {
 // -----------------------------------------------------------------
 
 int loadBinary(int addr) {
+
     return *(binary + addr / 4);
 }
 
@@ -3736,7 +3897,7 @@ void load() {
 // -----------------------------------------------------------------
 
 void emitExit() {
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "exit", 0, FUNCTION, INT_T, 0, binaryLength);
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "exit", binaryLength, FUNCTION, INT_T, 0);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
     emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
@@ -3759,19 +3920,25 @@ void syscall_exit() {
     int exitCode;
 
     exitCode = *(registers+REG_A0);
-
     *(registers+REG_V0) = exitCode;
 
-    print(binaryName);
-    print((int*) ": exiting with error code ");
-    print(itoa(exitCode, string_buffer, 10, 0, 0));
-    println();
+	print((int*)"process with id [");
+	print(itoa(getUID(currProcess), string_buffer, 10,0, 0));
+   	print((int*)"] terminates");println();
 
-    halt = 1;
+
+		println();
+		println();
+		print(binaryName);
+		print((int*) ": exiting with error code ");
+		print(itoa(exitCode, string_buffer, 10, 0, 0));
+
+		halt = 1;
+			
 }
 
 void emitRead() {
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "read", 0, FUNCTION, INT_T, 0, binaryLength);
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "read", binaryLength, FUNCTION, INT_T, 0);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
 
@@ -3796,22 +3963,35 @@ void syscall_read() {
     int vaddr;
     int fd;
     int *buffer;
-    int size;
 
+	int pageFrameOffset;
+	int sizeToRead;
+	int sizeRead;
+	
     count = *(registers+REG_A2);
     vaddr = *(registers+REG_A1);
     fd    = *(registers+REG_A0);
+	sizeToRead = count;
+	sizeRead = 0;
 
-    buffer = memory + tlb(vaddr);
-
-    size = read(fd, buffer, count);
-
-    *(registers+REG_V0) = size;
+	while(sizeToRead > 0){
+		pageFrameOffset = PAGEFRAMESIZE - vaddr % PAGEFRAMESIZE;
+		
+		buffer = tlb(vaddr);
+		
+		if(pageFrameOffset <= sizeToRead)
+			sizeRead = read(fd, buffer, pageFrameOffset);
+		else
+			sizeRead = read(fd, buffer, sizeToRead);
+		sizeToRead = sizeToRead - pageFrameOffset;
+		vaddr = vaddr + pageFrameOffset;
+	}
+    *(registers+REG_V0) = sizeRead;
 
     if (debug_read) {
         print(binaryName);
         print((int*) ": read ");
-        print(itoa(size, string_buffer, 10, 0, 0));
+        print(itoa(count, string_buffer, 10, 0, 0));
         print((int*) " bytes from file with descriptor ");
         print(itoa(fd, string_buffer, 10, 0, 0));
         print((int*) " into buffer at address ");
@@ -3821,7 +4001,7 @@ void syscall_read() {
 }
 
 void emitWrite() {
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "write", 0, FUNCTION, INT_T, 0, binaryLength);
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "write", binaryLength, FUNCTION, INT_T, 0);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
 
@@ -3845,21 +4025,35 @@ void syscall_write() {
     int vaddr;
     int fd;
     int *buffer;
+    
+    int pageFrameOffset;
+    int sizeToWrite;
+    int sizeWritten;
 
-    size  = *(registers+REG_A2);
-    vaddr = *(registers+REG_A1);
-    fd    = *(registers+REG_A0);
+	size  = *(registers+REG_A2);
+	vaddr = *(registers+REG_A1);
+	fd    = *(registers+REG_A0);
+	sizeToWrite = size;
+	sizeWritten = 0;
 
-    buffer = memory + tlb(vaddr);
+	while(sizeToWrite > 0){
+		pageFrameOffset = PAGEFRAMESIZE - vaddr % PAGEFRAMESIZE;
 
-    size = write(fd, buffer, size);
+		buffer = tlb(vaddr);
 
-    *(registers+REG_V0) = size;
-
+		if(pageFrameOffset <= sizeToWrite)
+			sizeWritten = write(fd, buffer, pageFrameOffset);
+		else
+			sizeWritten = write(fd, buffer, sizeToWrite);
+		vaddr = vaddr + pageFrameOffset;
+		sizeToWrite = sizeToWrite - pageFrameOffset;
+	}
+	*(registers+REG_V0) = sizeWritten;
+	
     if (debug_write) {
         print(binaryName);
         print((int*) ": wrote ");
-        print(itoa(size, string_buffer, 10, 0, 0));
+        print(itoa(sizeWritten, string_buffer, 10, 0, 0));
         print((int*) " bytes from buffer at address ");
         print(itoa((int) buffer, string_buffer, 16, 8, 0));
         print((int*) " into file with descriptor ");
@@ -3869,7 +4063,7 @@ void syscall_write() {
 }
 
 void emitOpen() {
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "open", 0, FUNCTION, INT_T, 0, binaryLength);
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "open", binaryLength, FUNCTION, INT_T, 0);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
 
@@ -3899,7 +4093,7 @@ void syscall_open() {
     flags = *(registers+REG_A1);
     vaddr = *(registers+REG_A0);
 
-    filename = memory + tlb(vaddr);
+    filename = tlb(vaddr);
 
     fd = open(filename, flags, mode);
 
@@ -3920,7 +4114,7 @@ void syscall_open() {
 }
 
 void emitMalloc() {
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "malloc", 0, FUNCTION, INTSTAR_T, 0, binaryLength);
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "malloc", binaryLength, FUNCTION, INTSTAR_T, 0);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
     emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
@@ -3963,7 +4157,7 @@ void syscall_malloc() {
 }
 
 void emitPutchar() {
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "putchar", 0, FUNCTION, INT_T, 0, binaryLength);
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "putchar", binaryLength, FUNCTION, INT_T, 0);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
 
@@ -3980,6 +4174,451 @@ void emitPutchar() {
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
+void emitAllocCMD(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*)"allocCMD", binaryLength, FUNCTION, INTSTAR_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_ALLOCCMD);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+
+}
+
+void syscall_allocCMD(){
+    int bump;
+    int size;
+    size = 16;
+	print((int*)"\nalloc cmd\n");
+    bump = *(registers+REG_K1);
+	
+    if (bump + size >= *(registers+REG_SP))
+        exception_handler(EXCEPTION_HEAPOVERFLOW);
+	
+	cmd = bump;
+	storeIPC(7003, 0 ,0 ,0);
+	
+    *(registers+REG_K1) = bump + size;
+    *(registers+REG_V0) = bump;
+}
+
+void emitAlignedAlloc(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*)"alignedAlloc", binaryLength, FUNCTION, INTSTAR_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_ALIGNEDALLOC);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+
+void syscall_alignedAlloc(){
+}
+// -----------------------------------------------------------------
+// -------------------------- HYPERCALLS ---------------------------
+// -----------------------------------------------------------------
+
+void emitCreateContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "hcCreateContext", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A3, 0); // pagetable
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A2, 0); // registers
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0); // pc
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0); // uid
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_CREATECONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+void hc_createContext(){
+
+	int *process;
+	process = createProcess();
+	print((int*)"\nhc_createContext in selfie\n");
+	
+
+}
+
+void emitSwitchContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "hcSwitchContext", binaryLength, FUNCTION, INT_T, 0);
+
+}
+void hc_switchContext(){
+
+}
+
+void emitDeleteContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "hcDeleteContext", binaryLength, FUNCTION, INT_T, 0);
+
+}
+void hc_deleteContext(){
+
+}
+
+void emitMapPageInContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "hcMapPageInContext", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A3, 0); 
+    emitIFormat(OP_LW, REG_SP, REG_A2, 0); 
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0);
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_MAPPAGEINCONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+
+}
+void hc_mapPageInContext(){
+	print((int*)"\nmap page in context\n");
+	saveKernelState();
+	setUserState();
+	halt = 1;
+}
+
+void emitFlushPageInContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "hcFlushPageInContext", binaryLength, FUNCTION, INT_T, 0);
+
+
+}
+void hc_flushPageInContext(){
+
+}
+
+void emitLoadBinary(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*)"hcLoadBinary", FUNCTION, INT_T, 0, binaryLength);
+
+}
+
+void hc_loadBinary(){
+}
+
+
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+// -----------------------------------------------------------------
+// ---------------------   Operating System    ---------------------
+// -----------------------------------------------------------------
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+
+// the kernel process has following structure:
+//
+// 0 +-----+
+//   |  /  | 
+// 1 +-----+  
+//   |  /  | 
+// 2 +-----+  
+//   |uid  | unique process ID (=0)
+// 3 +-----+  
+//   | pc  | program counter
+// 4 +-----+  
+//   |reg  | pointer to registers
+// 5 +-----+  
+//   | PT  | pointer to page table
+// 6 +-----+ 
+
+void createKernelProcess(){
+	int *pt;
+
+	kernelProcess = malloc(6 * 4);
+	setUID(kernelProcess, 0);
+	setPC(kernelProcess, pc);
+	setRegisters(kernelProcess, registers);//malloc(32 * 4));
+
+	pt = createKernelPageTable();
+
+	setPageTable(kernelProcess, pt);
+	
+	currProcess = kernelProcess;
+	currPageTable = pt;
+
+}
+int* createKernelPageTable(){
+	int *pt;
+	int ptMaxEntries;
+	int ptSize;
+	int i;
+	i=0;
+	
+	ptMaxEntries = memorySize / PAGESIZE; //VMEMORYSIZE / PAGESIZE;
+	ptSize = ptMaxEntries * 4;
+	pt = malloc(ptSize);
+
+	while(i < ptSize){
+		*(pt+i) = 0;
+		i = i + 1;
+	}
+	
+	*(pt+0) = (int)palloc();
+	*(pt+1) = (int)palloc();
+	*(pt+2) = (int)palloc();
+	*(pt+3) = (int)palloc();
+	*(pt+4) = (int)palloc();
+	*(pt+(ptMaxEntries-5)) = (int)palloc();
+	*(pt+(ptMaxEntries-4)) = (int)palloc();
+	*(pt+(ptMaxEntries-3)) = (int)palloc();
+	*(pt+(ptMaxEntries-2)) = (int)palloc();
+	*(pt+(ptMaxEntries-1)) = (int)palloc();
+
+	return pt;
+}
+
+// a userprocess has following structure:
+//
+// 0 +-----+
+//   |prev | pointer to previous element in list
+// 1 +-----+  
+//   |next | pointer to next element in list
+// 2 +-----+  
+//   |pid  | process ID
+// 3 +-----+  
+//   | pc  | program counter
+// 4 +-----+  
+//   |reg  | pointer to registers
+// 5 +-----+  
+//   | PT  | pointer to page table
+// 6 +-----+ 
+
+int* createProcess(){
+	int *process;
+	process = malloc (6*4);
+	setPrevProcess(process, (int*)0);
+	setNextProcess(process, (int*)0);
+	setUID(process, nextValidUID);
+	setPC(process, 0);
+	setRegisters(process, malloc(32 * 4));
+	setPageTable(process, createEmptyPageTable());
+	
+	nextValidUID = nextValidUID + 1;
+	return process;
+}
+
+int* createEmptyPageTable(){
+	int *pt;
+	int ptMaxEntries;
+	int ptSize;
+	int i;
+	i=0;
+	
+	ptMaxEntries = VMEMORYSIZE / PAGESIZE;
+	ptSize = ptMaxEntries * 4;
+	pt = malloc(ptSize);
+
+	while(i < ptSize){
+		*(pt+i) = 0;
+		i = i + 1;
+	}
+	
+	return pt;
+}
+
+int* palloc(){
+	int *page;
+	if((int)pfreeList != 0){
+		page = pfreeList;
+		pfreeList = (int*)*pfreeList;
+		return page;
+	}
+	print((int*)"no free pages left");
+	exit(-1);
+
+}
+
+void printPageTable(int *process){
+	int *pt;
+	int pageTableSize;
+	int i;
+	pt = getPageTable(process);
+	i=0;
+	if((int)pt == 0)
+		print((int*) "\npagetable is null\n");
+	pageTableSize = memorySize / PAGESIZE;
+	print((int*)"\nprint pagetable of process [");
+	print(itoa(getUID(process), string_buffer, 10, 0, 0));
+	print((int*)"]\n");
+
+	while(i < pageTableSize){
+		if(*(pt+i*4) != 0){
+			print((int*)"pageTableEntry [");
+			print(itoa(i, string_buffer, 10 , 0, 0));
+			print((int*)"] mapped to pageFrame [");
+			print(itoa((int)*(pt+i*4), string_buffer, 10 , 0, 0));
+			print((int*)"] in memory\n");
+		}
+		i = i+1;
+	}
+	print((int*)"print pagetable end\n\n");
+}
+void printPT(int *pt){
+	int pageTableSize;
+	int i;
+	i=0;
+	if((int)pt == 0)
+		print((int*) "\npagetable is null\n");
+	pageTableSize = memorySize / PAGESIZE;
+	while(i < pageTableSize){
+		if(*(pt+i*4) != 0){
+			print((int*)"pageTableEntry [");
+			print(itoa(i, string_buffer, 10 , 0, 0));
+			print((int*)"] mapped to pageFrame [");
+			print(itoa((int)*(pt+i*4), string_buffer, 10 , 0, 0));
+			print((int*)"] in memory\n");
+		}
+		i = i+1;
+	}
+	print((int*)"printPT end\n\n");
+}
+void printProcess(){
+    print((int*)"\nprint process\n");
+    print((int*)"\ncurrProcess id: ");
+    print(itoa(getUID(currProcess), string_buffer, 10, 0, 0));
+    print((int*)"\npc: ");
+    print(itoa(pc, string_buffer, 10, 0, 0));
+    println();
+    printPageTable(currProcess);
+    print((int*)"\nprint process end\n");
+}   
+
+void setKernelState(){
+	print((int*)"\nsetKernelState\n");
+	currProcess = kernelProcess;
+	currPageTable = getPageTable(kernelProcess);
+	registers = getRegisters(kernelProcess);
+	pc = 0;
+}
+void saveKernelState(){
+	print((int*)"\nsaveKernelState\n");
+	setPageTable(kernelProcess, currPageTable);
+	setRegisters(kernelProcess, registers);
+	setPC(kernelProcess, pc);
+}
+void setUserState(){
+	print((int*)"\nsetUserState\n");
+	currProcess = removeFirst(readyQueue);
+	pc = getPC(currProcess);
+	registers = getRegisters(currProcess);
+	currPageTable = getPageTable(currProcess);
+}
+
+void saveUserState(){
+	if((int)currProcess != 0){
+		if(getUID(currProcess) != 0){
+			print((int*)"\nsaveUserState\n");
+			setPC(currProcess, pc-4); //??
+			setRegisters(currProcess, registers);
+			setPageTable(currProcess, currPageTable);
+			appendListElement(currProcess, readyQueue);
+			currProcess = (int*)0;
+		}
+	}
+}
+
+// --- GETTER ---
+int* getPrevProcess(int *process){
+	return (int*)*process; 
+}
+int* getNextProcess(int *process){
+	return (int*)*(process+1); 
+}
+int getUID(int *process){
+	return *(process+2); 
+}
+int getPC(int *process){
+	return *(process+3);
+}
+int* getRegisters(int *process){
+	return (int*)*(process+4); 
+}
+int* getPageTable(int *process){
+	return (int*)*(process+5); 
+}
+
+// --- SETTER ---
+void setPrevProcess(int *process, int *prev){
+	*process = (int)prev;
+}
+void setNextProcess(int *process, int *next){
+	*(process+1) = (int)next;
+}
+void setUID(int *process, int uid){
+	*(process+2) = uid;
+}
+void setPC(int *process, int pc){
+	*(process+3) = pc;
+}
+void setRegisters(int *process, int *regs){
+	*(process+4) = (int)regs;
+}
+void setPageTable(int *process, int *pt){
+	*(process+5) = (int)pt;
+}
+
+// --- LIST ---
+
+int* initList(){
+	int *list;
+	list = malloc(2*4);
+	*list = 0;
+	*(list+1) = 0;
+	return list;
+}
+void appendListElement(int *element, int *list){
+	int *tail;
+	tail = (int*)*(list+1);
+	if(isListEmpty(list)){
+		*list = (int)element;
+	} else {
+		*element = *(list+1);
+		*(tail+1) = (int)element;
+	}
+	*(list+1) = (int)element;
+	*(element+1) = 0;
+}
+
+int isListEmpty(int *list){
+	if(*list == 0)
+		return 1;
+	return 0;
+}
+
+int* removeFirst(int *list){
+	int *head;
+	int *tail;
+	int *process;
+	
+	if(isListEmpty(list))
+		return (int*)0;
+
+	process = head;
+
+	if((int)head == (int)tail){
+		*head = 0;
+		*tail = 0;
+	} else {
+		head = getNextProcess(head);
+		setPrevProcess(head, (int*)0);
+	}
+	
+	return process;
+}
+
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -3989,30 +4628,110 @@ void emitPutchar() {
 // -----------------------------------------------------------------
 // ---------------------------- MEMORY -----------------------------
 // -----------------------------------------------------------------
+int* tlb(int vaddr) {
+	int paddr;
+	int pageFrameOffset;
+	int pageTableOffset;
+	int *newPage;
+	int interpretOld;
+	
+	if(interpret==0)
+		return memory + vaddr/4;
+	if (vaddr % 4 != 0){
+		print((int*)"tlb 1: ");
+		exception_handler(EXCEPTION_ADDRESSERROR);
+	}
+	if (vaddr < 0){
+		print((int*)"tlb 2: ");
+		exception_handler(EXCEPTION_ADDRESSERROR);
+	}
 
-int tlb(int vaddr) {
-    if (vaddr % 4 != 0)
-        exception_handler(EXCEPTION_ADDRESSERROR);
+	pageTableOffset = vaddr / PAGESIZE;
+	pageFrameOffset = vaddr % PAGESIZE;
+	if((int)*(currPageTable+pageTableOffset) == 0){
+		exception_handler(EXCEPTION_PAGEFAULT);
+		print((int*)"page fault exception thrown by vaddr: ");
+		print(itoa(vaddr, string_buffer, 10, 0, 0));
+		print((int*)"\nentry [");
+		print(itoa(pageTableOffset, string_buffer, 10, 0, 0));
+		print((int*)"] has no mapping in physical memory\n");
+		
+		saveUserState();
+		setKernelState();
+		
+		print((int*)"\nbefore storeIPC(HYPERCALL_MAPPAGEINCONTEXT)");
+		storeIPC(HYPERCALL_MAPPAGEINCONTEXT, pageTableOffset, 0, 0);
 
-    // physical memory is word-addressed for lack of byte-sized data type
-    return vaddr / 4;
+		interpretOld = interpret;		
+		newPage = palloc();
+
+		*(currPageTable+pageTableOffset) = (int)newPage;
+
+		run();
+
+		halt = 0;
+		interpret = interpretOld;
+
+	}
+	
+	paddr = (int)*(currPageTable + pageTableOffset) + pageFrameOffset;
+
+	if (paddr % 4 != 0){
+		print((int*)"tlb 4: ");
+		exception_handler(EXCEPTION_ADDRESSERROR);
+	}
+	if (paddr < (int)memory){
+		print((int*)"tlb 5: ");
+		exception_handler(EXCEPTION_ADDRESSERROR);
+	}
+	if (paddr >= (int)memory+memorySize){
+		print((int*)"tlb 6: ");
+		exception_handler(EXCEPTION_ADDRESSERROR);
+	}
+
+	return (int*)paddr;
 }
 
 int loadMemory(int vaddr) {
-    int paddr;
-
+    int *paddr;
+    
     paddr = tlb(vaddr);
-
-    return *(memory + paddr);
+    if(1 == 4880){
+    	print((int*)"\nloadmemory\n");
+		print((int*)"\nvaddr: ");
+		print(itoa(vaddr, string_buffer, 10, 0, 0));
+		print((int*)"\npaddr: ");
+		print(itoa((int)paddr, string_buffer, 10, 0, 0));
+		print((int*)"\n*paddr: ");
+		print(itoa((int)*paddr, string_buffer, 10, 0, 0));
+		println();
+	}
+    return *paddr;
 }
 
 void storeMemory(int vaddr, int data) {
-    int paddr;
-
+    int *paddr;
     paddr = tlb(vaddr);
-
-    *(memory + paddr) = data;
+	*paddr = data;
 }
+
+void storeIPC(int arg0, int arg1, int arg2, int arg3){
+	print((int*)"\nstore ipc\n");
+	print((int*)"\narg0: ");
+	print(itoa(arg0, string_buffer, 10, 0, 0));
+	print((int*)"\narg1: ");
+	print(itoa(arg1, string_buffer, 10, 0, 0));
+	print((int*)"\narg2: ");
+	print(itoa(arg2, string_buffer, 10, 0, 0));
+	print((int*)"\narg3: ");
+	print(itoa(arg3, string_buffer, 10, 0, 0));
+	println();
+	storeMemory(cmd,	arg0);
+	storeMemory(cmd+4,	arg1);
+	storeMemory(cmd+8,	arg2);
+	storeMemory(cmd+12,	arg3);
+}
+
 
 // -----------------------------------------------------------------
 // ------------------------- INSTRUCTIONS --------------------------
@@ -4035,6 +4754,24 @@ void fct_syscall() {
             syscall_open();
         } else if (*(registers+REG_V0) == SYSCALL_MALLOC) {
             syscall_malloc();
+//		} else if(*(registers+REG_V0) == SYSCALL_GETPID){
+//			syscall_getPID();
+		} else if(*(registers+REG_V0) == SYSCALL_ALLOCCMD){
+			syscall_allocCMD();
+		} else if(*(registers+REG_V0) == SYSCALL_ALIGNEDALLOC){
+			syscall_alignedAlloc();
+		} else if(*(registers+REG_V0) == HYPERCALL_CREATECONTEXT){
+			hc_createContext();
+		} else if(*(registers+REG_V0) == HYPERCALL_LOADBINARY){
+			hc_loadBinary();
+		} else if(*(registers+REG_V0) == HYPERCALL_SWITCHCONTEXT){
+			hc_switchContext();
+		} else if(*(registers+REG_V0) == HYPERCALL_DELETECONTEXT){
+			hc_deleteContext();
+		} else if(*(registers+REG_V0) == HYPERCALL_MAPPAGEINCONTEXT){
+			hc_mapPageInContext();
+		} else if(*(registers+REG_V0) == HYPERCALL_FLUSHPAGEINCONTEXT){
+			hc_flushPageInContext();
         } else {
             exception_handler(EXCEPTION_UNKNOWNSYSCALL);
         }
@@ -4690,7 +5427,10 @@ void exception_handler(int enumber) {
     printException(enumber);
     println();
 
-    exit(enumber);
+	if(enumber != EXCEPTION_PAGEFAULT)
+		if(enumber != EXCEPTION_OUTOFMEMORY)
+	   		exit(enumber);
+	
 }
 
 void fetch() {
@@ -4698,6 +5438,8 @@ void fetch() {
 }
 
 void execute() {
+	int debug_execute;
+	debug_execute = 0;
     if (debug)
         if (sourceLineNumber != (int*) 0) {
             print(binaryName);
@@ -4717,7 +5459,23 @@ void execute() {
         }
         print((int*) ": ");
     }
-
+    if(debug_execute){
+		print((int*)"ir: ");
+		print(itoa(ir, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"opcode: ");
+		print(itoa(opcode, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"function: ");
+		print(itoa(function, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"opcode: ");
+		print(itoa(opcode, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"function: ");
+		print(itoa(function, string_buffer, 10, 0, 0));
+		println();
+	}
     if (opcode == OP_SPECIAL) {
         if (function == FCT_NOP) {
             fct_nop();
@@ -4742,6 +5500,15 @@ void execute() {
         } else if (function == FCT_TEQ) {
             fct_teq();
         } else {
+		print((int*)"ir: ");
+		print(itoa(ir, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"opcode: ");
+		print(itoa(opcode, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"function: ");
+		print(itoa(function, string_buffer, 10, 0, 0));
+		println();
             exception_handler(EXCEPTION_UNKNOWNINSTRUCTION);
         }
     } else if (opcode == OP_ADDIU) {
@@ -4771,29 +5538,39 @@ void execute() {
 }
 
 void run() {
-    halt = 0;
-
-    while (halt == 0) {
-        fetch();
-        decode();
-        execute();
-    }
-
+	halt = 0;
+	while(halt==0){
+ 	    fetch();
+		decode();
+		execute();
+		if((int)currProcess != (int)kernelProcess){
+		 	if(counterInstr == maxInstr){
+				saveUserState();
+				setKernelState();
+				print((int*)"\nbefore storeIPC(HYPERCALL_SWITCHCONTEXT)");
+		 		storeIPC(HYPERCALL_SWITCHCONTEXT, getUID(currProcess), (int)getRegisters(currProcess),
+		 					(int)getPageTable(currProcess));
+				counterInstr = 0;
+			}
+		} else {
+		   	counterInstr = counterInstr + 1;
+	   	}
+	}
     halt = 0;
 
     interpret = 0;
     debug     = 0;
 }
 
+
 void up_push(int value) {
     int vaddr;
-
     // allocate space for one value on the stack
     *(registers+REG_SP) = *(registers+REG_SP) - 4;
 
     // compute address
     vaddr = *(registers+REG_SP);
-
+	
     // store value
     storeMemory(vaddr, value);
 }
@@ -4836,7 +5613,6 @@ int up_copyString(int *s) {
 
 void up_copyArguments(int argc, int *argv) {
     int vaddr;
-
     up_push(argc);
 
     vaddr = up_malloc(argc * 4);
@@ -4855,9 +5631,7 @@ void up_copyArguments(int argc, int *argv) {
 
 void copyBinaryToMemory() {
     int a;
-
     a = 0;
-
     while (a < binaryLength) {
         storeMemory(a, loadBinary(a));
 
@@ -5035,6 +5809,48 @@ void emulate(int argc, int *argv) {
     printProfile((int*) ": stores: ", stores, storesPerAddress);
 }
 
+void emulateKernel(int argc, int *argv) {
+    interpret = 1;
+
+    print(selfieName);
+    print((int*) ": this is selfie's mipster executing ");
+    print(binaryName);
+    print((int*) " with ");
+    print(itoa(memorySize / 1024 / 1024, string_buffer, 10, 0, 0));
+    print((int*) "MB of memory");
+    println();
+
+    resetInterpreter();
+
+	readyQueue = initList();
+	createKernelProcess();
+
+	copyBinaryToMemory();
+
+	*(registers+REG_SP) = memorySize-4;
+	*(registers+REG_GP) = binaryLength;
+	*(registers+REG_K1) = *(registers+REG_GP);
+ 
+	up_copyArguments(argc, argv);
+
+    run();
+
+    println();
+    println();
+    print(selfieName);
+    print((int*) ": this is selfie's mipster terminating ");
+    print(binaryName);
+    println();
+
+    print(selfieName);
+    print((int*) ": profile: total,max(ratio%)@addr(line#),2max(ratio%)@addr(line#),3max(ratio%)@addr(line#)");
+    println();
+    printProfile((int*) ": calls: ", calls, callsPerAddress);
+    printProfile((int*) ": loops: ", loops, loopsPerAddress);
+    printProfile((int*) ": loads: ", loads, loadsPerAddress);
+    printProfile((int*) ": stores: ", stores, storesPerAddress);
+}
+
 // -----------------------------------------------------------------
 // ----------------------------- MAIN ------------------------------
 // -----------------------------------------------------------------
@@ -5042,7 +5858,7 @@ void emulate(int argc, int *argv) {
 int selfie(int argc, int* argv) {
     if (argc < 2)
         return -1;
-    else {
+	else {
         while (argc >= 2) {
             if (stringCompare((int*) *argv, (int*) "-c")) {
                 sourceName = (int*) *(argv+1);
@@ -5100,7 +5916,6 @@ int selfie(int argc, int* argv) {
 
                 if (binaryLength > 0) {
                     debug = 0;
-
                     emulate(argc, argv);
                 } else {
                     print(selfieName);
@@ -5134,9 +5949,24 @@ int selfie(int argc, int* argv) {
 
                 return 0;
             } else if (stringCompare((int*) *argv, (int*) "-k")) {
-                print(selfieName);
-                print((int*) ": selfie -k size ... not yet implemented");
-                println();
+                initMemory(atoi((int*) *(argv+1)) * MEGABYTE);
+
+                argc = argc - 1;
+                argv = argv + 1;
+
+                // pass binaryName as first argument replacing size
+                *argv = (int) binaryName;
+
+                if (binaryLength > 0) {
+                    debug = 0;
+                    emulateKernel(argc, argv);
+                } else {
+                    print(selfieName);
+                    print((int*) ": nothing to emulate");
+                    println();
+
+                    exit(-1);
+                }
 
                 return 0;
             } else
@@ -5162,9 +5992,10 @@ int main(int argc, int *argv) {
     argc = argc - 1;
     argv = argv + 1;
 
-    if (selfie(argc, (int*) argv) != 0) {
+	if (selfie(argc, (int*) argv) != 0) {
         print(selfieName);
         print((int*) ": usage: selfie { -c source | -o binary | -s assembly | -l binary } [ -m size ... | -d size ... | -k size ... ] ");
         println();
     }
 }
+
