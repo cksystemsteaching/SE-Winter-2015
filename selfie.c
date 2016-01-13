@@ -748,6 +748,8 @@ int HYPERCALL_MAP_PAGE_IN_CONTEXT = 7004;
 int DEL_CTXT = 7004;
 int FLUSH_PAGE = 7005;
 
+int INTERRUPT = 8001;
+
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -4757,6 +4759,14 @@ int* osCreateProcess(int pid, int* prev, int* next) {
 	*(node + 2) = prev;
 	*(node + 3) = next;
 
+	if (prev != 0) {
+		*(prev + 3 ) = node;
+	}
+
+	if (next != 0) {
+		*(next + 2) = node;
+	}
+
 	return node;
 }
 
@@ -5657,7 +5667,11 @@ void execute() {
 }
 
 void run() {
+
+	int instrCount;
+
 	halt = 0;
+	instrCount = 0;
 
 	while (halt == 0) {
 
@@ -5670,6 +5684,15 @@ void run() {
 			restoreContext(nextContextId);
 			nextContextId = -1;
 		}
+
+		if ( kernel_mode == 0 )
+			instrCount = instrCount + 1;
+
+		if (instrCount == 30) {
+			trap(INTERRUPT, 0);
+			instrCount = 0;
+		}
+
 	}
 
 	halt = 0;
@@ -6032,10 +6055,13 @@ void kernel_event_loop() {
 	int* cursor;
 	int count;
 
-	int stop = 0;
+	int* process;
+
+	int stop;
 
 
 	sharedMemory = -SHARED_MEMORY_SIZE;
+	stop = 0;
 
 	while ( stop == 0) {
 		eventType = *sharedMemory;
@@ -6101,8 +6127,10 @@ void kernel_event_loop() {
 			print(itoa(arg, string_buffer, 10, 0, 0));
 			println();
 
-			parentProcess = osFindProcess(callerPid,context_lists);
-			context_lists = osDeleteProcess(parentProcess,context_lists);
+			process = osFindProcess(callerPid,context_lists);
+
+			context_lists = osDeleteProcess(process,context_lists);
+
 			delete_context(callerPid);
 
 			if (context_lists == 0) {
@@ -6111,6 +6139,16 @@ void kernel_event_loop() {
 			else {
 				switch_context(*context_lists);
 			}
+
+		}
+		else if (eventType == INTERRUPT) {
+			process = osFindProcess(callerPid, context_lists);
+			process = (int*) *(process+3);
+
+			if ( (int) process == 0 ) {
+				process = context_lists;
+			}
+			switch_context(*process);
 
 		}
 		else {
