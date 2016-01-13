@@ -23,8 +23,13 @@ int main() {
     pid = fork()
 
     if ( pid == 0) {
+
+      yield();
+
       exit(20);
     }
+
+    yield();
     exit(10);
   }
 

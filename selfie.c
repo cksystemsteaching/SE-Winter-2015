@@ -748,8 +748,6 @@ int HYPERCALL_MAP_PAGE_IN_CONTEXT = 7004;
 int DEL_CTXT = 7004;
 int FLUSH_PAGE = 7005;
 
-int INTERRUPT = 8001;
-
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -5688,8 +5686,8 @@ void run() {
 		if ( kernel_mode == 0 )
 			instrCount = instrCount + 1;
 
-		if (instrCount == 30) {
-			trap(INTERRUPT, 0);
+		if (instrCount == 3) {
+			trap(HYPERCALL_SWITCH_CONTEXT, -1);
 			instrCount = 0;
 		}
 
@@ -6085,12 +6083,15 @@ void kernel_event_loop() {
 			switch_context(callerPid);
 
 		} else if (eventType == HYPERCALL_SWITCH_CONTEXT) {
-			if (arg == -1) {
-				print("OS - Switch Context: YIELD");
-				println();
-			}
 
-			switch_context(callerPid);
+			process = osFindProcess(callerPid, context_lists);
+			process = (int*) *(process+3);
+
+			if ( (int) process == 0 ) {
+				process = context_lists;
+			}
+			switch_context(*process);
+
 		} else if (eventType == HYPERCALL_CREATE_CONTEXT) {
 			print("OS - Create Context: FORK");
 			println();
@@ -6139,16 +6140,6 @@ void kernel_event_loop() {
 			else {
 				switch_context(*context_lists);
 			}
-
-		}
-		else if (eventType == INTERRUPT) {
-			process = osFindProcess(callerPid, context_lists);
-			process = (int*) *(process+3);
-
-			if ( (int) process == 0 ) {
-				process = context_lists;
-			}
-			switch_context(*process);
 
 		}
 		else {
