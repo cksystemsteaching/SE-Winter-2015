@@ -51,21 +51,24 @@ int main() {
 		}
 		
 	}
+	putchar(10);
+	putchar('Z');
+	putchar(10);
 
 	pid = fork();
 
-	//lock();
+	lock();
 
-	//if (pid == 0) {
-	//	putchar('K');
-	//} else if (pid > 0) {
-	//	putchar('E');
-	//	wait(pid);
-	//} else {
-	//	exit(-1);
-	//}
+	if (pid == 0) {
+		putchar('K');
+	} else if (pid > 0) {
+		putchar('E');
+		wait(pid);
+	} else {
+		exit(-1);
+	}
 
-	//unlock();;
+	unlock();;
 
 	exit(0);
 }

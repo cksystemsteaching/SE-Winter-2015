@@ -4368,7 +4368,7 @@ void emitFork() {
 }
 
 void syscall_fork() {
-    passParameterToOS(SYSCALL_FORK, 0);	
+	passParameterToOS(SYSCALL_FORK, 0);	
 	passParameterToOS(currentProcessPid, 1);
 	switchToProcess(OSPid);
 }
@@ -4682,6 +4682,7 @@ void executeOS(int argc, int* argv) {
 			handleLock();
 		} else if (event == SYSCALL_UNLOCK) {
 			handleUnlock();
+			switch_context(*(currentProcess + 2));	
 		} else if (event == SYSCALL_FORK) {
 			handleFork();
 		} else if (event == SYSCALL_WAIT) {
@@ -4907,7 +4908,7 @@ void handlePageFault() {
 		println();
 		*(communicationChunk + 2) = -1;
 		handleExit();
-		schedule();
+		//schedule();
 		return;
 	}
 	
@@ -4916,7 +4917,7 @@ void handlePageFault() {
 	if (*(pageTable + page) == 0) {
 		*(communicationChunk + 2) = -1;
 		handleExit();
-		schedule();
+		//schedule();
 	} else {
 		map_page_in_context(*(currentProcess + 2), page, *(pageTable + page));
 		switch_context(*(currentProcess + 2));
@@ -4936,7 +4937,8 @@ void handleExit() {
     print(itoa(exitCode, string_buffer, 10, 0, 0));
     println();
     
-	handleUnlock(); //TODO test   
+	handleUnlock(); //TODO test 
+
 	notReady = 1;
     
 	parent = search(blockingQueue, *(currentProcess + 2), 5);
@@ -5016,8 +5018,6 @@ void handleUnlock() {
 		if (nextProcess != 0)
 			enqueue(readyQueue, nextProcess);
 	}
-	
-	switch_context(*(currentProcess + 2));	
 }
 
 void handleFork() {
@@ -5259,7 +5259,7 @@ int allocateProcess() {
 }
 
 void freeProcess(int pid) {
-	*(processTable + 3 * pid) = nextFreeProcess;
+	*(processTable + 3 * pid) = ((int) nextFreeProcess - (int) processTable) / 4;
 	nextFreeProcess = processTable + 3 * pid;//TODO correct?
 }
 
@@ -6443,7 +6443,7 @@ int selfie(int argc, int* argv) {
 	if (argc < 2) {
         return -1;
 	} else {
-		numberOfInstructions = 1000;
+		numberOfInstructions = 10000;
 		
         while (argc >= 2) {
             if (stringCompare((int*) *argv, (int*) "-c")) {
