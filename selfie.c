@@ -100,6 +100,8 @@ void printString(int *s);
 //void exit(int code);
 //int* malloc(int size);
 
+int* search(int* list, int key, int position);
+int* remove(int* list, int key, int position);
 void enqueue(int* list, int* node);
 int* dequeue(int* list);
 
@@ -776,6 +778,7 @@ int OS_EVENT_PAGE_FAULT = 8002;
 int* freelist = (int*) 0;
 int* readyQueue;
 int* blockingQueue;
+int* zombieQueue;
 int* lockHolder = (int*) 0;
 int* userProcessPageFrames;
 int spaceForUserPageFrames;
@@ -1427,6 +1430,55 @@ int* dequeue(int* list) {
 	//printlist(readyQueue);
 	
 	return tail;
+}
+
+// searches for element with specified data at specified position, returns pointer to found element or 0 if not found
+int* search(int* list, int key, int position) {
+    int* cursor;
+    
+    if (list == (int*) 0)
+    	return 0;
+    	
+    cursor = (int*) *(list + 1);
+
+    while ((int)cursor != 0) {
+        if (*(cursor + position) == key) {
+            return cursor;
+        }
+        cursor = (int*) *(cursor + 1);
+    }
+    
+    return (int*) 0;
+}
+
+// removes first (i.e. first inserted) entry with matching data, returns new head
+int* remove(int* list, int key, int position) {
+	int* node;
+	int* previous;
+	int* next;
+	
+	node = search(list, key, position);
+	
+	if (node == (int*) 0) {
+		return 0;
+	}
+	
+	previous = *(node + 1);
+	next = *node;
+	
+	if (previous != (int*) 0) {
+		*previous = next;
+	} else {
+		*list = next;
+	}
+	
+	if (next != (int*) 0) {
+		*(next + 1) = previous;
+	} else {
+		*(list + 1) = next;
+	}
+
+	return node;
 }
 
 
@@ -4371,6 +4423,7 @@ void hypercall_switch_context() {
 	int pid;
 	int OSevent;
 	int* childRegisters;
+	int result;
 	
 	if (OSPid == currentProcessPid) {
 		pid = *(registers + REG_A0);
@@ -4386,7 +4439,8 @@ void hypercall_switch_context() {
 		} else if (OSevent == SYSCALL_FORK) {
 			*(registers + REG_V0) = getParameterFromOS(2);
 			if (*(registers + REG_V0) != -1) {
-				childRegisters = *(processTable + 3 * *(registers + REG_V0) + 1);
+				result = *(registers + REG_V0);
+				childRegisters = *(processTable + 3 * result + 1);
 				*(childRegisters + REG_V0) = 0;			
 			}
 		}
@@ -4683,6 +4737,10 @@ void initOS(int argc, int* argv) {
     *blockingQueue = 0;
     *(blockingQueue + 1) = 0;
 
+	zombieQueue = malloc(2 * 4);
+    *zombieQueue = 0;
+    *(zombieQueue + 1) = 0;
+
     firstProcess = createProcess(0); //0 is hard coded for OSPid
     
     if (firstProcess == 0) {
@@ -4824,6 +4882,12 @@ void schedule() {
 	currentProcess = dequeue(readyQueue);
 	
 	if (currentProcess == (int*) 0) {
+		if (*blockingQueue != 0) {
+			println();
+			print((int*) "all processes blocked :-(");
+			println();
+			println();
+		}
 		halt();
 	}
 	
@@ -4862,6 +4926,7 @@ void handlePageFault() {
 
 void handleExit() {
 	int exitCode;
+	int* parent;
 	
 	exitCode = *(communicationChunk + 2); 
 
@@ -4874,8 +4939,18 @@ void handleExit() {
 	handleUnlock(); //TODO test   
 	notReady = 1;
     
-    //TODO remove parent from blockingQueue / put child into zombieQueue
-    
+	parent = search(blockingQueue, *(currentProcess + 2), 5);
+
+	if (parent != (int*) 0) {
+		*(parent + 5) = 0;
+
+		remove(*(parent + 4), *(currentProcess + 2), 2);
+		remove(blockingQueue, *(parent + 2), 2);
+		enqueue(readyQueue, parent);
+	} else {
+		enqueue(zombieQueue, currentProcess);
+	} 
+   
     freePageTable(*(currentProcess + 3));
  
     delete_context(*(currentProcess + 2));
@@ -4935,16 +5010,14 @@ void handleUnlock() {
 
 	if (*(currentProcess + 2) == *(lockHolder + 2)) {
 		lockHolder = (int*) 0;
-		
-		nextProcess = dequeue(blockingQueue);
+
+		nextProcess = remove(blockingQueue, 0, 5);
 	
 		if (nextProcess != 0)
 			enqueue(readyQueue, nextProcess);
-
 	}
 	
-	switch_context(*(currentProcess + 2));
-		
+	switch_context(*(currentProcess + 2));	
 }
 
 void handleFork() {
@@ -4970,6 +5043,8 @@ void handleFork() {
 	//*(child + 2) = *(child + 2) + 4;
 
 	enqueue(readyQueue, child);
+
+	*(communicationChunk + 2) = *(child + 2);
 	
 	switch_context(*(currentProcess + 2));
 }
@@ -5038,7 +5113,33 @@ void copyMemSpace(int* from, int* to, int size) {
 
 
 void handleWait() {
+	int pid;
+	int* childEntry;
 	
+	pid = *(communicationChunk + 2);
+	
+	childEntry = search(*(currentProcess + 4), pid, 2);
+	
+	if (childEntry == (int*) 0) {
+		switch_context(*(currentProcess + 2));
+		return;
+	}
+	
+	childEntry = search(zombieQueue, pid, 2);
+	
+	if (childEntry != (int*) 0) {
+		remove(*(currentProcess + 4), pid, 2);
+		remove(zombieQueue, pid, 2);
+		switch_context(*(currentProcess + 2));
+		return;
+	}
+	
+	*(currentProcess + 5) = pid;
+	notReady = 1;
+	//*(currentProcess + 2) = pc + 4;
+	enqueue(blockingQueue, currentProcess);
+
+	schedule();
 }
 
 

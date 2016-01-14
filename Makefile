@@ -8,7 +8,7 @@ selfcompilation:
 test:
 	 clang -v -w -m32 -Wl,--unresolved-symbols=ignore-in-object-files -D'main(a, b)=main(int argc, char **argv)' -o selfie selfie.c
 	 ./selfie -c selfie.c -o selfie1.mips
-	 ./selfie -c dummy.c -m 32
+	 ./selfie -c testForkAndWait.c -m 32
 	 
 debug:
 	clang -v -w -g -m32 -Wl,--unresolved-symbols=ignore-in-object-files -D'main(a, b)=main(int argc, char **argv)' -o selfie selfie.c
