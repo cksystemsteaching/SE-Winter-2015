@@ -1,14 +1,33 @@
 
-Our current version does a correct switch between the kernel 
-and the user process (as discussed in lecture).  Additionally, 
-we implemented a scaffold to move syscalls into the kernel- 
-process.  
+Our current version ported all system calls (except read, write 
+and open) to our kernel.c file, which is running on top of selfie 
+as a program.  We decided to simplify the design, therefore, we 
+don't need /all/ hypercalls for running entirely  on top of the 
+emulator.  One hypercall is necessary to set the Pagetable 
+Register for a new process and a new 'halt' instruction has been 
+included.  
 
-The initial user process is a binary that is loaded during 
-startup.  
+Our current kernel provides process abstraction and address 
+spaces and has three main-servers:  The TIMER is responsible for 
+scheduling processes, the SYSCALL server provides system calls 
+like fork(), wait(), yield(), malloc(), exit(), getpid(), lock(), 
+unlock(), exec().  The PAGER is responsible for page faults and 
+page allocations and deallocations. 
 
-Page fault handling and process forking is currently not 
-supported. 
+We also wrote a tiny shell that can execute selfie-binaries: 
 
-Our demo starts a counter and shows switching between kernel and 
-user process. 
+linux$ gcc -o selfie selfie.c
+linux$ ./selfie -c ls.c -o ls -c hi.c -o hi -c shell.c -o shell
+linux$ ./selfie -c kernel.c -k 64 shell
+bumpPointer: 27476, kernel Mem: 67108864, binaryName: shell
+$ ls
+files 
+ls
+shell
+hi
+[OS] PID2 Terminated with 0
+$ hi
+hi program
+[OS] PID3 Terminated with 0
+$ ^C
+
