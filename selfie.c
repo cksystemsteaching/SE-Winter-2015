@@ -1,3 +1,4 @@
+
 // Copyright (c) 2015, the Selfie Project authors. All rights reserved.
 // Please see the AUTHORS file for details. Use of this source code is
 // governed by a BSD license that can be found in the LICENSE file.
@@ -65,7 +66,6 @@
 // Professor Niklaus Wirth from ETH Zurich.
 
 int *selfieName = (int*) 0;
-int modeEmulator = 0;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -90,7 +90,7 @@ int  stringCompare(int *s, int *t);
 int  atoi(int *s);
 int* itoa(int n, int *s, int b, int a, int p);
 
-void putcharacter(int character);
+void putCharacter(int character);
 
 void print(int *s);
 void println();
@@ -194,7 +194,7 @@ void initScanner();
 void resetScanner();
 
 void printSymbol(int symbol);
-void printLineNumber(int* message, int line);
+void printLineNumber(int* message);
 
 void syntaxErrorMessage(int *message);
 void syntaxErrorCharacter(int character);
@@ -421,6 +421,7 @@ int allocatedTemporaries = 0; // number of allocated temporaries
 
 int allocatedMemory = 0; // number of bytes for global variables and strings
 
+int mainJumpAddress = 0; // address of main function
 int returnBranches  = 0; // fixup chain for return statements
 
 int *currentProcedureName = (int*) 0; // name of currently parsed procedure
@@ -626,6 +627,7 @@ void initDecoder() {
 }
 
 // -----------------------------------------------------------------
+// ---------------------------- BINARY -----------------------------
 // ----------------------------- CODE ------------------------------
 // -----------------------------------------------------------------
 
@@ -666,8 +668,6 @@ int *binaryName   = (int*) 0; // file name of binary
 
 int *sourceLineNumber = (int*) 0; // source line number per emitted instruction
 
-int mainJumpAddress = 0; // address of main function
-
 int *assemblyName = (int*) 0; // name of assembly file
 int assemblyFD    = 0;        // file descriptor of open assembly file
 
@@ -691,43 +691,39 @@ void emitMalloc();
 void syscall_malloc();
 
 void emitPutchar();
-//+++++++ recycling and complete old file for A6  +++++++++++++++++++ 
-void emitGetPID();
-void syscall_getPID();
 
-void emitYield();
-void syscall_yield();
+//void emitGetPID();
+//void syscall_getPID();
 
-void emitLock();
-void syscall_lock();
+void emitAllocCMD();
+void syscall_allocCMD();
 
-void emitUnlock();
-void syscall_unlock();
 
-void emitFork();
-void syscall_fork();
+void emitAlignedAlloc();
+void syscall_alignedAlloc();
 
-void emitWait();
-void syscall_wait();
-// --------- Hypercalls A6
-void emitSwitchContext();
-void hypercall_switchContext();
+
+// -----------------------------------------------------------------
+// -------------------------- HYPERCALLS ---------------------------
+// -----------------------------------------------------------------
 
 void emitCreateContext();
-void hypercall_createContext();
+void hc_createContext();
+
+void emitSwitchContext();
+void hc_switchContext();
 
 void emitDeleteContext();
-void hypercall_deleteContext();
+void hc_deleteContext();
 
 void emitMapPageInContext();
-void hypercall_mapPageInContext();
+void hc_mapPageInContext();
 
 void emitFlushPageInContext();
-void hypercall_flushPageInContext();
+void hc_flushPageInContext();
 
-void emitMode();
-void syscall_mode();
-
+void emitLoadBinary();
+void hc_loadBinary();
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -735,63 +731,88 @@ int SYSCALL_EXIT   = 4001;
 int SYSCALL_READ   = 4003;
 int SYSCALL_WRITE  = 4004;
 int SYSCALL_OPEN   = 4005;
+int SYSCALL_MALLOC = 5001;
+int SYSCALL_ALLOCCMD = 5002;
+int SYSCALL_ALIGNEDALLOC = 5003;
 
-//+++++++ recycling and complete old file for A6  +++++++++++++++++++
-int SYSCALL_MALLOC  = 5001;
-int SYSCALL_WAIT    = 5002;
-int SYSCALL_GETPID  = 5003;
-int SYSCALL_YIELD   = 5004;
-int SYSCALL_LOCK    = 5005;
-int SYSCALL_UNLOCK  = 5006;
-int SYSCALL_FORK    = 5007;
+int SYSCALL_YIELD = 6000;
+int SYSCALL_LOCK  = 6001;
+int SYSCALL_UNLOCK= 6002;
+int SYSCALL_GETPID= 6003;
+int SYSCALL_FORK  = 6004;
+int SYSCALL_WAIT  = 6005;
 
-int SYSCALL_MODE    = 5008;
+int HYPERCALL_CREATECONTEXT		= 7001;
+int HYPERCALL_SWITCHCONTEXT		= 7002;
+int HYPERCALL_DELETECONTEXT		= 7003;
+int HYPERCALL_MAPPAGEINCONTEXT	= 7004;
+int HYPERCALL_FLUSHPAGEINCONTEXT= 7005;
+int HYPERCALL_LOADBINARY		= 7006;
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+// -----------------------------------------------------------------
+// ---------------------    Operating System   ---------------------
+// -----------------------------------------------------------------
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 
-int HYPERCALL_SWITCHCONTEXT = 1;
-int HYPERCALL_CREATECONTEXT = 2;
-int HYPERCALL_DELETECONTEXT = 3;
-int HYPERCALL_MAPPAGEINCONTEXT = 4;
-int HYPERCALL_FLUSHPAGEINCONTEXT = 5;
+// ------------------------ constants -----------------------
+
+int VMEMORYSIZE = 4194304;	// Byte, 4MB
+int PAGESIZE = 4096;		// Byte, 4KB
+int PAGEFRAMESIZE = 4096;	// Byte, 4KB
+// ------------------------ variables -----------------------
+int *readyQueue = (int*)0;
+int *kernelProcess = (int*)0;
+int *currProcess = (int*)0;
+int *currPageTable = (int*)0;
+int  nextValidUID = 1;
+int  counterInstr = 0;		// currently processed instruction counter
+int  maxInstr = 1000;		// syscall_yield should be invoked every 'maxInstr'
+int  cmd = 0;	// address in memory of IPC
+
+// ------------------------ methods -----------------------
+void storeIPC(int arg0, int arg1, int arg2, int arg3);
+
+void createKernelProcess();
+int* createEmptyPageTable();
+int* createKernelPageTable();
+int* createProcess();
+int* palloc();
+void printPageTable(int *process);
+void printPT(int *pageTable);
+void printProcess();
+int *initFreeList();
+
+int* initList();
+void appendListElement(int *element, int *list);
+int isListEmpty(int *list);
+int* removeFirst(int *list);
+
+void saveUserState();
+void setUserState();
+void setKernelState();
+void saveKernelState();
+
+// --- GETTER ---
+int* getPrevProcess(int *process);
+int* getNextProcess(int *process);
+int  getUID(int *process);
+int  getPC(int *process);
+int* getRegisters(int *process);
+int* getPageTable(int *process);
+
+// --- SETTER ---
+void setPrevProcess(int *process, int *prev);
+void setNextProcess(int *process, int *next);
+void setUID(int *process, int uid);
+void setPC(int *process, int pc);
+void setRegisters(int *process, int *regs);
+void setPageTable(int *process, int *pt);
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
-// ----------------------------------------------------------------
-// ---------------------     E M U L A T O R   --------------------
-// ----------------------------------------------------------------
+// -----------------------------------------------------------------
+// ---------------------     E M U L A T O R   ---------------------
+// -----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
-
-// --------------------  context -----------------------------------
-// ----duplicate all operations of ProcessList -----------
-// -----------------------------------------------------------------
-
-int* insertContext(int contextId, int pc, int* registers, int* pageTable);
-int* removeContext(int* context_list, int pid);
-int* findContext(int* contextList, int Id);
-
-void setContextID(int* node, int Id);
-void setContextPC(int* node, int pc);
-void setContextRegisters(int* node, int registers);
-void setContextPageTable(int* node, int pageTable);
-void setContextPrev(int* node, int prev);
-void setContextNext(int* node, int next);
-
-int getContextPC(int* node);
-int* getContextRegisters(int* node);
-int* getContextPageTable(int* node);
-int* getContextPrev(int* node);
-int* getContextNext(int* node);
-int getContextID(int* node);
-
-int *contextList ; // List of contexts
-int nextContextId = 0;
-int* currPageTable;
-int* currContext;
-
-// -----------------------------------------------------------------
-// ------------------------- PAGE TABLE ---------------------------
-// -----------------------------------------------------------------
-
-int* getPageTableElt(int* pagetable, int idx);
-void setPageTableAtIndex(int* pagetable, int idx, int data);
 
 // -----------------------------------------------------------------
 // ---------------------------- MEMORY -----------------------------
@@ -799,30 +820,73 @@ void setPageTableAtIndex(int* pagetable, int idx, int data);
 
 void initMemory(int bytes);
 
-int tlb(int vaddr);
+int* tlb(int vaddr);
 
 int  loadMemory(int vaddr);
 void storeMemory(int vaddr, int data);
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
-int MEGABYTE = 1048576; // 1024*1024
+int MEGABYTE = 1048576;
 
 // ------------------------ GLOBAL VARIABLES -----------------------
 
 int memorySize = 0; // size of memory in bytes
-int *memory = (int*) 0; // mipster memory
 
+int *memory = (int*) 0; // mipster memory
+int *pfreeList = (int*)0;
 // ------------------------- INITIALIZATION ------------------------
 
-void initMemory(int megabytes) {
-    if (megabytes < 0)
-        megabytes = 64;
-    else if (megabytes > 1024)
-        megabytes = 1024;
+void initMemory(int bytes) {
+    if (bytes < 0)
+        memorySize = 64 * MEGABYTE;
+    else if (bytes > 1024 * MEGABYTE)
+        memorySize = 1024 * MEGABYTE;
+    else
+        memorySize = bytes;
 
-    memorySize = megabytes * MEGABYTE; // MEGABYTE = 1024*1024
     memory     = malloc(memorySize);
+	pfreeList = initFreeList();
+//	printFreeList();
+}
+
+int* initFreeList(){
+	int counterPages;
+	int *curr;
+	int i;
+	i = 0;
+	counterPages = memorySize / PAGEFRAMESIZE;
+	curr = memory;
+	while(i < counterPages){
+		if(i == counterPages - 1)
+			*curr = 0;
+		else
+			*curr = (int)curr + (PAGEFRAMESIZE);
+		
+		curr = (int*)((int)curr + (PAGEFRAMESIZE));
+		i = i + 1;
+	}
+	return memory;
+}
+void printFreeList(){
+	int i;
+	int *curr;
+	i = 0;
+	curr = pfreeList;
+	print((int*)"freeList\n");
+	
+	while(i< 10){//(int)curr != 0){
+		print((int*)"content of pageFrame [");
+		print(itoa(i, string_buffer, 10, 0, 0));
+		print((int*)"] at position [");
+		print(itoa((int)curr, string_buffer, 10, 0, 0));
+		print((int*)"]: [");
+		print(itoa(*curr, string_buffer, 10, 0, 0));
+		print((int*)"]\n");
+		i = i+1;
+		curr = (int*)*curr; 
+	}
+	print((int*)"freeList end\n");
 }
 
 // -----------------------------------------------------------------
@@ -846,7 +910,7 @@ void fct_subu();
 void op_lw();
 void fct_slt();
 void op_sw();
-void fct_teq();
+void op_teq();
 
 // -----------------------------------------------------------------
 // -------------------------- INTERPRETER --------------------------
@@ -878,6 +942,7 @@ void printProfile(int *message, int total, int *counters);
 
 void disassemble();
 void emulate(int argc, int *argv);
+void emulateKernel(int argc, int *argv);
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -892,6 +957,10 @@ int EXCEPTION_UNKNOWNINSTRUCTION = 3;
 int EXCEPTION_HEAPOVERFLOW       = 4;
 int EXCEPTION_UNKNOWNSYSCALL     = 5;
 int EXCEPTION_UNKNOWNFUNCTION    = 6;
+int EXCEPTION_SEGMENTATIONFAULT  = 7;
+int EXCEPTION_OUTOFMEMORY	     = 8;
+int EXCEPTION_PAGEFAULT			 = 9;
+
 
 int *EXCEPTIONS; // array of strings representing exceptions
 
@@ -926,7 +995,7 @@ int *storesPerAddress = (int*) 0; // number of executed stores per store operati
 // ------------------------- INITIALIZATION ------------------------
 
 void initInterpreter() {
-    EXCEPTIONS = malloc(7*4);
+    EXCEPTIONS = malloc(10*4);
 
     *(EXCEPTIONS + EXCEPTION_SIGNAL)             = (int) "signal";
     *(EXCEPTIONS + EXCEPTION_ADDRESSERROR)       = (int) "address error";
@@ -934,6 +1003,9 @@ void initInterpreter() {
     *(EXCEPTIONS + EXCEPTION_HEAPOVERFLOW)       = (int) "heap overflow";
     *(EXCEPTIONS + EXCEPTION_UNKNOWNSYSCALL)     = (int) "unknown syscall";
     *(EXCEPTIONS + EXCEPTION_UNKNOWNFUNCTION)    = (int) "unknown function";
+    *(EXCEPTIONS + EXCEPTION_SEGMENTATIONFAULT)  = (int) "segmentation fault [added]";
+    *(EXCEPTIONS + EXCEPTION_OUTOFMEMORY)		 = (int) "out of memory [added]";
+	*(EXCEPTIONS + EXCEPTION_PAGEFAULT)			 = (int) "page fault [added]";
 
     registers = malloc(32*4);
 }
@@ -1225,7 +1297,7 @@ int* itoa(int n, int *s, int b, int a, int p) {
     return s;
 }
 
-void putcharacter(int character) {
+void putCharacter(int character) {
     if (outputFD == 1)
         putchar(character);
     else {
@@ -1250,18 +1322,18 @@ void print(int *s) {
     i = 0;
 
     while (loadCharacter(s, i) != 0) {
-        putcharacter(loadCharacter(s, i));
+        putCharacter(loadCharacter(s, i));
 
         i = i + 1;
     }
 }
 
 void println() {
-    putcharacter(CHAR_LF);
+    putCharacter(CHAR_LF);
 }
 
 void printCharacter(int character) {
-    putcharacter(CHAR_SINGLEQUOTE);
+    putCharacter(CHAR_SINGLEQUOTE);
 
     if (character == CHAR_EOF)
         print((int*) "end of file");
@@ -1272,17 +1344,17 @@ void printCharacter(int character) {
     else if (character == CHAR_CR)
         print((int*) "carriage return");
     else
-        putcharacter(character);
+        putCharacter(character);
 
-    putcharacter(CHAR_SINGLEQUOTE);
+    putCharacter(CHAR_SINGLEQUOTE);
 }
 
 void printString(int *s) {
-    putcharacter(CHAR_DOUBLEQUOTE);
+    putCharacter(CHAR_DOUBLEQUOTE);
 
     print(s);
     
-    putcharacter(CHAR_DOUBLEQUOTE);
+    putCharacter(CHAR_DOUBLEQUOTE);
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -1296,29 +1368,29 @@ void printString(int *s) {
 // -----------------------------------------------------------------
 
 void printSymbol(int symbol) {
-    putcharacter(CHAR_DOUBLEQUOTE);
+    putCharacter(CHAR_DOUBLEQUOTE);
 
     if (symbol == SYM_EOF)
         print((int*) "end of file");
     else
         print((int*) *(SYMBOLS + symbol));
 
-    putcharacter(CHAR_DOUBLEQUOTE);
+    putCharacter(CHAR_DOUBLEQUOTE);
 }
 
-void printLineNumber(int* message, int line) {
+void printLineNumber(int* message) {
     print(selfieName);
     print((int*) ": ");
     print(message);
     print((int*) " in ");
     print(sourceName);
     print((int*) " in line ");
-    print(itoa(line, string_buffer, 10, 0, 0));
+    print(itoa(lineNumber, string_buffer, 10, 0, 0));
     print((int*) ": ");
 }
 
 void syntaxErrorMessage(int *message) {
-    printLineNumber((int*) "error", lineNumber);
+    printLineNumber((int*) "error");
 
     print(message);
     
@@ -1326,7 +1398,7 @@ void syntaxErrorMessage(int *message) {
 }
 
 void syntaxErrorCharacter(int expected) {
-    printLineNumber((int*) "error", lineNumber);
+    printLineNumber((int*) "error");
 
     printCharacter(expected);
     print((int*) " expected but ");
@@ -1698,7 +1770,7 @@ int getSymbol() {
         symbol = SYM_MOD;
 
     } else {
-        printLineNumber((int*) "error", lineNumber);
+        printLineNumber((int*) "error");
         print((int*) "found unknown character ");
         printCharacter(character);
         
@@ -1709,10 +1781,6 @@ int getSymbol() {
 
     return symbol;
 }
-
-// -----------------------------------------------------------------
-// ------------------------- SYMBOL TABLE --------------------------
-// -----------------------------------------------------------------
 
 // -----------------------------------------------------------------
 // ------------------------- SYMBOL TABLE --------------------------
@@ -1824,6 +1892,7 @@ void setValue(int *entry, int value) {
 void setRegister(int *entry, int reg) {
     *(entry + 6) = reg;
 }
+
 // -----------------------------------------------------------------
 // ---------------------------- PARSER -----------------------------
 // -----------------------------------------------------------------
@@ -1950,8 +2019,8 @@ int lookForType() {
 }
 
 void talloc() {
-    // we use registers REG_T0-REG_T7 for temporaries
-    if (allocatedTemporaries < REG_T7 - REG_A3)
+    // we use registers REG_T0-REG_T9 and REG_S0-REG_S7 for temporaries
+    if (allocatedTemporaries < REG_T9 - REG_A3)
         allocatedTemporaries = allocatedTemporaries + 1;
     else {
         syntaxErrorMessage((int*) "out of registers");
@@ -1981,7 +2050,7 @@ int previousTemporary() {
 }
 
 int nextTemporary() {
-    if (allocatedTemporaries < REG_T7 - REG_A3)
+    if (allocatedTemporaries < REG_T9 - REG_A3)
         return currentTemporary() + 1;
     else {
         syntaxErrorMessage((int*) "out of registers");
@@ -2021,7 +2090,7 @@ void restore_temporaries(int numberOfTemporaries) {
 }
 
 void syntaxErrorSymbol(int expected) {
-    printLineNumber((int*) "error", lineNumber);
+    printLineNumber((int*) "error");
 
     printSymbol(expected);
     print((int*) " expected but ");
@@ -2033,7 +2102,7 @@ void syntaxErrorSymbol(int expected) {
 }
 
 void syntaxErrorUnexpected() {
-    printLineNumber((int*) "error", lineNumber);
+    printLineNumber((int*) "error");
 
     print((int*) "unexpected symbol ");
     printSymbol(symbol);
@@ -2054,7 +2123,7 @@ int* putType(int type) {
 }
 
 void typeWarning(int expected, int found) {
-    printLineNumber((int*) "warning", lineNumber);
+    printLineNumber((int*) "warning");
 
     print((int*) "type mismatch, ");
 
@@ -2078,8 +2147,10 @@ int* getVariable(int *variable) {
         entry = getSymbolTableEntry(variable, VARIABLE, global_symbol_table);
 
         if (entry == (int*) 0) {
-            printLineNumber((int*) "error", lineNumber);
+            printLineNumber((int*) "error");
+
             print(variable);
+
             print((int*) " undeclared");
             println();
 
@@ -2154,7 +2225,7 @@ void load_string() {
     if (l % 4 != 0)
         allocatedMemory = allocatedMemory + 4 - l % 4;
 
-    createSymbolTableEntry(GLOBAL_TABLE, string, -allocatedMemory, STRING, INTSTAR_T, 0 );
+    createSymbolTableEntry(GLOBAL_TABLE, string, -allocatedMemory, STRING, INTSTAR_T, 0);
 
     talloc();
 
@@ -2166,7 +2237,7 @@ int help_call_codegen(int *entry, int *procedure) {
 
     if (entry == (int*) 0) {
         // CASE 1: function call, no definition, no declaration.
-        createSymbolTableEntry(GLOBAL_TABLE, procedure, binaryLength, FUNCTION, INT_T, 0 );
+        createSymbolTableEntry(GLOBAL_TABLE, procedure, binaryLength, FUNCTION, INT_T, 0);
 
         emitJFormat(OP_JAL, 0);
 
@@ -3026,23 +3097,22 @@ void gr_variable(int offset) {
     } else {
         syntaxErrorSymbol(SYM_IDENTIFIER);
 
-        createSymbolTableEntry(LOCAL_TABLE, (int*) "missing variable name", offset, VARIABLE, type, 0 );
+        createSymbolTableEntry(LOCAL_TABLE, (int*) "missing variable name", offset, VARIABLE, type, 0);
     }
 }
 
 void gr_initialization(int *name, int offset, int type) {
-    int actualLineNumber;
     int hasCast;
     int cast;
     int sign;
-
-    actualLineNumber = lineNumber;
 
     initialValue = 0;
 
     hasCast = 0;
 
-    if (symbol == SYM_ASSIGN) {
+    if (symbol == SYM_SEMICOLON)
+        getSymbol();
+    else if (symbol == SYM_ASSIGN) {
         getSymbol();
 
         // optional cast: [ cast ]
@@ -3095,7 +3165,7 @@ void gr_initialization(int *name, int offset, int type) {
         else
             syntaxErrorSymbol(SYM_SEMICOLON);
     } else
-        syntaxErrorSymbol(SYM_ASSIGN);
+        syntaxErrorUnexpected();
 
     if (hasCast) {
         if (type != cast)
@@ -3103,7 +3173,7 @@ void gr_initialization(int *name, int offset, int type) {
     } else if (type != INT_T)
         typeWarning(type, INT_T);
 
-    createSymbolTableEntry(GLOBAL_TABLE, name, offset, VARIABLE, type, initialValue );
+    createSymbolTableEntry(GLOBAL_TABLE, name, offset, VARIABLE, type, initialValue);
 }
 
 void gr_procedure(int *procedure, int returnType) {
@@ -3167,23 +3237,27 @@ void gr_procedure(int *procedure, int returnType) {
     } else if (symbol == SYM_LBRACE) {
         functionStart = binaryLength;
         
+        getSymbol();
+
         entry = getSymbolTableEntry(currentProcedureName, FUNCTION, global_symbol_table);
 
         if (entry == (int*) 0)
-            createSymbolTableEntry(GLOBAL_TABLE, currentProcedureName, binaryLength, FUNCTION, returnType, 0 );
+            createSymbolTableEntry(GLOBAL_TABLE, currentProcedureName, binaryLength, FUNCTION, returnType, 0);
         else {
             if (getData(entry) != 0) {
                 if (getOpcode(loadBinary(getData(entry))) == OP_JAL)
                     fixlink_absolute(getData(entry), functionStart);
                 else {
-                    printLineNumber((int*) "error", lineNumber);
+                    printLineNumber((int*) "error");
+
                     print((int*) "multiple definitions of ");
+
                     print(currentProcedureName);
+
                     println();
                 }
             }
 
-            //setLineNumber(entry, lineNumber);
             setData(entry, functionStart);
 
             if (getType(entry) != returnType)
@@ -3191,8 +3265,6 @@ void gr_procedure(int *procedure, int returnType) {
 
             setType(entry, returnType);
         }
-
-        getSymbol();
 
         localVariables = 0;
 
@@ -3281,9 +3353,9 @@ void gr_cstar() {
 
                     // type identifier ";" global variable declaration
                     if (symbol == SYM_SEMICOLON) {
-                        createSymbolTableEntry(GLOBAL_TABLE, variableOrProcedureName, -allocatedMemory, VARIABLE, type, 0);
-
                         getSymbol();
+
+                        createSymbolTableEntry(GLOBAL_TABLE, variableOrProcedureName, -allocatedMemory, VARIABLE, type, 0);
 
                     // type identifier "=" global variable definition
                     } else
@@ -3309,14 +3381,19 @@ void emitLeftShiftBy(int b) {
 }
 
 void emitMainEntry() {
-    // instruction at address zero cannot be fixed up
+    // instruction at address zero cannot be fixed up, so just put a NOP there
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_NOP);
 
     createSymbolTableEntry(GLOBAL_TABLE, (int*) "main", binaryLength, FUNCTION, INT_T, 0);
 
     mainJumpAddress = binaryLength;
 
+    // jump and link to main, will return here only if there is no exit call
     emitJFormat(OP_JAL, 0);
+
+    // we exit cleanly with error code 0 pushed onto the stack
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, -4);
+    emitIFormat(OP_SW, REG_SP, REG_ZR, 0);
 }
 
 // -----------------------------------------------------------------
@@ -3368,21 +3445,16 @@ void compile() {
     emitOpen();
     emitMalloc();
     emitPutchar();
-    
-    emitGetPID();
-    emitYield();
-    emitLock();
-    emitUnlock();
-    emitFork();
-    emitWait();
-    
-    emitMode();
-    // A6
-    emitSwitchContext();
+//    emitGetPID();
+	emitAllocCMD();
+	emitAlignedAlloc();
+
 	emitCreateContext();
+	emitSwitchContext();
 	emitDeleteContext();
 	emitMapPageInContext();
 	emitFlushPageInContext();
+	emitLoadBinary();
 
     // parser
     gr_cstar();
@@ -3393,7 +3465,7 @@ void compile() {
     // emit global variables and strings
     emitGlobalsStrings();
 
-      if (getInstrIndex(loadBinary(mainJumpAddress)) == 0) {
+    if (getInstrIndex(loadBinary(mainJumpAddress)) == 0) {
         print(selfieName);
         print((int*) ": main function missing in ");
         print(sourceName);
@@ -3518,8 +3590,36 @@ void printFunction(int function) {
 }
 
 void decode() {
+	int debug_decode;
+	debug_decode = 0;
+	if(debug_decode){
+	 	print((int*)"ir: ");
+		print(itoa(ir, string_buffer, 10, 0, 0));
+		println();
+	  	print((int*)"pc: ");
+		print(itoa(pc, string_buffer, 10, 0, 0));
+		println();
+	}
     opcode = getOpcode(ir);
+    if(0){
+		print((int*)"ir: ");
+		print(itoa(ir, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"pc: ");
+		print(itoa(pc, string_buffer, 10, 0, 0));
+		println();
+    
+    }
+	if(debug_decode){
 
+		print((int*)"opcode: ");
+		print(itoa(opcode, string_buffer, 10, 0, 0));
+		println();
+
+		print((int*)"function: ");
+		print(itoa(function, string_buffer, 10, 0, 0));
+		println();
+	}
     if (opcode == 0)
         decodeRFormat();
     else if (opcode == OP_JAL)
@@ -3583,6 +3683,7 @@ void decodeJFormat() {
 // -----------------------------------------------------------------
 
 int loadBinary(int addr) {
+
     return *(binary + addr / 4);
 }
 
@@ -3792,823 +3893,6 @@ void load() {
     exit(-1);
 }
 
-// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
-// -----------------------------------------------------------------
-// ---------------------------     O S   ---------------------------
-// -----------------------------------------------------------------
-// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
-
-//================== Global OS-variables ===========================
-
-// debug-variables
-int debug_GETPID  = 0;
-int debug_YIELD   = 0;
-int debug_LOCK    = 0;
-int debug_UNLOCK  = 0;
-int debug_EXIT    = 0;
-int debug_FORK    = 0;
-int debug_WAIT    = 0;
-
-// --- global variables needed for lists and their management----------
-int *blockedQueue;			// blocked processes, wait for unlock
-int *readyQueue;			// ready processes
-int *zombieQueue;			// processes that are childs but parent is not waiting yet
-int *waitQueue;				// processes waiting for an event such an interrupt or a lock
-
-// --- global variables needed for processes ------
-int *currProcess;			// currently operating process 
-int lock = 0;				// if 1 lock is hold by a process
-int lockID = 0;			// id of process holding the lock
-int lockCounter = 0;		// counts syscall_lock calls of process that holds lock, lock increases, unlock decreases
-int nextValidPID = 0;		// unique id for next process
-int maxNrProcesses = 3;	// maximum number of processes;
-int counterInstr = 0;		// currently processed instruction counter
-int maxInstrPerContext ;		// syscall_yield should be invoked every 'maxInstrPerContext'
-int kernelGP;
-int *kernelProcess;
-int kernelMode = 0;
-int userMode = 0;
-
-int *processTable;
-int pageFault;
-int pageFaultVadr;
-int *vMemory;
-int *pMemory;
-
-// --- global variables needed for memory management ------
-int yieldCaller = 0;		// 0...yield, 1...syscall_lock, 2...syscall_exit, 3...syscall_wait
-int *pfreeList;	// contains free pages in memory
-int pageSize = 4096;		// Byte, 4KB
-int pageFrameSize = 4096;	// Byte, 4KB
-int vmemorySize = 4194304;	// Byte, 4MB
-int maxVMemoryAddress = 67108863; //Byte, 64MB
-int *currPageTable;
-int maxPages;                 // maxium of pages
-int allocatedPages = 0;
-int freepages;
-int invalidPage = 0;
-int *pageframeptr;
-int pageFlag;  
-
-//=============================== OS-Methods ============================
-
-// --- some helpfull methods
-int *createArray(int size);
-int *getArrayElt(int *array, int pos);
-void setArrayElt(int *array, int pos, int *elt);
-
-// --- methods needed for outputs and debugs------
-void printList(int *list, int verbose);
-void printProcessVerbose(int *element);
-void printProcess(int *element);
-void printProcessList(int *list);
-void printProcessListVerbose(int *list);
-void printProcessEntry(int *process, int verbose);
-void printPageTable(int *pageTable, int pid);
-void printFreeList();
-
-// --- generic operations for lists------
-int* initList();
-void appendListElement(int *element, int *list);
-int* findElementInList(int *list, int pid);
-int* findElementInLists(int pid);
-int  listContainsElement(int pid, int *list);
-int  isListEmpty(int *list);
-int  getListSize(int *list);
-int* removeFirst(int *list);
-int* removeFirstNotWaitingProcessFromBlockedQueue();
-int* removeListElementByPID(int *list, int pid);
-int* removeListElement(int *list, int *process);
-void removeFromList(int *process);
-void removeAllZombieChildren(int *childList);
-
-// --- generic operations for processmanagement------
-int* createProcess();
-void saveProcessState();
-void setProcessState();
-int* getPrevProcess(int *process);
-int* getNextProcess(int *process);
-int  getProcessID(int *process);
-int  getPC(int *process);
-void setPC(int *process, int data);
-int* getRegisters(int *process);
-void setRegisters(int *process, int *registers);
-int* getPageTable(int *process);
-void setPageTable(int *process, int *pageTable);
-int  getPPID(int *process);
-void setPPID(int *process, int pid);
-int* getChildren(int *process);
-int  getWaitStatus(int *process);
-void setWaitStatus(int *process, int status);
-int  isProcessWaiting(int *process);
-int  hasParent(int *process);
-
-void copyRegisters(int *copyTo, int *copyFrom);
-void copyPageTable(int *copyTo, int *copyFrom);
-void duplicatePageFrame(int *copyTo, int *copyFrom);
-
-void contextSwitch(int notTerminated);
-void fifo();
-
-void killProcess(int *process);
-void killChildren(int *children);
-void releaseLock();
-
-void notify(int ppid);
-
-int* initFreeList();
-int* pmalloc();
-void pfree(int *page);
-void freePages(int *process);
-int* createPageTable();
-
-int getVirtualPageNr(int vaddr);  // vaddr = virtual address
-int getPageOffset(int vaddr);
-int getPageFlag(int* process, int vpn); // vpn = virtual page number
-int getRPNfromPageTable(int* process, int vpn);
-void insertIntoPageTable(int* process, int vpn, int rpn, int mode);
-void copyPageFrame(int fromRpn, int toRpn); // rpn = real page number 
-int pageFrameLookup(int vaddr);
-int getProcessPageFault(int* process);
-int addProcessPageFault(int* process);
-int getProcessExitCode(int* process);
-int processTerminated(int* process);
-
-void bootStrap();
-void os_loadFirstUserProcess(int *argv);
-void manualSetupPtrs(int *process);
-void saveContext(int *process);
-void restoreContext(int *process);
-
-void switchMode();
-void switchToKernel() ;
-void switchToProcess();
-void allocPageFault(int pid, int vaddr, int memory_pos);
-void loadPage(int *vaddr, int *paddr);
-
-
-// a process has following structure:
-//
-// 0 +-----+
-//   |prev | pointer to previous element in list
-// 1 +-----+  
-//   |next | pointer to next element in list
-// 2 +-----+  
-//   |pid  | process ID
-// 3 +-----+  
-//   | pc  | program counter
-// 4 +-----+  
-//   |reg  | pointer to registers
-// 5 +-----+  
-//   | PT  | pointer to page table
-// 6 +-----+ 
-//   |PPID | parent process ID
-// 7 +-----+ 
-//   |child| children process 
-// 8 +-----+ 
-//   |wait | status of process, 1 if waiting, 0 otherwise
-// 9 +-----+
-//	 |p I  | page infos
-//   +-----+
-// 10 +-----+
-//	|Exit| exit code 
-//   +-----+
-
-int* createProcess(){
-	int *process;
-	int pid;
-	pid = nextValidPID;
-	nextValidPID = nextValidPID+1;
-	process = malloc (9*4);
-	*(process+0) = 0;	// prev process
-	*(process+1) = 0;	// next process
-	*(process+2) = pid;	// PID
-	*(process+3) = 0;	// PC
-	*(process+4) = (int)malloc(32*4);	// registers
-	*(process+5) = (int)createPageTable(); // pointer to pageTable
-	*(process+6) = -1; // PPID
-	*(process+7) = (int)initList(); // list for child processes
-	*(process+8) = 0; // wait status
-	*(process+9) = (int*)malloc(pageSize);
-	*(process+10) = 0; // exit status 
-		
-	return process;
-}
-int* createPageTable(){
-	int pageTableEntries;
-	int *pageTable;
-	int i;
-	i=0;
-	pageTableEntries = vmemorySize / pageSize;
-	pageTable = malloc(pageTableEntries * 4);
-
-	while(i < pageTableEntries * 4){
-		*(pageTable+i) = 0;
-		i = i + 4;
-	}
-	
-	return pageTable;
-}
-int *createArray(int size){
-	int *ptr;
-	ptr = (int *)malloc(size*4);
-	return ptr;
-}
-int* getArrayElt(int *array, int pos ){
-	return (int *)*(array + pos);
-}
-void setArrayElt(int *array, int pos, int *elt){
-	*(array +pos) = (int)elt;
-}
-int* initList(){
-	int *list;
-	list = malloc(2*4);
-	*list = 0;
-	*(list+1) = 0;
-	return list;
-}
-void appendListElement(int *element, int *list){
-	int *tail;
-	tail = (int*)*(list+1);
-	if(isListEmpty(list)){
-		*list = (int)element;
-	} else {
-		*element = *(list+1);
-		*(tail+1) = (int)element;
-	}
-	*(list+1) = (int)element;
-	*(element+1) = 0;
-}
-int* findElementInList(int *list, int pid){ // search for element with pid 'pid' in list 'list'
-	int *curr;
-	curr = (int*)*list;
-	while((int)curr != 0){
-		if(getProcessID(curr) == pid){
-			return curr;
-		}
-		curr = getNextProcess(curr);
-	}
-	return (int*)0;
-}
-int* findElementInLists(int pid){ // search for element with pid 'pid' in all lists
-	int *find;
-	find = findElementInList(readyQueue, pid);
-	if((int)find==0)
-		find = findElementInList(blockedQueue, pid);
-	if((int)find==0)
-		find = findElementInList(zombieQueue, pid);
-	return find;
-}
-int* removeFirst(int *list){
-	return removeListElement(list, (int*)*list);
-}
-int* removeListElementByPID(int *list, int pid){
-	int *process;
-	process = findElementInList(list, pid);
-	if((int)process == 0)
-		return (int*)0;
-	return removeListElement(list, process);
-}
-int* removeListElement(int *list, int *process){
-	int *prev;
-	int *next;
-	if(*list == 0)
-		return (int*)0;
-	if((int)process == 0)
-		return (int*)0;
-	if(getProcessID(process) == getProcessID((int*)*list)){		// process is first element
-		next = getNextProcess(process);
-		if((int)next == 0){			// process is first and last element
-			*list = 0;
-			*(list+1) = 0;
-		} else {					// process is first element but not last element
-			*next = 0;
-			*list = (int)next;
-		}
-	} else if(getProcessID(process) == getProcessID((int*)*(list+1))){ // process is not first but last element
-		prev = getPrevProcess(process);
-		*(prev+1) = 0;
-		*(list+1) = (int)prev;
-	} else {						// process is in middle of list
-		prev = getPrevProcess(process);
-		next = getNextProcess(process);
-		*(prev+1) = (int)next;
-		*next = (int)prev;
-	}
-	return process;	
-}
-// remove a process from list w/o knowing in which list the process is
-void removeFromList(int *process){
-	int *remove;
-	remove = removeListElement(readyQueue, process);
-	if((int)remove == 0)
-		remove = removeListElement(blockedQueue, process);
-	if((int)remove == 0)
-		removeListElement(zombieQueue, process);
-}
-void removeAllZombieChildren(int *childList){
-	int *zombie;
-	int *child;
-	zombie = (int*)*zombieQueue;
-	while((int)zombie != 0){
-		child = (int*)*childList;
-		while((int)child != 0){
-			if(getProcessID(zombie) == getProcessID(child)){
-				removeListElement(childList, child);
-				removeListElement(zombieQueue, zombie);
-			}
-			child = getNextProcess(child);
-		}
-		zombie = getNextProcess(zombie);
-	}
-}
-void releaseLock(){
-	if(lock==1){
-		if(lockID == getProcessID(currProcess)){
-			print((int*)"process [\n");
-			print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
-			print((int*)"] drops lock\n");
-			lock = 0;
-			lockCounter = 0;
-		}
-	}
-}
-void killProcess(int *process){
-	
-	killChildren(getChildren(process));
-
-	notify(getPPID(process));
-	freePages(process);
-	removeFromList(process);
-}
-
-void killChildren(int *children){
-	int *curr;
-	curr = (int*)*children;
-	while((int)curr != 0){
-		killProcess(curr);
-		curr = (int*)(curr+1);
-	}
-	
-}
-int* createChildProcess(int pid){
-	int *child;
-	child = malloc(3*4);
-	*(child+0) = 0;	// prev
-	*(child+1) = 0;	// next
-	*(child+2) = pid;
-	return child;
-
-}
-void saveProcessState(){
-	setPC(currProcess, pc);
-	setRegisters(currProcess, pc);
-	   
-	    print((int*) "id: ");
-        print(getProcessID(currProcess));
-        println();
-
-        print((int*) "PC: ");
-        print(getPC(currProcess));
-        println();
-}
-void setProcessState(){
-	registers = getRegisters(currProcess);
-	pc = getPC(currProcess);
-	currPageTable = getPageTable(currProcess);
-}
-void saveContext(int *process){
-	setPC(process, pc);
-}
-void restoreContext(int *process){
-	//int *process;
-	//process = removeFirst(readyQueue);
-	if(process != 0){
-		pc = getPC(process);
-		registers = getRegisters(process);
-	}
-	else {
-		print((int*) "processQueue empty, restore context faild, machine stop");
-		println();
-		exit(0);
-	}
-}
-
-void switchToKernel() {
-    print((int*) "context switch to kernel: ");
-    saveContext(currProcess);
-	switchMode();
-    pc = getPC(kernelProcess);
-	registers = getRegisters(kernelProcess);	
-}
-
-void switchToProcess(int *process) {
-	 saveContext(kernelProcess);
-     currProcess = process;
-     pc = getPC(currProcess);
-     registers = getRegisters(currProcess);
-     switchMode();
-}
-
-void allocPageFault(int pid, int vaddr, int memoryPos) {
-    int *process;
-    int *pagetable;
-    int *pageFrameNr;
-    int pageNr;
-
-    process = findElementInList(processTable, pid);
-    currPageTable = getPageTable(process);
-    pageFrameNr = malloc(1 * 4);
-    *pageFrameNr = memoryPos;
-
-    // Get the position of the frame in the virtual memory
-    pageNr = vaddr/pageSize;
-
-    // Map the virtual into the physical memory
-   setArrayElt(currPageTable, pageNr, pageFrameNr);
-}
-
-void loadPage(int *vaddr, int *paddr) {
-    int i;
-    i = 0;
-    while(i < pageSize/4) {
-        *(paddr + i) = *(vaddr + i);
-        i = i + 1;
-    }
-}
-void runKernel() {
-    int mode;
-    while(1) {
-        if(mode == kernelMode) 
-            switchToKernel();
-         else{
-         	currProcess = removeFirst(readyQueue);
-         	switchToProcess(currProcess);
-         }
-    }
-}
-
-
-//@return: first "not waiting" process in blockedQueue
-//			if such a process does not exist it returns the the first process from readyQueue
-int* removeFirstNotWaitingProcessFromBlockedQueue(){
-	int *curr;
-	curr = (int*)*blockedQueue;
-	while((int)curr != 0){
-		if(getWaitStatus(curr) == 0){
-			return removeListElement(blockedQueue, curr);
-		}
-		curr = getNextProcess(curr);
-	}
-	return (int*)0;
-}
-void switchProcessFromYield(){
-	appendListElement(currProcess, readyQueue);
-}
-void switchProcessFromLock(){
-	appendListElement(currProcess, blockedQueue);
-}
-void switchProcessFromExit(){
-	if(hasParent(currProcess)){
-		appendListElement(currProcess, zombieQueue);
-		notify(getPPID(currProcess));
-	}
-	releaseLock();
-}
-void switchProcessFromWait(){
-	appendListElement(currProcess, blockedQueue);
-	releaseLock();
-}
-void notify(int ppid){
-	int *parent;
-	int *parentChildList;
-	parent = findElementInList(blockedQueue, ppid);
-	if((int)parent != 0){
-		parentChildList = getChildren(parent);
-		removeAllZombieChildren(parentChildList);
-		if(getListSize(parentChildList)==0){
-			setWaitStatus(parent, 0);
-			removeListElement(blockedQueue, parent);
-			appendListElement(parent, readyQueue);
-		}
-	}
-}
-
-int* getPrevProcess(int *process){
-	return (int*)*process; 
-}
-int* getNextProcess(int *process){
-	return (int*)*(process+1); 
-}
-int getProcessID(int *process){
-	return *(process+2); 
-}
-int getPC(int *process){
-	return *(process+3);
-}
-void setPC(int *process, int pc){
-	*(process+3) = pc;
-}
-int* getRegisters(int *process){
-	return (int*)*(process+4); 
-}
-void setRegisters(int *process, int *regs){
-	*(process+4) = (int)regs;
-}
-int* getPageTable(int *process){
-	return (int*)*(process+5); 
-}
-void setPageTable(int *process, int *pageTable){
-	*(process+5) = (int)pageTable;
-}
-int getPPID(int *process){
-	return *(process+6);
-}
-int hasParent(int *process){
-	if(getPPID(process) > -1)
-		return 1;
-	return 0;
-}
-void setPPID(int *process, int pid){
-	*(process+6) = pid;
-}
-int getWaitStatus(int *process){
-	return *(process+8);
-}
-void setWaitStatus(int *process, int status){
-	*(process+8) = status;
-}
-int isProcessWaiting(int *process){
-	return getWaitStatus(process);
-}
-int* getChildren(int *process){
-	return (int*)*(process+7);
-}
-int isListEmpty(int *list){
-	if(*list == 0)
-		return 1;
-	return 0;
-}
-int listContainsElement(int pid, int *list){
-	int *el;
-	el = findElementInList(list, pid);
-	if((int)el == 0)
-		return 0;
-	return 1;
-}
-int getListSize(int *list){
-	int size;
-	int *curr;
-	size = 0;
-	curr = (int*)*list;
-	while((int)curr != 0){
-		size = size+1;
-		curr = getNextProcess(curr);
-	}
-	return size;
-}
-
-void copyRegisters(int *copyTo, int *copyFrom){
-	int i;
-	i = 0;
-	while(i < 32){
-		*(copyTo+i) = *(copyFrom+i);
-		i = i+1;
-	}
-}
-void copyPageTable(int *copyTo, int *copyFrom){
-	int debug_copyPageTable;
-	int pageTableSize;
-	int i;
-	int *newPage;
-	debug_copyPageTable = 0;
-	i=0;
-	pageTableSize = vmemorySize / pageSize;
-	while(i < pageTableSize){
-		if((int)*copyFrom != 0){
-			if(debug_copyPageTable){
-				print((int*)"copy pageframe [");
-				print(itoa(i , string_buffer, 10, 0, 0));
-				print((int*)"] at [");
-				print(itoa(*copyFrom, string_buffer, 10, 0, 0));
-				print((int*)"] from process [");
-				print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
-				print((int*)"] to ");
-			}
-			newPage = pmalloc();
-			*copyTo = (int)newPage;
-			
-			if(debug_copyPageTable){
-				print((int*)"new pageframe at [");
-				print(itoa(*copyTo , string_buffer, 10, 0, 0));
-				print((int*)"]\n");
-			}
-			duplicatePageFrame(newPage, (int*)*copyFrom);
-			
-		}
-		copyTo = copyTo + 1;
-		copyFrom = copyFrom + 1;
-		i = i + 1;
-	}
-}
-void duplicatePageFrame(int *copyTo, int *copyFrom){
-	int i;
-	i = 0;
-	while(i < pageFrameSize /4){
-		*copyTo = *copyFrom;
-		copyTo = copyTo + 1;
-		copyFrom = copyFrom + 1;
-		i = i + 1;
-	}
-}
-
-int* pmalloc(){
-	int *page;
-	if((int)pfreeList == 0){
-		println();
-		//exception_handler(EXCEPTION_OUTOFMEMORY);
-		yieldCaller = 2;
-		killProcess(currProcess);
-		syscall_yield();
-	}
-	page = pfreeList;
-	pfreeList = (int*)*pfreeList;
-	return page;
-}
-void freePages(int *process){
-	int *pageTable;
-	int pageTableSize;
-	int i;
-	pageTable = getPageTable(process);
-	pageTableSize = vmemorySize / pageSize;
-	i = 0;
-	while(i < pageTableSize){
-		if(*pageTable != 0){
-			pfree((int*)*pageTable);
-			*pageTable = 0;
-		}
-		pageTable = pageTable + 1;
-		i = i + 1;
-	}
-}
-void pfree(int *page){
-	*page = (int)pfreeList;
-	pfreeList = page;
-}
-
-
-void printProcessEntry(int *process, int verbose){
-	int *prev;
-	int *next;
-	prev = (int*)*process;
-	next = (int*)*(process+1);
-
-	if(verbose){
-		print((int*)"pre ");
-		if(prev != (int*)0)
-			print(itoa(getProcessID(prev), string_buffer, 10, 0, 0));
-		println();
-	}
-	print((int*)"pid ");
-	if(process != (int*)0)
-		print(itoa(getProcessID(process), string_buffer, 10, 0, 0));
-	println();
-
-	if(verbose){
-		print((int*)"next ");
-		if(next != (int*)0)
-			print(itoa(getProcessID(next), string_buffer, 10, 0, 0));
-		println();
-		print((int*)"pc ");
-		if(process != (int*)0)
-			print(itoa(getPC(process), string_buffer, 10, 0, 0));
-		println();
-		print((int*)"PPID ");
-		if(process != (int*)0)
-			print(itoa(getPPID(process), string_buffer, 10, 0, 0));
-		println();
-		print((int*)"child list size ");
-		if(process != (int*)0)
-			print(itoa(getListSize(getChildren(process)), string_buffer, 10, 0, 0));
-		println();
-		print((int*)"is waiting ");
-		if(process != (int*)0)
-			print(itoa(getWaitStatus(process), string_buffer, 10, 0, 0));
-		println();
-	}
-}
-void printProcess(int *process){
-	printProcessEntry(process, 0);
-}
-void printProcessVerbose(int *process){
-	printProcessEntry(process, 1);
-}
-void printList(int *list, int verbose){
-	int *curr;
-	print((int*)"\nprint list start\n\n");
-	if(isListEmpty(list) == 0){
-		curr = (int*)*list;
-		while((int)curr != 0){
-			if(verbose == 0){
-				printProcess(curr);
-			} else if (verbose == 1){
-				printProcessVerbose(curr);
-			}
-			curr = getNextProcess(curr);
-			println();
-		}
-	} else println();
-	print((int*)"print list end\n");
-}
-void printProcessList(int *list){
-	printList(list, 0);
-}
-void printProcessListVerbose(int *list){
-	printList(list, 1);
-}
-
-void printPageTable(int *pageTable, int pid){
-	int pageTableSize;
-	int i;
-	i=0;
-	pageTableSize = vmemorySize / pageSize ;
-	print((int*)"\n print pagetable of process [");
-	print(itoa(pid, string_buffer, 10, 0, 0));
-	print((int*)"]\n");
-
-	while(i < pageTableSize){
-		if((int)*pageTable != 0){
-			print((int*)"pageTableEntry [");
-			print(itoa(i, string_buffer, 10 , 0, 0));
-			print((int*)"] mapped to pageFrame [");
-			print(itoa((int)*pageTable, string_buffer, 10 , 0, 0));
-			print((int*)"] in pmemory\n");
-		}
-		pageTable = pageTable + 1;
-		i= i + 1;
-	}
-	print((int*)"print pagetable end\n\n");
-}
-void printFreeList(){
-	int i;
-	int *curr;
-	i = 0;
-	curr = pfreeList;
-	print((int*)"freeList\n");
-	
-	while(curr != 0){
-		print((int*)"content of pageFrame [");
-		print(itoa(i, string_buffer, 10, 0, 0));
-		print((int*)"] at position [");
-		print(itoa((int)curr, string_buffer, 10, 0, 0));
-		print((int*)"]: [");
-		print(itoa(*curr, string_buffer, 10, 0, 0));
-		print((int*)"]\n");
-		i = i+1;
-		curr = (int*)*curr; 
-	}
-	print((int*)"freeList end\n");
-}
-
-
-void bootStrap(){
-	int* process;
-
-    modeEmulator = 1;
-    pageframeptr = (int*)malloc(4*(memorySize/pageSize));
-    vmemorySize = 4*1024*1024;  //4 MB
-    maxPages = vmemorySize/pageSize;
-
- //  freepages = 0;
-
-    readyQueue   = initList();
-    blockedQueue = initList();
-    zombieQueue  = initList();
-    waitQueue    = initList();
-    processTable = initList();
-    currPageTable    = createArray(maxPages - 1);
-
-    kernelProcess = createProcess();
-    *(kernelProcess+9) = 0;
-
-    copyBinaryToMemory();
-   manualSetupPtrs(kernelProcess);
-}
-
-void manualSetupPtrs(int *process){
-	int initStackptr;
-    initStackptr = memorySize / 2;//user space and kernel space 
-    registers = (int*)*(process + 4);
-    *(registers+REG_SP) = initStackptr; // initialize stack pointer
-    *(registers+REG_GP) = binaryLength; // initialize global pointer
-    *(registers+REG_K1) = *(registers+REG_GP);// initialize heap/bump pointer
-    initStackptr = initStackptr - 4;
-    *(memory + initStackptr/4) = memorySize;
-    *(registers+REG_SP) = *(registers+REG_SP) - 4;
-    initStackptr = initStackptr - 4;
-    *(memory + initStackptr/4) = binaryLength;
-    *(registers+REG_SP) = *(registers+REG_SP) - 4;
-}
 // -----------------------------------------------------------------
 // --------------------------- SYSCALLS ----------------------------
 // -----------------------------------------------------------------
@@ -4637,15 +3921,21 @@ void syscall_exit() {
     int exitCode;
 
     exitCode = *(registers+REG_A0);
-
     *(registers+REG_V0) = exitCode;
 
-    print(binaryName);
-    print((int*) ": exiting with error code ");
-    print(itoa(exitCode, string_buffer, 10, 0, 0));
-    println();
+	print((int*)"process with id [");
+	print(itoa(getUID(currProcess), string_buffer, 10,0, 0));
+   	print((int*)"] terminates");println();
 
-    halt = 1;
+
+		println();
+		println();
+		print(binaryName);
+		print((int*) ": exiting with error code ");
+		print(itoa(exitCode, string_buffer, 10, 0, 0));
+
+		halt = 1;
+			
 }
 
 void emitRead() {
@@ -4674,22 +3964,35 @@ void syscall_read() {
     int vaddr;
     int fd;
     int *buffer;
-    int size;
 
+	int pageFrameOffset;
+	int sizeToRead;
+	int sizeRead;
+	
     count = *(registers+REG_A2);
     vaddr = *(registers+REG_A1);
     fd    = *(registers+REG_A0);
+	sizeToRead = count;
+	sizeRead = 0;
 
-    buffer = memory + tlb(vaddr);
-
-    size = read(fd, buffer, count);
-
-    *(registers+REG_V0) = size;
+	while(sizeToRead > 0){
+		pageFrameOffset = PAGEFRAMESIZE - vaddr % PAGEFRAMESIZE;
+		
+		buffer = tlb(vaddr);
+		
+		if(pageFrameOffset <= sizeToRead)
+			sizeRead = read(fd, buffer, pageFrameOffset);
+		else
+			sizeRead = read(fd, buffer, sizeToRead);
+		sizeToRead = sizeToRead - pageFrameOffset;
+		vaddr = vaddr + pageFrameOffset;
+	}
+    *(registers+REG_V0) = sizeRead;
 
     if (debug_read) {
         print(binaryName);
         print((int*) ": read ");
-        print(itoa(size, string_buffer, 10, 0, 0));
+        print(itoa(count, string_buffer, 10, 0, 0));
         print((int*) " bytes from file with descriptor ");
         print(itoa(fd, string_buffer, 10, 0, 0));
         print((int*) " into buffer at address ");
@@ -4723,21 +4026,35 @@ void syscall_write() {
     int vaddr;
     int fd;
     int *buffer;
+    
+    int pageFrameOffset;
+    int sizeToWrite;
+    int sizeWritten;
 
-    size  = *(registers+REG_A2);
-    vaddr = *(registers+REG_A1);
-    fd    = *(registers+REG_A0);
+	size  = *(registers+REG_A2);
+	vaddr = *(registers+REG_A1);
+	fd    = *(registers+REG_A0);
+	sizeToWrite = size;
+	sizeWritten = 0;
 
-    buffer = memory + tlb(vaddr);
+	while(sizeToWrite > 0){
+		pageFrameOffset = PAGEFRAMESIZE - vaddr % PAGEFRAMESIZE;
 
-    size = write(fd, buffer, size);
+		buffer = tlb(vaddr);
 
-    *(registers+REG_V0) = size;
-
+		if(pageFrameOffset <= sizeToWrite)
+			sizeWritten = write(fd, buffer, pageFrameOffset);
+		else
+			sizeWritten = write(fd, buffer, sizeToWrite);
+		vaddr = vaddr + pageFrameOffset;
+		sizeToWrite = sizeToWrite - pageFrameOffset;
+	}
+	*(registers+REG_V0) = sizeWritten;
+	
     if (debug_write) {
         print(binaryName);
         print((int*) ": wrote ");
-        print(itoa(size, string_buffer, 10, 0, 0));
+        print(itoa(sizeWritten, string_buffer, 10, 0, 0));
         print((int*) " bytes from buffer at address ");
         print(itoa((int) buffer, string_buffer, 16, 8, 0));
         print((int*) " into file with descriptor ");
@@ -4777,7 +4094,7 @@ void syscall_open() {
     flags = *(registers+REG_A1);
     vaddr = *(registers+REG_A0);
 
-    filename = memory + tlb(vaddr);
+    filename = tlb(vaddr);
 
     fd = open(filename, flags, mode);
 
@@ -4840,270 +4157,6 @@ void syscall_malloc() {
     }
 }
 
-void emitYield(){
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "yield", binaryLength, FUNCTION, VOID_T, 0);
-
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0); 
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
-
-    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_YIELD);
-    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
-
-    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);	
-}
-
-void syscall_yield(){
-	int debug_yield;
-	debug_yield = 0;
-	
-	if(debug_yield)
-		print((int*)"\nswitch process caller=");
-	
-	saveProcessState();
-	if(yieldCaller == 0){
-		if(debug_yield)
-				print((int*)"syscall_yield");
-		switchProcessFromYield();
-	} else if(yieldCaller == 1){
-		if(debug_yield)
-				print((int*)"syscall_lock");
-		switchProcessFromLock();
-	} else if(yieldCaller == 2){
-		if(debug_yield)
-				print((int*)"syscall_exit");
-		switchProcessFromExit();
-	} else if(yieldCaller == 3){
-		if(debug_yield)
-				print((int*)"syscall_wait");
-		switchProcessFromWait();
-	}
-	
-	if(debug_yield){
-		println();
-		print((int*)"switch from process [");
-		print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
-		print((int*)"]\n");
-	}
-	currProcess = (int*)0;
-	if(lock == 0){
-		currProcess = removeFirstNotWaitingProcessFromBlockedQueue();
-	}
-	if((int)currProcess != 0){
-		setProcessState();
-		syscall_lock();
-	} else {
-		currProcess = removeFirst(readyQueue);
-		if((int)currProcess == 0){
-			if(debug_yield){
-				printProcessList(blockedQueue);
-				print((int*)"switch to process [NULL]\n");
-			}
-			exit(-1);
-		}
-		setProcessState();
-	}
-	if(debug_yield){
-		print((int*)"switch to process [");
-		print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
-		print((int*)"]\n");
-		print((int*)"*(registers + reg_v0): ");
-		print(itoa(*(registers+REG_V0), string_buffer, 10, 0, 0));
-		println();
-	}
-	yieldCaller = 0;
-	counterInstr = 0;
-	
-}
-
-void emitUnlock(){
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "unlock", binaryLength, FUNCTION, VOID_T, 0);
-
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
-
-    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_UNLOCK);
-    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
-
-    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);	
-
-}
-
-void syscall_unlock(){
-	print((int*)"\nprocess [");
-	print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
-	if(lock == 1){
-		if(getProcessID(currProcess) == lockID){
-			lockCounter = lockCounter - 1;
-			
-			if(lockCounter == 0){
-				lock = 0;
-				print((int*)"] unlocks");
-			} else {
-				print((int*)"] decrements lockCounter to [");
-				print(itoa(lockCounter, string_buffer, 10, 0, 0));
-				print((int*)"]");
-			}
-			
-		} else {
-			print((int*)"] cannot unlock, lock hold by process [");
-			print(itoa(lockID, string_buffer, 10, 0, 0));
-			print((int*)"]");
-		}
-	} else 
-		print((int*)"] cannot unlock, lock not hold by any process");
-	
-	println();
-}
-
-void emitLock(){
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "lock", binaryLength, FUNCTION, VOID_T, 0);
-
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
-
-    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_LOCK);
-    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
-
-    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);	
-}
-
-void syscall_lock(){
-	print((int*)"\nprocess [");
-	print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
-	if(lock == 0){
-		lock = 1;
-		lockID = getProcessID(currProcess);
-		lockCounter = 1;
-		print((int*)"] locks");
-	} else if(lock == 1){
-		if(lockID != getProcessID(currProcess)){
-			print((int*)"] cannot lock, lock hold by process [");
-			print(itoa(lockID, string_buffer, 10, 0, 0));
-			print((int*)"]");
-			yieldCaller = 1;
-			syscall_yield();			
-		} else {
-			print((int*)"] already holds lock");
-			lockCounter = lockCounter + 1;
-		}
-	}
-	println();
-}
-
-void emitGetPID(){
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "getPID", binaryLength, FUNCTION, INT_T, 0);
-
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
-
-    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_GETPID);
-    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
-
-    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);	
-
-}
-
-void syscall_getPID(){
-	//*(registers+REG_V0) = *(currProcess+2);
-	int pid;
-	pid = getProcessID(currProcess);
-	*(registers+REG_V0) = pid;
-}
-
-void emitFork(){
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "fork", binaryLength, FUNCTION, INT_T, 0);
-
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
-
-    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_FORK);
-    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
-
-    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);	
-
-}
-
-void syscall_fork(){
-		
-	int *process;
-    int *newProcess;
-    int *newProcessRegs;
-
-    process = currProcess;
-    newProcess = createProcess();
-
-    *(newProcess+3) = pc;
-    *(newProcess+6) = (int)process;
-    appendListElement(readyQueue, newProcess);
-    newProcessRegs = getRegister(newProcess);
-
-    copyRegisters(process, newProcess);
-    copyPageTable(process, newProcess);
-
-    *(registers + REG_V0) = getProcessID(newProcess);
-    *(newProcessRegs + REG_V0) = 0;
-}
-
-void emitWait(){
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "wait", binaryLength, FUNCTION, VOID_T, 0);
-
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
-
-    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
-    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
-
-    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_WAIT);
-    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
-
-    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);	
-}
-
-void syscall_wait(){
-	int debug_wait;
-	int waitPID; // currProcess must wait for process with 'waitPID'
-	debug_wait = 0;
-	waitPID = *(registers+REG_A0);
-	if(debug_wait){
-		print((int*)"syscall_wait");
-		println();
-		print((int*)"currPID ");
-		print(itoa(getProcessID(currProcess), string_buffer, 10, 0, 0));
-		println();
-		print((int*)"waitPID ");
-		print(itoa(waitPID, string_buffer, 10, 0, 0));
-		println();
-		print((int*)"wait pid is in childrenlist ");
-		print(itoa(listContainsElement(waitPID, getChildren(currProcess)), string_buffer, 10, 0, 0));
-		println();
-	}
-	
-	if(listContainsElement(waitPID, getChildren(currProcess))){
-		if(debug_wait){
-			print((int*)"call yield from wait\n\n");
-		}
-		setWaitStatus(currProcess, 1);
-		
-		yieldCaller = 3;
-		syscall_yield();
-	} else
-		if(debug_wait){
-			print((int*)"no yield call from wait\n\n");
-		}
-}
-
-
 void emitPutchar() {
     createSymbolTableEntry(GLOBAL_TABLE, (int*) "putchar", binaryLength, FUNCTION, INT_T, 0);
 
@@ -5122,226 +4175,449 @@ void emitPutchar() {
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
-// -----------------------------------------------------------------
-// -------------------------- HYPERCALLS A6 ---------------------------
-// -----------------------------------------------------------------
+void emitAllocCMD(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*)"allocCMD", binaryLength, FUNCTION, INTSTAR_T, 0);
 
-void emitSwitchContext() {
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "switch_context", binaryLength, FUNCTION, VOID_T, 0);
-    
-	//print((int*) "... emiting hypercall context switch ...");
-	//println();
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
     emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
     emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
-    // load argument for switch ctx: id of new process
-    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
-    // remove the argument from the stack
-    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
-    // load the correct syscall number and invoke syscall
-    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_SWITCHCONTEXT);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_ALLOCCMD);
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
-    // jump back to caller, return value is in REG_V0
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+
+}
+
+void syscall_allocCMD(){
+    int bump;
+    int size;
+    size = 16;
+	print((int*)"\nalloc cmd\n");
+    bump = *(registers+REG_K1);
+	
+    if (bump + size >= *(registers+REG_SP))
+        exception_handler(EXCEPTION_HEAPOVERFLOW);
+	
+	cmd = bump;
+	storeIPC(7004, 0 ,0 ,0);
+	*(registers+REG_K1) = bump + size;
+    *(registers+REG_V0) = cmd;
+     
+}
+
+void emitAlignedAlloc(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*)"alignedAlloc", binaryLength, FUNCTION, INTSTAR_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_ALIGNEDALLOC);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
-void hypercall_switchContext() {
 
-    int context;
-    int *process;
-    //print((int*) "executing hypercall context switch ");
-    //println();
-    context = *(registers+REG_A0);
-    saveContext(currProcess);
-    //saveContext(kernelProcess);
-    process = findElementInList(readyQueue, context);
-    if ((int)process != 0) {
-        restoreContext(process);
-    } else {        
-        print((int*) "switch context failed...no such process found");
-        println();
-        exit(0);
-    }
-   switchMode();
-   
+void syscall_alignedAlloc(){
 }
+// -----------------------------------------------------------------
+// -------------------------- HYPERCALLS ---------------------------
+// -----------------------------------------------------------------
 
-void switchMode(){
-	if (kernelMode)
-		kernelMode = 0; // reset kernelmode to zero
-	else 
-	    kernelMode = 1; // reset kernelmode to one
-	counterInstr = 0;  // reset instruction counter to zero in every case
-}
+void emitCreateContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "hcCreateContext", binaryLength, FUNCTION, INT_T, 0);
 
-void emitCreateContext() {
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "createContext", binaryLength, FUNCTION, VOID_T, 0);
-	
-	//print((int*) "... emiting hypercall create context ...");
-	//println();
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
-    emitIFormat(OP_ADDIU, REG_SP, REG_A0, 0);
+    emitIFormat(OP_LW, REG_SP, REG_A3, 0); // pagetable
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A2, 0); // registers
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0); // pc
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0); // uid
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_CREATECONTEXT);
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
 
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
+void hc_createContext(){
 
-void hypercall_createContext() {
-     
-	int context;
-	int* newReg;
-	int* newPageTable;
-	int newPC;
-
-	newReg = malloc(32 * 4);
-	newPageTable = createPageTable();
-	newPC = 0;
-
-	*(newReg + REG_SP) = *(registers+REG_A1);
-	*(newReg + REG_GP) = *(registers+REG_A0);
-	*(newReg + REG_K1) = *(newReg + REG_GP);
-	// add to list of contexts
-	insertContext(nextContextId, newPC, newReg, newPageTable );
-	// return the UID
-	*(registers+REG_V0) = nextContextId;
-	//increment to next Uid
-	nextContextId = nextContextId + 1;
+	int *process;
+	process = createProcess();
+	print((int*)"\nhc_createContext in selfie\n");
 	
-	print((int*) "sucessfully create new context : ");
-	print(nextContextId);
-	println();
-	exit(0);
 
 }
 
-void emitDeleteContext() {
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "deleteContext", binaryLength, FUNCTION, VOID_T, 0);
-	
-	//print((int*) "... emiting hypercall delete context ...");
-	//println();
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+void emitSwitchContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "hcSwitchContext", binaryLength, FUNCTION, INT_T, 0);
 
+}
+void hc_switchContext(){
+
+}
+
+void emitDeleteContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "hcDeleteContext", binaryLength, FUNCTION, INT_T, 0);
+
+}
+void hc_deleteContext(){
+
+}
+
+void emitMapPageInContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "hcMapPageInContext", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A3, 0); 
+    emitIFormat(OP_LW, REG_SP, REG_A2, 0); 
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0);
     emitIFormat(OP_LW, REG_SP, REG_A0, 0);
-    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
-
-    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_DELETECONTEXT);
-    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
-
-    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
-}
-
-void hypercall_deleteContext() {
-    int pid;
-
-    pid = *(registers+REG_A0);
-	removeContext(contextList, pid);
-    
-    print((int*) "delete context with PID ");
-    print(pid);
-    println();
-
-    exit(0);
-
-}
-
-void emitMapPageInContext() {
- 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "mapPageInContext", binaryLength, FUNCTION, VOID_T, 0);
-
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
-    
-    emitIFormat(OP_LW, REG_SP, REG_A2, 0); // page frame
-    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
-
-    emitIFormat(OP_LW, REG_SP, REG_A1, 0); // page 
-    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
-
-    emitIFormat(OP_LW, REG_SP, REG_A0, 0); // pid
-    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_MAPPAGEINCONTEXT);
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
 
-    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+
+}
+void hc_mapPageInContext(){
+	print((int*)"\nmap page in context\n");
+	saveKernelState();
+	setUserState();
+	halt = 1;
 }
 
-void hypercall_mapPageInContext() {
-	int pid;
-	int paddr;
-	int pageIndex;
-	int* pageTable;
-	int* context;
-	// get the parameter
-	pid  = *(registers+REG_A2);
-	pageIndex  = *(registers+REG_A1);
-	paddr  = *(registers+REG_A0);
-	// find the context by pid in the list of context
-	context = findContext(contextList, pid);
-	// get the page table of found context
-	pageTable = getContextPageTable (context);
-	setPageTableAtIndex(pageTable, pageIndex, paddr);
+void emitFlushPageInContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "hcFlushPageInContext", binaryLength, FUNCTION, INT_T, 0);
+
+
+}
+void hc_flushPageInContext(){
+
 }
 
-void emitFlushPageInContext() {
- 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "flushPageInContext()", binaryLength, FUNCTION, VOID_T, 0);
+void emitLoadBinary(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*)"hcLoadBinary", FUNCTION, INT_T, 0, binaryLength);
+
+}
+
+void hc_loadBinary(){
+}
+
+
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+// -----------------------------------------------------------------
+// ---------------------   Operating System    ---------------------
+// -----------------------------------------------------------------
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+
+// the kernel process has following structure:
+//
+// 0 +-----+
+//   |  /  | 
+// 1 +-----+  
+//   |  /  | 
+// 2 +-----+  
+//   |uid  | unique process ID (=0)
+// 3 +-----+  
+//   | pc  | program counter
+// 4 +-----+  
+//   |reg  | pointer to registers
+// 5 +-----+  
+//   | PT  | pointer to page table
+// 6 +-----+ 
+
+void createKernelProcess(){
+	int *pt;
+
+	kernelProcess = malloc(6 * 4);
+	setUID(kernelProcess, 0);
+	setPC(kernelProcess, pc);
+	setRegisters(kernelProcess, registers);//malloc(32 * 4));
+
+	pt = createKernelPageTable();
+
+	setPageTable(kernelProcess, pt);
 	
-	 emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+	currProcess = kernelProcess;
+	currPageTable = pt;
 
-    emitIFormat(OP_LW, REG_SP, REG_A1, 0); // page 
-    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
-
-    emitIFormat(OP_LW, REG_SP, REG_A0, 0); // pid
-    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
-
-    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_FLUSHPAGEINCONTEXT);
-    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
-
-    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
-
-void hypercall_flushPageInContext() {
+int* createKernelPageTable(){
+	int *pt;
+	int ptMaxEntries;
+	int ptSize;
+	int i;
+	i=0;
 	
-	int* context;
-	int* pageTable;
-	int pageIndex;
-	int pid;
+	ptMaxEntries = memorySize / PAGESIZE; //VMEMORYSIZE / PAGESIZE;
+	ptSize = ptMaxEntries * 4;
+	pt = malloc(ptSize);
+
+	while(i < ptSize){
+		*(pt+i) = 0;
+		i = i + 1;
+	}
 	
-	pid = *(registers + REG_A0);
-	pageIndex = *(registers + REG_A1);
-	// find the context by pid in the list of context
-	context = findContext(contextList, pid);
-	// get the page table of found context
-	pageTable = getContextPageTable (context);
-	// mark the pageTable at the given index with invalid value
-	setPageTableAtIndex(pageTable, pageIndex, -1);	
+	*(pt+0) = (int)palloc();
+	*(pt+1) = (int)palloc();
+	*(pt+2) = (int)palloc();
+	*(pt+3) = (int)palloc();
+	*(pt+4) = (int)palloc();
+	*(pt+(ptMaxEntries-5)) = (int)palloc();
+	*(pt+(ptMaxEntries-4)) = (int)palloc();
+	*(pt+(ptMaxEntries-3)) = (int)palloc();
+	*(pt+(ptMaxEntries-2)) = (int)palloc();
+	*(pt+(ptMaxEntries-1)) = (int)palloc();
+
+	return pt;
 }
 
-void emitMode() {
-    // Create the symbol table entry fpr sched_yield
-    createSymbolTableEntry(GLOBAL_TABLE, (int*) "mode", binaryLength, FUNCTION, INT_T, 0);
-    
-    // sched_yield doesn't have any arguments
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
-    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+// a userprocess has following structure:
+//
+// 0 +-----+
+//   |prev | pointer to previous element in list
+// 1 +-----+  
+//   |next | pointer to next element in list
+// 2 +-----+  
+//   |pid  | process ID
+// 3 +-----+  
+//   | pc  | program counter
+// 4 +-----+  
+//   |reg  | pointer to registers
+// 5 +-----+  
+//   | PT  | pointer to page table
+// 6 +-----+ 
 
-    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_MODE);
-    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
-
-    // We don't have a return value so we just jump back
-    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR); // REG_RA instead of REG_LINK
+int* createProcess(){
+	int *process;
+	process = malloc (6*4);
+	setPrevProcess(process, (int*)0);
+	setNextProcess(process, (int*)0);
+	setUID(process, nextValidUID);
+	setPC(process, 0);
+	setRegisters(process, malloc(32 * 4));
+	setPageTable(process, createEmptyPageTable());
+	
+	nextValidUID = nextValidUID + 1;
+	return process;
 }
 
-void syscall_mode() {
-    *(registers+REG_V0) = kernelMode;
-    print((int*) "...sucessfull call of syscall_mode ...");
-	println();
+int* createEmptyPageTable(){
+	int *pt;
+	int ptMaxEntries;
+	int ptSize;
+	int i;
+	i=0;
+	
+	ptMaxEntries = VMEMORYSIZE / PAGESIZE;
+	ptSize = ptMaxEntries * 4;
+	pt = malloc(ptSize);
+
+	while(i < ptSize){
+		*(pt+i) = 0;
+		i = i + 1;
+	}
+	
+	return pt;
+}
+
+int* palloc(){
+	int *page;
+	if((int)pfreeList != 0){
+		page = pfreeList;
+		pfreeList = (int*)*pfreeList;
+		return page;
+	}
+	print((int*)"no free pages left");
+	exit(-1);
+
+}
+
+void printPageTable(int *process){
+	int *pt;
+	int pageTableSize;
+	int i;
+	pt = getPageTable(process);
+	i=0;
+	if((int)pt == 0)
+		print((int*) "\npagetable is null\n");
+	pageTableSize = memorySize / PAGESIZE;
+	print((int*)"\nprint pagetable of process [");
+	print(itoa(getUID(process), string_buffer, 10, 0, 0));
+	print((int*)"]\n");
+
+	while(i < pageTableSize){
+		if(*(pt+i*4) != 0){
+			print((int*)"pageTableEntry [");
+			print(itoa(i, string_buffer, 10 , 0, 0));
+			print((int*)"] mapped to pageFrame [");
+			print(itoa((int)*(pt+i*4), string_buffer, 10 , 0, 0));
+			print((int*)"] in memory\n");
+		}
+		i = i+1;
+	}
+	print((int*)"print pagetable end\n\n");
+}
+void printPT(int *pt){
+	int pageTableSize;
+	int i;
+	i=0;
+	if((int)pt == 0)
+		print((int*) "\npagetable is null\n");
+	pageTableSize = memorySize / PAGESIZE;
+	while(i < pageTableSize){
+		if(*(pt+i*4) != 0){
+			print((int*)"pageTableEntry [");
+			print(itoa(i, string_buffer, 10 , 0, 0));
+			print((int*)"] mapped to pageFrame [");
+			print(itoa((int)*(pt+i*4), string_buffer, 10 , 0, 0));
+			print((int*)"] in memory\n");
+		}
+		i = i+1;
+	}
+	print((int*)"printPT end\n\n");
+}
+void printProcess(){
+    print((int*)"\nprint process\n");
+    print((int*)"\ncurrProcess id: ");
+    print(itoa(getUID(currProcess), string_buffer, 10, 0, 0));
+    print((int*)"\npc: ");
+    print(itoa(pc, string_buffer, 10, 0, 0));
+    println();
+    printPageTable(currProcess);
+    print((int*)"\nprint process end\n");
+}   
+
+void setKernelState(){
+	print((int*)"\nsetKernelState\n");
+	currProcess = kernelProcess;
+	currPageTable = getPageTable(kernelProcess);
+	registers = getRegisters(kernelProcess);
+	pc = 0;
+}
+void saveKernelState(){
+	print((int*)"\nsaveKernelState\n");
+	setPageTable(kernelProcess, currPageTable);
+	setRegisters(kernelProcess, registers);
+	setPC(kernelProcess, pc);
+}
+void setUserState(){
+	print((int*)"\nsetUserState\n");
+	currProcess = removeFirst(readyQueue);
+	pc = getPC(currProcess);
+	registers = getRegisters(currProcess);
+	currPageTable = getPageTable(currProcess);
+}
+
+void saveUserState(){
+	if((int)currProcess != 0){
+		if(getUID(currProcess) != 0){
+			print((int*)"\nsaveUserState\n");
+			setPC(currProcess, pc-4); //??
+			setRegisters(currProcess, registers);
+			setPageTable(currProcess, currPageTable);
+			appendListElement(currProcess, readyQueue);
+			currProcess = (int*)0;
+		}
+	}
+}
+
+// --- GETTER ---
+int* getPrevProcess(int *process){
+	return (int*)*process; 
+}
+int* getNextProcess(int *process){
+	return (int*)*(process+1); 
+}
+int getUID(int *process){
+	return *(process+2); 
+}
+int getPC(int *process){
+	return *(process+3);
+}
+int* getRegisters(int *process){
+	return (int*)*(process+4); 
+}
+int* getPageTable(int *process){
+	return (int*)*(process+5); 
+}
+
+// --- SETTER ---
+void setPrevProcess(int *process, int *prev){
+	*process = (int)prev;
+}
+void setNextProcess(int *process, int *next){
+	*(process+1) = (int)next;
+}
+void setUID(int *process, int uid){
+	*(process+2) = uid;
+}
+void setPC(int *process, int pc){
+	*(process+3) = pc;
+}
+void setRegisters(int *process, int *regs){
+	*(process+4) = (int)regs;
+}
+void setPageTable(int *process, int *pt){
+	*(process+5) = (int)pt;
+}
+
+// --- LIST ---
+
+int* initList(){
+	int *list;
+	list = malloc(2*4);
+	*list = 0;
+	*(list+1) = 0;
+	return list;
+}
+void appendListElement(int *element, int *list){
+	int *tail;
+	tail = (int*)*(list+1);
+	if(isListEmpty(list)){
+		*list = (int)element;
+	} else {
+		*element = *(list+1);
+		*(tail+1) = (int)element;
+	}
+	*(list+1) = (int)element;
+	*(element+1) = 0;
+}
+
+int isListEmpty(int *list){
+	if(*list == 0)
+		return 1;
+	return 0;
+}
+
+int* removeFirst(int *list){
+	int *head;
+	int *tail;
+	int *process;
+	
+	if(isListEmpty(list))
+		return (int*)0;
+
+	process = head;
+
+	if((int)head == (int)tail){
+		*head = 0;
+		*tail = 0;
+	} else {
+		head = getNextProcess(head);
+		setPrevProcess(head, (int*)0);
+	}
+	
+	return process;
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -5353,134 +4629,108 @@ void syscall_mode() {
 // -----------------------------------------------------------------
 // ---------------------------- MEMORY -----------------------------
 // -----------------------------------------------------------------
+int* tlb(int vaddr) {
+	int paddr;
+	int pageFrameOffset;
+	int pageTableOffset;
+	int *newPage;
+	int interpretOld;
+	
+	if(interpret==0)
+		return memory + vaddr/4;
+	if (vaddr % 4 != 0){
+		print((int*)"tlb 1: ");
+		exception_handler(EXCEPTION_ADDRESSERROR);
+	}
+	if (vaddr < 0){
+		print((int*)"tlb 2: ");
+		exception_handler(EXCEPTION_ADDRESSERROR);
+	}
 
-int tlb(int vaddr) {
-    int *pagetable;
-    int pageNr;
-    int *pageFramePtr;
-    int pageFrame;
-    int offset;
+	pageTableOffset = vaddr / PAGESIZE;
+	pageFrameOffset = vaddr % PAGESIZE;
+	if((int)*(currPageTable+pageTableOffset) == 0){
+		exception_handler(EXCEPTION_PAGEFAULT);
+		print((int*)"page fault exception thrown by vaddr: ");
+		print(itoa(vaddr, string_buffer, 10, 0, 0));
+		print((int*)"\nentry [");
+		print(itoa(pageTableOffset, string_buffer, 10, 0, 0));
+		print((int*)"] has no mapping in physical memory\n");
+		
+		saveUserState();
+		setKernelState();
+		
+		print((int*)"\nbefore storeIPC(HYPERCALL_MAPPAGEINCONTEXT)");
+		storeIPC(HYPERCALL_MAPPAGEINCONTEXT, pageTableOffset, 0, 0);
 
-    if (vaddr % 4 != 0)
-        exception_handler(EXCEPTION_ADDRESSERROR);
+		interpretOld = interpret;		
+		newPage = palloc();
 
-    if(pageFlag) {
-        pageNr = vaddr/pageSize; // Get the page number in the virtual memory
-        offset = vaddr % pageSize;  // get the offset
-        pagetable = getPageTable(currProcess);
-        pageFramePtr = getArrayElt(pagetable, pageNr);
-        vaddr = *pageFramePtr + offset; // physical adress
-    }
+		*(currPageTable+pageTableOffset) = (int)newPage;
 
-    return vaddr / 4;
+		run();
+
+		halt = 0;
+		interpret = interpretOld;
+
+	}
+	
+	paddr = (int)*(currPageTable + pageTableOffset) + pageFrameOffset;
+
+	if (paddr % 4 != 0){
+		print((int*)"tlb 4: ");
+		exception_handler(EXCEPTION_ADDRESSERROR);
+	}
+	if (paddr < (int)memory){
+		print((int*)"tlb 5: ");
+		exception_handler(EXCEPTION_ADDRESSERROR);
+	}
+	if (paddr >= (int)memory+memorySize){
+		print((int*)"tlb 6: ");
+		exception_handler(EXCEPTION_ADDRESSERROR);
+	}
+
+	return (int*)paddr;
 }
 
 int loadMemory(int vaddr) {
-    int paddr;
-
-    paddr = tlb(vaddr);
-
-    return *(memory + paddr);
-}
-int pageFrameLookup(int vaddr){
-	int *pagetable;
-    int pageNr;
-    int *pageFramePtr;
-    int pageFrame;
-    int offset;
-
-     pageNr = vaddr/pageSize; 
-    offset = vaddr % pageSize; 
-    pagetable = getPageTable(currProcess);
-    pageFramePtr = getArrayElt(pagetable, pageNr);
-
-    if(pageFramePtr == (int*)0) {
-        print((int*) "No page frame failed at vaddr: ");
-        print(vaddr);
-        print((int*) " pid: ");
+    int *paddr;
     
-	return 1;
+    paddr = tlb(vaddr);
+    if(1 == 4880){
+    	print((int*)"\nloadmemory\n");
+		print((int*)"\nvaddr: ");
+		print(itoa(vaddr, string_buffer, 10, 0, 0));
+		print((int*)"\npaddr: ");
+		print(itoa((int)paddr, string_buffer, 10, 0, 0));
+		print((int*)"\n*paddr: ");
+		print(itoa((int)*paddr, string_buffer, 10, 0, 0));
+		println();
 	}
-	return 0;
+    return *paddr;
 }
 
 void storeMemory(int vaddr, int data) {
-    int paddr;
-
+    int *paddr;
     paddr = tlb(vaddr);
-
-    *(memory + paddr) = data;
+	*paddr = data;
 }
 
-// ----duplicate all operations of ProcessList for context-----------
-// --------------------------------------------------------
-
-int* insertContext(int contextId, int pc, int* registers, int* pageTable ) {
-	
-	int* ptr;
-	ptr = malloc(6 * 4);
-	setContextID(ptr, contextId);
-    setContextPC(ptr, pc);
-	setContextRegisters(ptr, (int) registers);
-	setContextPageTable(ptr, (int) pageTable);
-	appendListElement(contextList, ptr);
-	return ptr;
-}
-
-int* findContext(int* contextList, int Id){
-	findElementInList(contextList, Id);
-}
-
-int* removeContext(int* contextList, int pid){
-	 removeListElementByPID(contextList, pid);
-}
-
-void setContextID(int* node, int Id){
-	node = Id;
-}
-void setContextPrev(int* node, int prev){
-	*(node + 1) = prev; 	
-}
-void setContextNext(int* node, int next){
-	*(node + 2) = next;
-}
-
-void setContextPC(int* node, int pc){
-	*(node + 3) = pc;
-}
-void setContextRegisters(int* node, int registers){
-	*(node + 4) = registers;
-}
-void setContextPageTable(int* node, int pageTable){
-	*(node + 5) = pageTable;
-}
-
-int* getContextPrev(int* node){
-	return *(node + 1);	
-}
-int* getContextNext(int* node){
-	return *(node + 2);
-}
-
-int getContextPC(int* node){
-	return *(node + 3);
-}
-int* getContextRegisters(int* node){
-	return *(node + 4);
-}
-int* getContextPageTable(int* node){
-	return *(node + 5);
-}
-
-int getContextID(int* node){
-	
-}
-
-void setPageTableAtIndex(int* pagetable, int index, int data) {
-  *(pagetable + index) = data;
-}
-int* getpageTableElt(int* pagetable, int index) {
-  return *(pagetable + index);
+void storeIPC(int arg0, int arg1, int arg2, int arg3){
+	print((int*)"\nstore ipc\n");
+	print((int*)"\narg0: ");
+	print(itoa(arg0, string_buffer, 10, 0, 0));
+	print((int*)"\narg1: ");
+	print(itoa(arg1, string_buffer, 10, 0, 0));
+	print((int*)"\narg2: ");
+	print(itoa(arg2, string_buffer, 10, 0, 0));
+	print((int*)"\narg3: ");
+	print(itoa(arg3, string_buffer, 10, 0, 0));
+	println();
+	storeMemory(cmd,	arg0);
+	storeMemory(cmd+4,	arg1);
+	storeMemory(cmd+8,	arg2);
+	storeMemory(cmd+12,	arg3);
 }
 
 
@@ -5503,31 +4753,27 @@ void fct_syscall() {
             syscall_write();
         } else if (*(registers+REG_V0) == SYSCALL_OPEN) {
             syscall_open();
-        } else if (*(registers+REG_V0) == SYSCALL_WAIT) {
-            syscall_wait();
-        }  else if (*(registers+REG_V0) == SYSCALL_LOCK) {
-            syscall_lock();
-        } else if (*(registers+REG_V0) == SYSCALL_UNLOCK) {
-            syscall_unlock();
-        } else if (*(registers+REG_V0) == SYSCALL_FORK) {
-            syscall_fork();
-        } else if (*(registers+REG_V0) == SYSCALL_YIELD) {
-            syscall_yield();
-        } else if (*(registers+REG_V0) == SYSCALL_GETPID) {
-            syscall_getPID();
-        } else if (*(registers+REG_V0) ==  HYPERCALL_CREATECONTEXT) {
-             hypercall_createContext();
-        } else if (*(registers+REG_V0) ==  HYPERCALL_SWITCHCONTEXT) {
-           hypercall_switchContext();
-        } else if (*(registers+REG_V0) ==  HYPERCALL_DELETECONTEXT) {
-           hypercall_deleteContext();
-        } else if (*(registers+REG_V0) ==  SYSCALL_MODE) {
-          syscall_mode();
-        } else if (*(registers+REG_V0) ==  HYPERCALL_MAPPAGEINCONTEXT) {
-           hypercall_mapPageInContext();
-        } else if (*(registers+REG_V0) ==  HYPERCALL_FLUSHPAGEINCONTEXT) {
-            hypercall_flushPageInContext();
-        }else {
+        } else if (*(registers+REG_V0) == SYSCALL_MALLOC) {
+            syscall_malloc();
+//		} else if(*(registers+REG_V0) == SYSCALL_GETPID){
+//			syscall_getPID();
+		} else if(*(registers+REG_V0) == SYSCALL_ALLOCCMD){
+			syscall_allocCMD();
+		} else if(*(registers+REG_V0) == SYSCALL_ALIGNEDALLOC){
+			syscall_alignedAlloc();
+		} else if(*(registers+REG_V0) == HYPERCALL_CREATECONTEXT){
+			hc_createContext();
+		} else if(*(registers+REG_V0) == HYPERCALL_LOADBINARY){
+			hc_loadBinary();
+		} else if(*(registers+REG_V0) == HYPERCALL_SWITCHCONTEXT){
+			hc_switchContext();
+		} else if(*(registers+REG_V0) == HYPERCALL_DELETECONTEXT){
+			hc_deleteContext();
+		} else if(*(registers+REG_V0) == HYPERCALL_MAPPAGEINCONTEXT){
+			hc_mapPageInContext();
+		} else if(*(registers+REG_V0) == HYPERCALL_FLUSHPAGEINCONTEXT){
+			hc_flushPageInContext();
+        } else {
             exception_handler(EXCEPTION_UNKNOWNSYSCALL);
         }
 
@@ -6182,7 +5428,10 @@ void exception_handler(int enumber) {
     printException(enumber);
     println();
 
-    exit(enumber);
+	if(enumber != EXCEPTION_PAGEFAULT)
+		if(enumber != EXCEPTION_OUTOFMEMORY)
+	   		exit(enumber);
+	
 }
 
 void fetch() {
@@ -6190,6 +5439,8 @@ void fetch() {
 }
 
 void execute() {
+	int debug_execute;
+	debug_execute = 0;
     if (debug)
         if (sourceLineNumber != (int*) 0) {
             print(binaryName);
@@ -6209,7 +5460,23 @@ void execute() {
         }
         print((int*) ": ");
     }
-
+    if(debug_execute){
+		print((int*)"ir: ");
+		print(itoa(ir, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"opcode: ");
+		print(itoa(opcode, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"function: ");
+		print(itoa(function, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"opcode: ");
+		print(itoa(opcode, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"function: ");
+		print(itoa(function, string_buffer, 10, 0, 0));
+		println();
+	}
     if (opcode == OP_SPECIAL) {
         if (function == FCT_NOP) {
             fct_nop();
@@ -6234,6 +5501,15 @@ void execute() {
         } else if (function == FCT_TEQ) {
             fct_teq();
         } else {
+		print((int*)"ir: ");
+		print(itoa(ir, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"opcode: ");
+		print(itoa(opcode, string_buffer, 10, 0, 0));
+		println();
+		print((int*)"function: ");
+		print(itoa(function, string_buffer, 10, 0, 0));
+		println();
             exception_handler(EXCEPTION_UNKNOWNINSTRUCTION);
         }
     } else if (opcode == OP_ADDIU) {
@@ -6263,38 +5539,39 @@ void execute() {
 }
 
 void run() {
-	
-	maxInstrPerContext = 10;
-	counterInstr = 0;
-	//restoreContext(kernelProcess);
+	halt = 0;
+	while(halt==0){
+ 	    fetch();
+		decode();
+		execute();
+		if((int)currProcess != (int)kernelProcess){
+		 	if(counterInstr == maxInstr){
+				saveUserState();
+				setKernelState();
+				print((int*)"\nbefore storeIPC(HYPERCALL_SWITCHCONTEXT)");
+		 		storeIPC(HYPERCALL_SWITCHCONTEXT, getUID(currProcess), (int)getRegisters(currProcess),
+		 					(int)getPageTable(currProcess));
+				counterInstr = 0;
+			}
+		} else {
+		   	counterInstr = counterInstr + 1;
+	   	}
+	}
     halt = 0;
 
-    while (halt == 0) {
-		if(kernelMode != 0){
-			if (counterInstr == maxInstrPerContext) {
-		   	     //switchToKernel();
-			} 
-		}	       
-        fetch();
-        decode();
-        execute();
-    }
-	
-    halt = 0;
-
-    //interpret = 0;
-    //debug     = 0;
+    interpret = 0;
+    debug     = 0;
 }
+
 
 void up_push(int value) {
     int vaddr;
-
     // allocate space for one value on the stack
     *(registers+REG_SP) = *(registers+REG_SP) - 4;
 
     // compute address
     vaddr = *(registers+REG_SP);
-
+	
     // store value
     storeMemory(vaddr, value);
 }
@@ -6337,7 +5614,6 @@ int up_copyString(int *s) {
 
 void up_copyArguments(int argc, int *argv) {
     int vaddr;
-
     up_push(argc);
 
     vaddr = up_malloc(argc * 4);
@@ -6356,9 +5632,7 @@ void up_copyArguments(int argc, int *argv) {
 
 void copyBinaryToMemory() {
     int a;
-
     a = 0;
-
     while (a < binaryLength) {
         storeMemory(a, loadBinary(a));
 
@@ -6498,7 +5772,6 @@ void disassemble() {
 }
 
 void emulate(int argc, int *argv) {
-		
     print(selfieName);
     print((int*) ": this is selfie's mipster executing ");
     print(binaryName);
@@ -6528,13 +5801,55 @@ void emulate(int argc, int *argv) {
     print(binaryName);
     println();
 
+    //print(selfieName);
+    //print((int*) ": profile: total,max(ratio%)@addr(line#),2max(ratio%)@addr(line#),3max(ratio%)@addr(line#)");
+    //println();
+    //printProfile((int*) ": calls: ", calls, callsPerAddress);
+    //printProfile((int*) ": loops: ", loops, loopsPerAddress);
+    //printProfile((int*) ": loads: ", loads, loadsPerAddress);
+    //printProfile((int*) ": stores: ", stores, storesPerAddress);
+}
+
+void emulateKernel(int argc, int *argv) {
+    interpret = 1;
+
     print(selfieName);
-    print((int*) ": profile: total,max(ratio%)@addr(line#),2max(ratio%)@addr(line#),3max(ratio%)@addr(line#)");
+    print((int*) ": this is selfie's mipster executing ");
+    print(binaryName);
+    print((int*) " with ");
+    print(itoa(memorySize / 1024 / 1024, string_buffer, 10, 0, 0));
+    print((int*) "MB of memory");
     println();
-    printProfile((int*) ": calls: ", calls, callsPerAddress);
-    printProfile((int*) ": loops: ", loops, loopsPerAddress);
-    printProfile((int*) ": loads: ", loads, loadsPerAddress);
-    printProfile((int*) ": stores: ", stores, storesPerAddress);
+
+    resetInterpreter();
+
+	readyQueue = initList();
+	createKernelProcess();
+
+	copyBinaryToMemory();
+
+	*(registers+REG_SP) = memorySize-4;
+	*(registers+REG_GP) = binaryLength;
+	*(registers+REG_K1) = *(registers+REG_GP);
+ 
+	up_copyArguments(argc, argv);
+
+    run();
+
+    println();
+    println();
+    print(selfieName);
+    print((int*) ": this is selfie's mipster terminating ");
+    print(binaryName);
+    println();
+
+   // print(selfieName);
+   // print((int*) ": profile: total,max(ratio%)@addr(line#),2max(ratio%)@addr(line#),3max(ratio%)@addr(line#)");
+   // println();
+   // printProfile((int*) ": calls: ", calls, callsPerAddress);
+   //printProfile((int*) ": loops: ", loops, loopsPerAddress);
+   // printProfile((int*) ": loads: ", loads, loadsPerAddress);
+   // printProfile((int*) ": stores: ", stores, storesPerAddress);
 }
 
 // -----------------------------------------------------------------
@@ -6544,7 +5859,7 @@ void emulate(int argc, int *argv) {
 int selfie(int argc, int* argv) {
     if (argc < 2)
         return -1;
-    else {
+	else {
         while (argc >= 2) {
             if (stringCompare((int*) *argv, (int*) "-c")) {
                 sourceName = (int*) *(argv+1);
@@ -6602,7 +5917,6 @@ int selfie(int argc, int* argv) {
 
                 if (binaryLength > 0) {
                     debug = 0;
-
                     emulate(argc, argv);
                 } else {
                     print(selfieName);
@@ -6636,9 +5950,24 @@ int selfie(int argc, int* argv) {
 
                 return 0;
             } else if (stringCompare((int*) *argv, (int*) "-k")) {
-                print(selfieName);
-                print((int*) ": selfie -k size ... not yet implemented");
-                println();
+                initMemory(atoi((int*) *(argv+1)) * MEGABYTE);
+
+                argc = argc - 1;
+                argv = argv + 1;
+
+                // pass binaryName as first argument replacing size
+                *argv = (int) binaryName;
+
+                if (binaryLength > 0) {
+                    debug = 0;
+                    emulateKernel(argc, argv);
+                } else {
+                    print(selfieName);
+                    print((int*) ": nothing to emulate");
+                    println();
+
+                    exit(-1);
+                }
 
                 return 0;
             } else
@@ -6650,35 +5979,24 @@ int selfie(int argc, int* argv) {
 }
 
 int main(int argc, int *argv) {
-      
     initLibrary();
-    //print((int*)"initLibrary\n");
 
-	//print((int*)"initScanner\n");
     initScanner();
     
-	//print((int*)"initRegister\n");
     initRegister();
-	
-	//print((int*)"initDecoder\n");
     initDecoder();
     
-	//print((int*)"initInterpreter\n");
     initInterpreter();
 
     selfieName = (int*) *argv;
-	println();
-	print((int*)selfieName);
-	println();
 
     argc = argc - 1;
     argv = argv + 1;
-    
 
-    if (selfie(argc, (int*) argv) != 0) {
+	if (selfie(argc, (int*) argv) != 0) {
         print(selfieName);
         print((int*) ": usage: selfie { -c source | -o binary | -s assembly | -l binary } [ -m size ... | -d size ... | -k size ... ] ");
         println();
     }
-   
 }
+
