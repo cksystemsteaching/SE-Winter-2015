@@ -97,8 +97,13 @@ void println();
 void printCharacter(int character);
 void printString(int *s);
 
-void exit(int code);
-int* malloc(int size);
+//void exit(int code);
+//int* malloc(int size);
+
+int* search(int* list, int key, int position);
+int* remove(int* list, int key, int position);
+void enqueue(int* list, int* node);
+int* dequeue(int* list);
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -652,7 +657,7 @@ int copyStringToBinary(int *s, int a);
 void emitGlobalsStrings();
 
 void emit();
-void load();
+void load(int fd);
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -672,6 +677,7 @@ int *sourceLineNumber = (int*) 0; // source line number per emitted instruction
 
 int *assemblyName = (int*) 0; // name of assembly file
 int assemblyFD    = 0;        // file descriptor of open assembly file
+
 
 // -----------------------------------------------------------------
 // --------------------------- SYSCALLS ----------------------------
@@ -694,6 +700,22 @@ void syscall_malloc();
 
 void emitPutchar();
 
+void emitYield();
+void syscall_yield();
+
+void emitLock();
+void syscall_lock();
+
+void emitUnlock();
+void syscall_unlock();
+
+void emitFork();
+void syscall_fork();
+
+void emitWait();
+void syscall_wait();
+
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int SYSCALL_EXIT   = 4001;
@@ -701,6 +723,87 @@ int SYSCALL_READ   = 4003;
 int SYSCALL_WRITE  = 4004;
 int SYSCALL_OPEN   = 4005;
 int SYSCALL_MALLOC = 5001;
+int SYSCALL_YIELD  = 5002;
+int SYSCALL_LOCK   = 5003;
+int SYSCALL_UNLOCK = 5004;
+int SYSCALL_FORK   = 5005;
+int SYSCALL_WAIT   = 5006;
+
+// -----------------------------------------------------------------
+// -------------------------- HYPERCALLS ---------------------------
+// -----------------------------------------------------------------
+
+void emitSwitch_context();
+void hypercall_switch_context();
+void switchToProcess(int pid);
+
+void emitMap_page_in_context();
+void hypercall_map_page_in_context();
+
+void emitFlush_page_in_context();
+void hypercall_flush_page_in_context();
+
+void emitCreate_context();
+void hypercall_create_context();
+
+void emitDelete_context();
+void hypercall_delete_context();
+
+void emitHalt();
+void hypercall_halt();
+
+// ------------------------ GLOBAL CONSTANTS -----------------------
+
+int HYPERCALL_SWITCH_CONTEXT   = 6001;
+int HYPERCALL_MAP_PAGE_IN_CONTEXT = 6002;
+int HYPERCALL_FLUSH_PAGE_IN_CONTEXT = 6003;
+int HYPERCALL_CREATE_CONTEXT = 6004;
+int HYPERCALL_DELETE_CONTEXT = 6005;
+int HYPERCALL_HALT = 6006;
+
+
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+// -----------------------------------------------------------------
+// ----------------------------   O S   ----------------------------
+// -----------------------------------------------------------------
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+
+// ------------------------ GLOBAL CONSTANTS -----------------------
+
+int OS_EVENT_SCHEDULE = 8001;
+int OS_EVENT_PAGE_FAULT = 8002;
+
+// ------------------------ GLOBAL VARIABLES -----------------------
+
+int* freelist = (int*) 0;
+int* readyQueue;
+int* blockingQueue;
+int* zombieQueue;
+int* lockHolder = (int*) 0;
+int* userProcessPageFrames;
+int spaceForUserPageFrames;
+int* communicationChunk;
+int* currentProcess;
+int notReady;
+
+// OS functions
+
+void executeOS(int argc, int* argv);
+void initOS();
+int* createProcess(int parentPid);
+int* palloc();
+void schedule();
+void handlePageFault();
+void handleExit();
+void handleLock();
+void handleUnlock();
+void handleFork();
+void handleWait();
+void freePageTable(int* pagetable);
+void pfree(int* page);
+int* copyCurrentProcess();
+void copyMemSpace(int* from, int* to, int size);
+
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -722,6 +825,7 @@ void storeMemory(int vaddr, int data);
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int MEGABYTE = 1048576;
+int KILOBYTE = 1024;
 
 // ------------------------ GLOBAL VARIABLES -----------------------
 
@@ -741,6 +845,45 @@ void initMemory(int bytes) {
 
     memory = malloc(memorySize);
 }
+
+// -----------------------------------------------------------------
+// ---------------------- PROCESS MANAGEMENT -----------------------
+// -----------------------------------------------------------------
+
+// ------------------------ GLOBAL CONSTANTS -----------------------
+
+int NROFPROCESSES = 100;
+
+// ------------------------ GLOBAL VARIABLES -----------------------
+
+int* processTable = (int*) 0;
+int* nextFreeProcess;
+int OSPid;
+int currentProcessPid;
+int binarylengthOfFirstProcess;
+int spaceForArgs;
+
+// ------------------------- INITIALIZATION ------------------------
+
+void initProcessTable() {
+	int i;
+
+    processTable = malloc(NROFPROCESSES * 3 * 4);
+	nextFreeProcess = processTable;
+	
+	i = 0;
+
+	while (i < 3 * NROFPROCESSES) {
+		*(processTable + i) = i + 3;
+		i = i + 3;
+	}
+
+	*(processTable + (i - 3)) = 0;
+}
+
+int allocateProcess();
+void freeProcess(int pid);
+
 
 // -----------------------------------------------------------------
 // ------------------------- INSTRUCTIONS --------------------------
@@ -785,7 +928,10 @@ int  up_malloc(int size);
 int  up_copyString(int *s);
 void up_copyArguments(int argc, int *argv);
 
-void copyBinaryToMemory();
+void passParameterToOS(int data, int offset);
+int getParameterFromOS(int offset);
+
+void copyBinaryToMemory(int offset);
 
 int addressWithMaxCounter(int *counters, int max);
 int fixedPointRatio(int a, int b);
@@ -795,6 +941,7 @@ void printProfile(int *message, int total, int *counters);
 
 void disassemble();
 void emulate(int argc, int *argv);
+
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -819,10 +966,12 @@ int *registers; // general purpose registers
 int pc = 0; // program counter
 int ir = 0; // instruction record
 
+int numberOfInstructions;
+
 int reg_hi = 0; // hi register for multiplication/division
 int reg_lo = 0; // lo register for multiplication/division
 
-int halt = 0; // flag for halting mipster
+//int halt = 0; // flag for halting mipster
 
 int interpret = 0;
 
@@ -969,7 +1118,7 @@ int stringCompare(int *s, int *t) {
 
     i = 0;
 
-    while (1)
+    while (1) 
         if (loadCharacter(s, i) == 0)
             if (loadCharacter(t, i) == 0)
                 return 1;
@@ -979,6 +1128,7 @@ int stringCompare(int *s, int *t) {
             i = i + 1;
         else
             return 0;
+
 }
 
 int atoi(int *s) {
@@ -1201,6 +1351,136 @@ void printString(int *s) {
     
     putCharacter(CHAR_DOUBLEQUOTE);
 }
+
+void printlist(int* list) {
+	int* head;
+
+	head = (int*) *list;	
+	println();
+	print((int*) "<===========================================>");
+	println();
+    while ((int) head != 0) {
+        print(itoa(*(head + 2), string_buffer, 10, 0, 0));
+		println();
+        head = (int*) *head;
+    }
+	print((int*) "<===========================================>");
+	println();
+}
+
+
+void enqueue(int* list, int* node) {
+	int* head;
+	
+	//print((int*) "Anfang enqueue"); //DEBUG
+	//println();
+	//printlist(readyQueue);
+
+	if((int) node == 0)
+		return;
+	if((int) list == 0)
+		return;
+	
+	*(node + 1) = 0;
+	*node = *list;
+
+	if (*list != 0) {
+		head = (int*) *list;
+		*(head + 1) = (int) node;
+	} 
+	
+	*list = (int) node;
+	
+    if (*(list + 1) == 0) {
+    	*(list + 1) = (int) node;
+    }
+
+	//print((int*) "Ende enqueue"); //DEBUG
+	//println();
+	//printlist(readyQueue);
+    
+}
+
+int* dequeue(int* list) {
+	int* tail;
+	int* previous;
+	
+	//print((int*) "Anfang dequeue"); //DEBUG
+	//println();
+	//printlist(readyQueue);
+
+	if ((int) list == 0)
+		return (int*) 0;
+	if ((int) *list == 0)
+		return (int*) 0;
+	
+	tail = (int*) *(list + 1);
+	previous = (int*) *(tail + 1);
+	
+	if ((int) previous != 0) {
+		*previous = 0;
+	} else {
+		*list = 0;
+	}
+	
+	*(list + 1) = (int) previous;
+
+	//print((int*) "Ende dequeue"); //DEBUG
+	//println();
+	//printlist(readyQueue);
+	
+	return tail;
+}
+
+// searches for element with specified data at specified position, returns pointer to found element or 0 if not found
+int* search(int* list, int key, int position) {
+    int* cursor;
+    
+    if (list == (int*) 0)
+    	return 0;
+    	
+    cursor = (int*) *(list + 1);
+
+    while ((int)cursor != 0) {
+        if (*(cursor + position) == key) {
+            return cursor;
+        }
+        cursor = (int*) *(cursor + 1);
+    }
+    
+    return (int*) 0;
+}
+
+// removes first (i.e. first inserted) entry with matching data, returns new head
+int* remove(int* list, int key, int position) {
+	int* node;
+	int* previous;
+	int* next;
+	
+	node = search(list, key, position);
+	
+	if (node == (int*) 0) {
+		return 0;
+	}
+	
+	previous = *(node + 1);
+	next = *node;
+	
+	if (previous != (int*) 0) {
+		*previous = next;
+	} else {
+		*list = next;
+	}
+	
+	if (next != (int*) 0) {
+		*(next + 1) = previous;
+	} else {
+		*(list + 1) = next;
+	}
+
+	return node;
+}
+
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -1467,7 +1747,7 @@ int getSymbol() {
 
         symbol = SYM_INTEGER;
 
-    } else if (character == CHAR_SINGLEQUOTE) {
+    } else if (character == CHAR_SINGLEQUOTE) {//TODO allow things like \n
         getCharacter();
 
         constant = 0;
@@ -3328,6 +3608,17 @@ void compile() {
     emitOpen();
     emitMalloc();
     emitPutchar();
+    emitYield();
+	emitLock();
+	emitUnlock();
+	emitFork();
+	emitWait();
+    emitSwitch_context();
+    emitMap_page_in_context();
+    emitFlush_page_in_context();
+    emitCreate_context();
+    emitDelete_context();
+    emitHalt();
 
     // parser
     gr_cstar();
@@ -3680,12 +3971,9 @@ void emit() {
     write(fd, binary, binaryLength);
 }
 
-void load() {
-    int fd;
+void load(int fd) {
     int numberOfReadBytes;
-
-    fd = open(binaryName, O_RDONLY, 0);
-
+	
     if (fd < 0) {
         print(selfieName);
         print((int*) ": could not open input file ");
@@ -3706,7 +3994,7 @@ void load() {
     print((int*) ": loading code from input file ");
     print(binaryName);
     println();
-
+    
     // read code length first
     numberOfReadBytes = read(fd, io_buffer, 4);
 
@@ -3718,7 +4006,8 @@ void load() {
 
         if (numberOfReadBytes > 0) {
             binaryLength = numberOfReadBytes;
-
+			
+			
             return;
         }
     }
@@ -3757,17 +4046,15 @@ void emitExit() {
 
 void syscall_exit() {
     int exitCode;
-
+   
     exitCode = *(registers+REG_A0);
 
     *(registers+REG_V0) = exitCode;
-
-    print(binaryName);
-    print((int*) ": exiting with error code ");
-    print(itoa(exitCode, string_buffer, 10, 0, 0));
-    println();
-
-    halt = 1;
+    
+    passParameterToOS(SYSCALL_EXIT, 0);	
+	passParameterToOS(currentProcessPid, 1);
+	passParameterToOS(exitCode, 2);
+	switchToProcess(OSPid);
 }
 
 void emitRead() {
@@ -3792,21 +4079,35 @@ void emitRead() {
 }
 
 void syscall_read() {
-    int count;
     int vaddr;
     int fd;
     int *buffer;
     int size;
+    int newSize;
+    int i;
+    
+    i = 0;
+    newSize = 0;
 
-    count = *(registers+REG_A2);
+    size = *(registers+REG_A2);
     vaddr = *(registers+REG_A1);
     fd    = *(registers+REG_A0);
 
-    buffer = memory + tlb(vaddr);
 
-    size = read(fd, buffer, count);
+    while (i < size / 4){
+			newSize = newSize + read(fd, memory + tlb(vaddr + i * 4), 4);
+			
+			i = i + 1;
+	}
+	
+    if (size % 4 != 0) {
+    	newSize = newSize + read(fd, memory + tlb(vaddr + i * 4), size % 4);
+    }
+	
+	
+	
 
-    *(registers+REG_V0) = size;
+    *(registers+REG_V0) = newSize;
 
     if (debug_read) {
         print(binaryName);
@@ -3840,21 +4141,32 @@ void emitWrite() {
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
-void syscall_write() {
+void syscall_write() {//TODO handle invalid vaddr (tlb returns -1), also in open and read
     int size;
     int vaddr;
     int fd;
     int *buffer;
-
+	int i;
+	int newSize;
+	
     size  = *(registers+REG_A2);
     vaddr = *(registers+REG_A1);
     fd    = *(registers+REG_A0);
+    
+	newSize = 0;
+	
+	i = 0;
+	
+	while (i < size / 4){
+		newSize = newSize + write(fd, memory + tlb(vaddr + i * 4), 4);
+		i = i + 1;
+	}
+	
+    if (size % 4 != 0) {
+    	newSize = newSize + write(fd, memory + tlb(vaddr + i * 4), size % 4);
+    }
 
-    buffer = memory + tlb(vaddr);
-
-    size = write(fd, buffer, size);
-
-    *(registers+REG_V0) = size;
+    *(registers+REG_V0) = newSize;
 
     if (debug_write) {
         print(binaryName);
@@ -3935,7 +4247,7 @@ void emitMalloc() {
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
-void syscall_malloc() {
+void syscall_malloc() {//ATTENTION: DO NOT ZERO!
     int size;
     int bump;
 
@@ -3946,9 +4258,10 @@ void syscall_malloc() {
 
     bump = *(registers+REG_K1);
 
-    if (bump + size >= *(registers+REG_SP))
+    if (bump + size >= *(registers+REG_SP)) {
         exception_handler(EXCEPTION_HEAPOVERFLOW);
-
+	}
+	
     *(registers+REG_K1) = bump + size;
     *(registers+REG_V0) = bump;
 
@@ -3980,6 +4293,856 @@ void emitPutchar() {
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
+void emitYield() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "yield", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_YIELD);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_yield() {
+    passParameterToOS(SYSCALL_YIELD, 0);	
+	passParameterToOS(currentProcessPid, 1);
+	switchToProcess(OSPid);
+}
+
+void emitLock() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "lock", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_LOCK);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_lock() {
+    passParameterToOS(SYSCALL_LOCK, 0);	
+	passParameterToOS(currentProcessPid, 1);
+	switchToProcess(OSPid);
+}
+
+void emitUnlock() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "unlock", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_UNLOCK);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_unlock() {
+    passParameterToOS(SYSCALL_UNLOCK, 0);	
+	passParameterToOS(currentProcessPid, 1);
+	switchToProcess(OSPid);
+}
+
+void emitFork() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "fork", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_FORK);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_fork() {
+	passParameterToOS(SYSCALL_FORK, 0);	
+	passParameterToOS(currentProcessPid, 1);
+	switchToProcess(OSPid);
+}
+
+void emitWait() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "wait", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0); // pid
+
+    // remove the argument from the stack
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_WAIT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_wait() {
+	int pid;
+
+	pid = *(registers+REG_A0);
+	
+    passParameterToOS(SYSCALL_WAIT, 0);	
+	passParameterToOS(currentProcessPid, 1);
+	passParameterToOS(pid, 2);
+	switchToProcess(OSPid);
+}
+
+
+// -----------------------------------------------------------------
+// -------------------------- HYPERCALLS ---------------------------
+// -----------------------------------------------------------------
+
+void switchToProcess(int pid) {
+	// save
+	*(processTable + currentProcessPid * 3) = pc;
+
+	// restore
+	pc = *(processTable + pid * 3);
+	
+	registers = (int*) *(processTable + pid * 3 + 1);
+	
+	currentProcessPid = pid;
+}
+
+void hypercall_switch_context() {
+	int pid;
+	int OSevent;
+	int* childRegisters;
+	int result;
+	
+	if (OSPid == currentProcessPid) {
+		pid = *(registers + REG_A0);
+		switchToProcess(pid);
+
+		OSevent = getParameterFromOS(0);	
+		
+		if (OSevent == SYSCALL_LOCK) {
+			if (getParameterFromOS(2) == 0) {
+				//when dequed from blocking queue process should again try to get lock
+				*(processTable + 3 * getParameterFromOS(1)) = *(processTable + 3 * getParameterFromOS(1)) - 4; 
+			}
+		} else if (OSevent == SYSCALL_FORK) {
+			*(registers + REG_V0) = getParameterFromOS(2);
+			if (*(registers + REG_V0) != -1) {
+				result = *(registers + REG_V0);
+				childRegisters = *(processTable + 3 * result + 1);
+				*(childRegisters + REG_V0) = 0;			
+			}
+		}
+		
+	} //TODO else
+
+}
+
+void emitSwitch_context() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "switch_context", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    
+	emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_SWITCH_CONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void hypercall_map_page_in_context() {
+	int pid;
+	int page;
+	int pageFrame;
+	int* pageTable;
+
+	if (OSPid == currentProcessPid) {
+		pid = *(registers + REG_A0);
+		page = *(registers + REG_A1);
+		pageFrame = *(registers + REG_A2);
+		pageTable = *(processTable + 3 * pid + 2);
+		*(pageTable + page) = pageFrame;
+	}
+}
+
+void emitMap_page_in_context() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "map_page_in_context", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    
+    emitIFormat(OP_LW, REG_SP, REG_A2, 0); // page frame
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0); // page 
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0); // pid
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_MAP_PAGE_IN_CONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void hypercall_flush_page_in_context() {
+	int pid;
+	int page;
+	int* pageTable;
+
+	if (OSPid == currentProcessPid) {
+		pid = *(registers + REG_A0);
+		page = *(registers + REG_A1);
+		
+		pageTable = *(processTable + 3 * pid + 2);
+		*(pageTable + page) = 0;
+	}
+}
+
+void emitFlush_page_in_context() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "flush_page_in_context", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0); // page 
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0); // pid
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_FLUSH_PAGE_IN_CONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void hypercall_create_context() {
+	int newPid;
+	int parentPid;
+	int i;
+	int* newRegisters;
+	int* newPageTable;
+	int* parentRegisters;
+	
+	parentPid = *(registers + REG_A0);
+	
+	newPid = allocateProcess();
+	
+	newRegisters = (int*) *(processTable + newPid * 3 + 1);
+	
+	if (newRegisters == 0) {
+		*(processTable + newPid * 3 + 1) = malloc(32 * 4);
+		newRegisters = (int*) *(processTable + newPid * 3 + 1);
+	}
+
+	if (parentPid == OSPid) {
+
+		*(processTable + newPid * 3) = 0; //set pc
+		i = 0;
+		while (i < 32) {
+			*(newRegisters + i) = 0;
+			i = i + 1;
+		}
+		*(newRegisters + REG_SP) = 4 * MEGABYTE - 4;
+		*(newRegisters + REG_K1) = binarylengthOfFirstProcess;
+		*(newRegisters + REG_GP) = binarylengthOfFirstProcess;
+	} else {
+		*(processTable + newPid * 3) = *(processTable + parentPid * 3) ; //set pc	
+
+		parentRegisters = *(processTable + 3 * parentPid + 1);
+		i = 0;
+		while (i < 32) {
+			*(newRegisters + i) = *(parentRegisters + i);
+			i = i + 1;
+		}
+	}
+	
+	newPageTable = *(processTable + newPid * 3 + 2);
+	if(newPageTable == 0) {
+		*(processTable + newPid * 3 + 2) = malloc(1024 * 4);
+		newPageTable = *(processTable + newPid * 3 + 2);
+	}
+
+	//set all mappings to 0 //TODO in fork: map all pages via map_page_in_context
+	i = 0;
+	while (i < 1024) {
+		*(newPageTable + i) = 0;
+		i = i + 1;
+	}
+	
+	*(registers + REG_V0) = newPid;
+}
+
+void emitCreate_context() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "create_context", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0); // parentPid
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_CREATE_CONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void hypercall_delete_context() {
+	int pid;
+	int* r;
+	
+	pid = *(registers + REG_A0);
+	r = *(processTable + pid * 3 + 1);
+	*r = -1;//TODO hack :D reg0 = -1, nötig?
+	
+	freeProcess(pid);
+}
+
+void emitDelete_context() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "delete_context", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0); // pid
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_DELETE_CONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void hypercall_halt() {
+	println();
+	print((int*) "Machine is shutting down.");
+	println();
+	exit(0);
+}
+
+void emitHalt() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "halt", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_HALT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+// -----------------------------------------------------------------
+// ----------------------------   O S   ----------------------------
+// -----------------------------------------------------------------
+// *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+
+void executeOS(int argc, int* argv) {
+	int event;
+	int callerPid;
+	
+	initOS(argc, argv);
+	
+	while (1) {
+	
+		event = *communicationChunk;
+		callerPid = *(communicationChunk + 1);
+		
+		if (event == OS_EVENT_SCHEDULE) {
+			schedule();			
+		} else if (event == OS_EVENT_PAGE_FAULT) {
+			handlePageFault();
+		} else if (event == SYSCALL_EXIT) {
+			handleExit();
+		} else if (event == SYSCALL_YIELD) {
+			schedule();
+		} else if (event == SYSCALL_LOCK) {
+			handleLock();
+		} else if (event == SYSCALL_UNLOCK) {
+			handleUnlock();
+			switch_context(*(currentProcess + 2));	
+		} else if (event == SYSCALL_FORK) {
+			handleFork();
+		} else if (event == SYSCALL_WAIT) {
+			handleWait();
+		} else {
+			switch_context(callerPid);//TODO does this make sense?
+		}
+
+	}
+}
+
+void initOS(int argc, int* argv) {
+	int* restOfPage;
+	int* firstProcess;
+	int i;
+	int pid;
+	int* pageTable;
+	int* nameOfFirstProcess;
+	int nrOfCodePages;
+	int* stackPage;
+	int next;
+	
+	communicationChunk = malloc(10 * 4);
+	
+	spaceForUserPageFrames = *communicationChunk;
+	
+	//set HP to begin of page frame
+	restOfPage = malloc(4096 - ((int) communicationChunk + 10) % 4096);
+	
+	spaceForUserPageFrames = (spaceForUserPageFrames / 4096) * 4096;
+	
+	userProcessPageFrames = malloc(spaceForUserPageFrames);
+	
+	//build freelist
+	freelist = userProcessPageFrames;
+    
+	i = 0;
+	next = (int) userProcessPageFrames + 4096;
+	
+	while (i < spaceForUserPageFrames / 4096 * 4096) {
+		*(userProcessPageFrames + i / 4) = next;
+		next = next + 4096;
+		i = i + 4096;
+	}
+	
+	*(userProcessPageFrames + (i - 4096) / 4) = 0;
+	
+	readyQueue = malloc(2 * 4);
+    *readyQueue = 0;
+    *(readyQueue + 1) = 0;
+    
+    blockingQueue = malloc(2 * 4);
+    *blockingQueue = 0;
+    *(blockingQueue + 1) = 0;
+
+	zombieQueue = malloc(2 * 4);
+    *zombieQueue = 0;
+    *(zombieQueue + 1) = 0;
+
+    firstProcess = createProcess(0); //0 is hard coded for OSPid
+    
+    if (firstProcess == 0) {
+		print((int*) "Not enough memory for page table of first process.");
+		*(communicationChunk + 2) = -1;
+		handleExit();	
+		halt();
+	}
+    
+    currentProcess = firstProcess;
+
+    pid = *(firstProcess + 2);
+    pageTable = (int*) *(firstProcess + 3);
+
+    //load first process
+	//fd = *(communicationChunk + 1);
+	nameOfFirstProcess = *argv;
+
+	nrOfCodePages = *(communicationChunk + 2);
+	
+	if(nrOfCodePages > 1024) {
+		print((int*) "Code of first process is greater than 4MB (maximal memory per process).");
+		halt();
+	}
+	
+	i = 0;
+	
+	while (i < nrOfCodePages) {
+		*(pageTable + i) = palloc();
+		
+		if (*(pageTable + i) == 0) {
+			print((int*) "Not enough memory for code of first process.");
+			*(communicationChunk + 2) = -1;
+			handleExit();			
+			halt();			
+		}
+		
+		map_page_in_context(pid, i, *(pageTable + i));
+		i = i + 1;
+	}
+	
+	load(open(nameOfFirstProcess, O_RDONLY, 0));
+
+    copyBinaryToMemory(userProcessPageFrames + 1024);
+	
+    //load args
+    *(pageTable + 1023) = palloc();//map one stack page
+    
+    if (*(pageTable + 1023) == 0) {
+		print((int*) "Not enough memory for first process.");
+		*(communicationChunk + 2) = -1;
+		handleExit();	
+		halt();
+	}
+    
+	map_page_in_context(pid, 1023, *(pageTable + 1023));
+	stackPage = *(pageTable + 1023);
+	
+	//*(stackPage + 1023) = *(communicationChunk + 3);//argc//TODO argumente auf stack legen 
+	
+	//i = 0;
+
+	//while (i < *(communicationChunk + 3)) {
+		//*(stackPage + (1022 - i)) = *(argv + (1 + i));
+		//i = i + 1;
+	//}
+	
+    switch_context(pid);
+}
+
+int* createProcess(int parentPid) {
+	//next
+	//prev
+	//pid
+	//page table
+	//children
+	//pid of child which is waited for
+
+	int* processEntry;
+	int* childrenlist; 	
+
+	processEntry = malloc(6 * 4);
+	*processEntry = 0;
+	*(processEntry + 1) = 0;
+	*(processEntry + 3) = palloc();
+	
+	if (*(processEntry + 3) == 0) {
+		return 0;
+	}
+	
+	*(processEntry + 2) = create_context(parentPid);
+	*(processEntry + 4) = malloc(2 * 4);
+	*(processEntry + 5) = 0;
+	
+	//enqueue(readyQueue, processEntry);
+	
+	childrenlist = *(processEntry + 4);
+	*(childrenlist) = 0;
+	*(childrenlist + 1) = 0;
+
+	return processEntry;
+}
+
+int* palloc() {
+	int* newPage;
+	int i;
+
+	if (freelist == 0) {
+		print((int*) "Physical memory full. Process with PID ");
+		print(itoa(*(currentProcess + 2), string_buffer, 10, 0, 0)); //TODO kill only child
+		print((int*) " killed.");
+		println();
+		//*(communicationChunk + 2) = -1;
+		//handleExit();
+		return 0;
+	}
+
+	newPage = freelist;
+
+	freelist = *freelist;
+
+	i = 0;
+
+	while (i < 1024) {
+		*(newPage + i) = 0;		
+		i = i + 1;
+	}
+
+	return newPage;
+}
+
+void schedule() {
+
+	if (notReady == 0) {
+		enqueue(readyQueue, currentProcess);
+	}	
+
+	notReady = 0;
+	currentProcess = dequeue(readyQueue);
+	
+	if (currentProcess == (int*) 0) {
+		if (*blockingQueue != 0) {
+			println();
+			print((int*) "all processes blocked :-(");
+			println();
+			println();
+		}
+		halt();
+	}
+	
+	switch_context(*(currentProcess + 2));
+}
+
+void handlePageFault() {
+	int page;
+	int* pageTable;
+	
+	page = *(communicationChunk + 2);
+	pageTable = *(currentProcess + 3);
+	
+	if (page > 1023) {
+		//kill currentProcess
+		print((int*) "Out of memory. Maximal memory size per process is 4MB.");
+		println();
+		*(communicationChunk + 2) = -1;
+		handleExit();
+		//schedule();
+		return;
+	}
+	
+	*(pageTable + page) = palloc();
+	
+	if (*(pageTable + page) == 0) {
+		*(communicationChunk + 2) = -1;
+		handleExit();
+		//schedule();
+	} else {
+		map_page_in_context(*(currentProcess + 2), page, *(pageTable + page));
+		switch_context(*(currentProcess + 2));
+	}
+	
+}
+
+void handleExit() {
+	int exitCode;
+	int* parent;
+	
+	exitCode = *(communicationChunk + 2); 
+
+	print((int*) "Process with PID ");
+	print(itoa(*(currentProcess + 2), string_buffer, 10, 0, 0));
+    print((int*) " exiting with error code ");
+    print(itoa(exitCode, string_buffer, 10, 0, 0));
+    println();
+    
+	handleUnlock(); //TODO test 
+
+	notReady = 1;
+    
+	parent = search(blockingQueue, *(currentProcess + 2), 5);
+
+	if (parent != (int*) 0) {
+		*(parent + 5) = 0;
+
+		remove(*(parent + 4), *(currentProcess + 2), 2);
+		remove(blockingQueue, *(parent + 2), 2);
+		enqueue(readyQueue, parent);
+	} else {
+		enqueue(zombieQueue, currentProcess);
+	} 
+   
+    freePageTable(*(currentProcess + 3));
+ 
+    delete_context(*(currentProcess + 2));
+    
+    schedule();
+}
+
+void freePageTable(int* pagetable) {
+	int i;	
+
+	i = 0;
+
+	while (i < 4 * KILOBYTE / 4) {
+		if (*(pagetable + i) != 0) {
+			pfree(*(pagetable + i));
+		}
+		
+		i = i + 1;
+	}	
+
+	pfree(pagetable);
+}
+
+void pfree(int* page) {
+	int remainder;
+
+	if (page > userProcessPageFrames + spaceForUserPageFrames / 4) {
+		print((int*) "Tried to free nonexistent pageframe.");		
+		return;
+	}
+
+	// get beginning of the page
+	remainder = ((int) page - (int) userProcessPageFrames) % (4 * KILOBYTE);
+	page = page - remainder / 4;
+
+	*page = freelist;
+	freelist = page;
+	
+	flush_page_in_context(*(currentProcess + 2), ((int) page - (int) userProcessPageFrames) / 4096);
+}
+
+void handleLock() {
+	if ((int) lockHolder == 0) {
+		lockHolder = currentProcess;
+		*(communicationChunk + 2) = 1;
+		switch_context(*(currentProcess + 2));
+	} else {
+		notReady = 1;
+		enqueue(blockingQueue, currentProcess);
+		*(communicationChunk + 2) = 0;
+		schedule();
+	}
+}
+
+void handleUnlock() {
+	int* nextProcess;
+
+	if (*(currentProcess + 2) == *(lockHolder + 2)) {
+		lockHolder = (int*) 0;
+
+		nextProcess = remove(blockingQueue, 0, 5);
+	
+		if (nextProcess != 0)
+			enqueue(readyQueue, nextProcess);
+	}
+}
+
+void handleFork() {
+	int* child;
+	int* childRegisters;
+	int* childElement;
+
+	child = copyCurrentProcess();
+	
+	if (child == (int*) 0) {
+    	*(communicationChunk + 2) = -1;
+		switch_context(*(currentProcess + 2));
+		return;
+	}
+	
+	childElement = malloc(3 * 4);
+	*childElement = 0;
+	*(childElement + 1) = 0;
+	*(childElement + 2) = *(child + 2);
+
+	enqueue((int*) *(currentProcess + 4), childElement);
+
+	//*(child + 2) = *(child + 2) + 4;
+
+	enqueue(readyQueue, child);
+
+	*(communicationChunk + 2) = *(child + 2);
+	
+	switch_context(*(currentProcess + 2));
+}
+
+int* copyCurrentProcess() {
+	int* child;
+	int* pagetableToCopy;
+	int* newPagetable;
+	int* listEntry;
+	int i;
+
+	child = createProcess(*(currentProcess + 2));
+
+	if (child == 0) {
+		return 0;
+	}
+
+	newPagetable = *(child + 3);
+
+	pagetableToCopy = (int*) *(currentProcess + 3);
+	//child = malloc(6 * 4);
+
+	//*child = 0;
+	//*(child + 1) = 0;
+	//*(child + 2) = create_context();
+	//*(child + 3) = newPagetable;
+	//*(child + 4) = malloc(2 * 4);
+	//*(child + 5) = 0;
+
+	//listEntry = *(child + 4);
+	//*listEntry = 0;
+	//*(listEntry + 1) = 0;
+
+	i = 0;
+
+	while (i < 4 * KILOBYTE / 4) {
+		if (*(pagetableToCopy + i) != 0) {
+			*(newPagetable + i) = palloc();
+
+			if (*(newPagetable + i) == 0) {
+				freePageTable(newPagetable);
+				return 0;
+			}
+
+			map_page_in_context(*(child + 2), i, *(newPagetable + i));
+
+			copyMemSpace(*(pagetableToCopy + i), *(newPagetable + i), 4 * KILOBYTE / 4);
+		}
+
+		i = i + 1; 
+	}
+
+	return child;
+}
+
+void copyMemSpace(int* from, int* to, int size) {
+
+	size = size - 1;
+
+	while (size >= 0) {
+		*(to + size) = *(from + size);
+	
+		size = size - 1;
+	}
+}
+
+
+void handleWait() {
+	int pid;
+	int* childEntry;
+	
+	pid = *(communicationChunk + 2);
+	
+	childEntry = search(*(currentProcess + 4), pid, 2);
+	
+	if (childEntry == (int*) 0) {
+		switch_context(*(currentProcess + 2));
+		return;
+	}
+	
+	childEntry = search(zombieQueue, pid, 2);
+	
+	if (childEntry != (int*) 0) {
+		remove(*(currentProcess + 4), pid, 2);
+		remove(zombieQueue, pid, 2);
+		switch_context(*(currentProcess + 2));
+		return;
+	}
+	
+	*(currentProcess + 5) = pid;
+	notReady = 1;
+	//*(currentProcess + 2) = pc + 4;
+	enqueue(blockingQueue, currentProcess);
+
+	schedule();
+}
+
+
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -3991,27 +5154,113 @@ void emitPutchar() {
 // -----------------------------------------------------------------
 
 int tlb(int vaddr) {
-    if (vaddr % 4 != 0)
+	int* pagetable;
+	int* pageTableEntry;
+	
+    if (vaddr % 4 != 0){
         exception_handler(EXCEPTION_ADDRESSERROR);
+    }  
+    
+    if (interpret == 0)
+		return vaddr / 4;
+		
+	pagetable = (int*) *(processTable + (currentProcessPid * 3 + 2));
+	
+	if (currentProcessPid == OSPid) {
+		if (vaddr < 0) { 
+			print((int*) "Segmentation fault");
+			exit(-1);
+		} else if (vaddr >= memorySize) {
+			print((int*) "Segmentation fault");
+			exit(-1);
+		}
+		return vaddr / 4;		
+	} 
+	
+	if (vaddr < 0) { 
+		print((int*) "Segmentation fault");
+		//syscall_exit();//TODO kill only current process
+		//return -1;
+		exit(-1);
+	} else if (vaddr >= 4 * MEGABYTE) {
+		print((int*) "Segmentation fault");
+		//syscall_exit();//TODO kill only current process
+		//return -1;
+		exit(-1);
+	}
 
-    // physical memory is word-addressed for lack of byte-sized data type
-    return vaddr / 4;
+	pageTableEntry = pagetable + vaddr / (4 * KILOBYTE);
+
+	if (*pageTableEntry == 0) {
+		//print((int*) "page fault"); //DEBUG
+		//println();
+		// page fault
+		//switch to OS pager
+		passParameterToOS(OS_EVENT_PAGE_FAULT, 0);
+		passParameterToOS(currentProcessPid, 1);
+		passParameterToOS(vaddr / (4 * KILOBYTE), 2);
+		
+		pc = pc - 4;//TODO correct?
+		switchToProcess(OSPid);
+		return -1;
+		//OSregisters = *(processTable + (OSPid * 3 + 1));
+		//*pageTableEntry = *(OSregisters + REG_V0);//TODO geht das wirklich so oder sollt ma lieber wieder communicationChunk verwenden?
+		//*pageTableEntry = palloc();
+		//if(*pageTableEntry == 0)//TODO kill process in os if no memory left
+			//TODO invoke scheduler
+			//return -1; //hierarchie raufgehen bis run()
+		
+	}
+
+	return (*pageTableEntry + vaddr % (4 * KILOBYTE)) / 4;
 }
 
 int loadMemory(int vaddr) {
     int paddr;
-
+	int returnValue;
+	
     paddr = tlb(vaddr);
-
-    return *(memory + paddr);
+    
+    if (paddr == -1) {
+    	return -1;
+    }
+    
+	return *(memory + paddr);	
 }
 
 void storeMemory(int vaddr, int data) {
     int paddr;
 
     paddr = tlb(vaddr);
+    
+    if (paddr == -1) {//ATTENTION
+    	return;
+    }
 
     *(memory + paddr) = data;
+}
+
+// -----------------------------------------------------------------
+// ---------------------- PROCESS MANAGEMENT -----------------------
+// -----------------------------------------------------------------
+
+int allocateProcess() {
+	int newPid;
+
+	if (nextFreeProcess == 0) {
+		// TODO: kill user process -> keep second counter in OS!
+		exit(-1); //if still here, shut down machine
+	}
+
+	newPid = ((int) nextFreeProcess - (int) processTable) / 3 / 4; //korrekt???
+	nextFreeProcess = processTable + *nextFreeProcess;
+
+	return newPid;
+}
+
+void freeProcess(int pid) {
+	*(processTable + 3 * pid) = ((int) nextFreeProcess - (int) processTable) / 4;
+	nextFreeProcess = processTable + 3 * pid;//TODO correct?
 }
 
 // -----------------------------------------------------------------
@@ -4019,12 +5268,16 @@ void storeMemory(int vaddr, int data) {
 // -----------------------------------------------------------------
 
 void fct_syscall() {
+
     if (debug) {
         printFunction(function);
         println();
     }
 
     if (interpret) {
+    
+    	pc = pc + 4;
+    	
         if (*(registers+REG_V0) == SYSCALL_EXIT) {
             syscall_exit();
         } else if (*(registers+REG_V0) == SYSCALL_READ) {
@@ -4035,11 +5288,32 @@ void fct_syscall() {
             syscall_open();
         } else if (*(registers+REG_V0) == SYSCALL_MALLOC) {
             syscall_malloc();
+        } else if (*(registers+REG_V0) == SYSCALL_YIELD) {
+            syscall_yield();
+        } else if (*(registers+REG_V0) == SYSCALL_LOCK) {
+            syscall_lock();
+        } else if (*(registers+REG_V0) == SYSCALL_UNLOCK) {
+            syscall_unlock();
+        } else if (*(registers+REG_V0) == SYSCALL_FORK) {
+            syscall_fork();
+        } else if (*(registers+REG_V0) == SYSCALL_WAIT) {
+            syscall_wait();
+        } else if (*(registers+REG_V0) == HYPERCALL_SWITCH_CONTEXT) {
+            hypercall_switch_context();
+        } else if (*(registers+REG_V0) == HYPERCALL_MAP_PAGE_IN_CONTEXT) {
+            hypercall_map_page_in_context();
+        } else if (*(registers+REG_V0) == HYPERCALL_FLUSH_PAGE_IN_CONTEXT) { 
+            hypercall_flush_page_in_context();
+        } else if (*(registers+REG_V0) == HYPERCALL_CREATE_CONTEXT) {
+            hypercall_create_context();
+        } else if (*(registers+REG_V0) == HYPERCALL_DELETE_CONTEXT) {
+            hypercall_delete_context();
+        } else if (*(registers+REG_V0) == HYPERCALL_HALT) {
+            hypercall_halt();
         } else {
             exception_handler(EXCEPTION_UNKNOWNSYSCALL);
         }
 
-        pc = pc + 4;
     }
 }
 
@@ -4530,9 +5804,7 @@ void op_lw() {
 
     if (interpret) {
         vaddr = *(registers+rs) + signExtend(immediate);
-
         *(registers+rt) = loadMemory(vaddr);
-
         // keep track of number of loads
         loads = loads + 1;
 
@@ -4748,13 +6020,13 @@ void execute() {
         op_addiu();
     } else if (opcode == OP_LW) {
         op_lw();
-    } else if (opcode == OP_SW) {
+    } else if (opcode == OP_SW) {    
         op_sw();
     } else if (opcode == OP_BEQ) {
         op_beq();
-    } else if (opcode == OP_BNE) {
+    } else if (opcode == OP_BNE) {        			    		
         op_bne();
-    } else if (opcode == OP_JAL) {
+    } else if (opcode == OP_JAL) {        			    		
         op_jal();
     } else if (opcode == OP_J) {
         op_j();
@@ -4764,25 +6036,37 @@ void execute() {
 
     if (interpret == 0) {
         if (pc == codeLength - 4)
-            halt = 1;
+            //halt = 1;
+            exit(0);
         else
             pc = pc + 4;
     }
 }
 
 void run() {
-    halt = 0;
+    //halt = 0;
+	int nrOfInstr;
 
-    while (halt == 0) {
+	nrOfInstr = numberOfInstructions;
+    while (nrOfInstr > 0) {
+    
+    
+    	if(currentProcessPid != OSPid) {
+        	nrOfInstr = nrOfInstr - 1;
+			
+		}
+	
         fetch();
+        if(ir == -1)
+        	return;
         decode();
         execute();
     }
 
-    halt = 0;
+    //halt = 0;
 
-    interpret = 0;
-    debug     = 0;
+    //interpret = 0;
+    //debug     = 0;
 }
 
 void up_push(int value) {
@@ -4802,6 +6086,11 @@ int up_malloc(int size) {
     *(registers+REG_A0) = size;
 
     syscall_malloc();
+    
+    if(size % 4 != 0)
+    	size = size + 4 - size % 4;
+    
+    spaceForArgs = spaceForArgs + size;
 
     return *(registers+REG_V0);
 }
@@ -4836,7 +6125,7 @@ int up_copyString(int *s) {
 
 void up_copyArguments(int argc, int *argv) {
     int vaddr;
-
+    
     up_push(argc);
 
     vaddr = up_malloc(argc * 4);
@@ -4853,13 +6142,33 @@ void up_copyArguments(int argc, int *argv) {
     }
 }
 
-void copyBinaryToMemory() {
+void passParameterToOS(int data, int offset) {
+	int* OSregisters;
+	int* begin;
+	
+	OSregisters = *(processTable + 3 * OSPid + 1);
+	begin = memory + (*(OSregisters + REG_GP) + spaceForArgs + 952) / 4;//don't ask...
+
+	*(begin + offset) = data;
+}
+
+int getParameterFromOS(int offset) {
+	int* OSregisters;
+	int* begin;
+	
+	OSregisters = *(processTable + 3 * OSPid + 1);
+	begin = memory + (*(OSregisters + REG_GP) + spaceForArgs + 952) / 4;//don't ask...
+
+	return *(begin + offset);
+}
+
+void copyBinaryToMemory(int offset) {
     int a;
 
     a = 0;
 
     while (a < binaryLength) {
-        storeMemory(a, loadBinary(a));
+        storeMemory(offset + a, loadBinary(a));
 
         a = a + 4;
     }
@@ -4986,17 +6295,27 @@ void disassemble() {
     interpret = 0;
     debug     = 1;
 
-    copyBinaryToMemory();
+    copyBinaryToMemory(0);
     
     resetInterpreter();
 
-    run();
+    run();//TODO does this still work?
+    
+    debug = 0;
 
     outputName = (int*) 0;
     outputFD   = 1;
 }
 
 void emulate(int argc, int *argv) {
+	//int* nameOfFirstProcess;
+	int spaceForUserPageFrames; 
+	int processesLeft;
+	int nrOfMappingsForFirstProcess;
+	int i;
+	int kernelArgc;// 2 + argcFirstProcess
+	int* kernelArgv;//selfie1.mips -k argvfirstProcess (nameOfFirstProcess in argv!)
+		
     print(selfieName);
     print((int*) ": this is selfie's mipster executing ");
     print(binaryName);
@@ -5007,7 +6326,28 @@ void emulate(int argc, int *argv) {
 
     interpret = 1;
 
-    copyBinaryToMemory();
+	initProcessTable();
+
+	// 1. create context0 for OS-process
+	OSPid = allocateProcess();
+	*(processTable + OSPid * 3) = 0;
+	*(processTable + OSPid * 3 + 1) = (int) registers;
+	*(processTable + OSPid * 3 + 2) = 0;
+
+	currentProcessPid = OSPid;
+	
+	//nameOfFirstProcess = binaryName;
+	
+	binarylengthOfFirstProcess = binaryLength;
+
+	//write current content of binary to file
+	emit();
+	
+	binaryName = (int*) "selfie1.mips";
+
+	load(open(binaryName, O_RDONLY, 0));	
+
+    copyBinaryToMemory(0);
 
     resetInterpreter();
 
@@ -5016,11 +6356,61 @@ void emulate(int argc, int *argv) {
     *(registers+REG_GP) = binaryLength; // initialize global pointer
 
     *(registers+REG_K1) = *(registers+REG_GP); // initialize bump pointer
+    
 
-    up_copyArguments(argc, argv);
+	kernelArgc = argc + 2;//nur strings so mitgeben?
+	kernelArgv = malloc((2+argc)*4);
+	*kernelArgv = (int) binaryName;
+	*(kernelArgv + 1) = "-k";
+	//*(kernelArgv + 2) = nameOfFirstProcess;
+	i = 2;
+	while ((i - 2) < argc) {
+		*(kernelArgv + i) = *(argv + i - 2);
+		i = i + 1;
+	}
 
-    run();
+    up_copyArguments(kernelArgc, kernelArgv);
+	//up_copyArguments(1, argv);//wrong name //TODO
+	
+    spaceForUserPageFrames = memorySize - 4 - binaryLength - 4 * 1024 * 50;
+    
+    nrOfMappingsForFirstProcess = binarylengthOfFirstProcess / 4096;
+    
+    if(binarylengthOfFirstProcess % 4096 != 0)
+    	nrOfMappingsForFirstProcess = nrOfMappingsForFirstProcess + 1;
+    	
+	//fd =open(nameOfFirstProcess, O_RDONLY, 0);//PROBLEM
+		
+    //print(itoa(fd, string_buffer, 10, 0, 0));
+    
+    passParameterToOS(spaceForUserPageFrames, 0);
+	//passParameterToOS(nameOfFirstProcess, 1);	
+	passParameterToOS(nrOfMappingsForFirstProcess, 2);
+	passParameterToOS(argc, 3);
 
+	//maximal 6 commandline args
+	//i = 4;
+	//while (i < 10) {
+		//passParameterToOS(*(argv + i - 4), i);
+		//i = i + 1;
+	//}
+
+	switchToProcess(OSPid); //init OS
+
+	run();
+
+	while (1) {
+	
+		if (currentProcessPid != OSPid) { //otherwise there was a trap
+			passParameterToOS(OS_EVENT_SCHEDULE, 0);	
+			passParameterToOS(currentProcessPid, 1);
+			switchToProcess(OSPid); 
+		}
+    	run();
+	}
+	
+	interpret = 0;
+	
     print(selfieName);
     print((int*) ": this is selfie's mipster terminating ");
     print(binaryName);
@@ -5035,18 +6425,30 @@ void emulate(int argc, int *argv) {
     printProfile((int*) ": stores: ", stores, storesPerAddress);
 }
 
+
 // -----------------------------------------------------------------
 // ----------------------------- MAIN ------------------------------
 // -----------------------------------------------------------------
 
 int selfie(int argc, int* argv) {
-    if (argc < 2)
+	//if (argc == 0) {   
+		//print(selfieName);
+        //print((int*) ": loading kernel :-D");
+        //println();
+        
+		//executeOS();
+
+        //return 0;
+	//} else
+	if (argc < 2) {
         return -1;
-    else {
+	} else {
+		numberOfInstructions = 10000;
+		
         while (argc >= 2) {
             if (stringCompare((int*) *argv, (int*) "-c")) {
                 sourceName = (int*) *(argv+1);
-                binaryName = sourceName;
+                binaryName = "a.out";
 
                 argc = argc - 2;
                 argv = argv + 2;
@@ -5067,6 +6469,7 @@ int selfie(int argc, int* argv) {
                     println();
                 }
             } else if (stringCompare((int*) *argv, (int*) "-s")) {
+            	numberOfInstructions = codeLength;
                 assemblyName = (int*) *(argv+1);
 
                 argc = argc - 2;
@@ -5088,7 +6491,7 @@ int selfie(int argc, int* argv) {
                 argc = argc - 2;
                 argv = argv + 2;
 
-                load();
+                load(open(binaryName, O_RDONLY, 0));
             } else if (stringCompare((int*) *argv, (int*) "-m")) {
                 initMemory(atoi((int*) *(argv+1)) * MEGABYTE);
 
@@ -5134,11 +6537,14 @@ int selfie(int argc, int* argv) {
 
                 return 0;
             } else if (stringCompare((int*) *argv, (int*) "-k")) {
+            	argc = argc - 1;
+                argv = argv + 1;
+                
                 print(selfieName);
-                print((int*) ": selfie -k size ... not yet implemented");
-                println();
-
-                return 0;
+        		print((int*) ": loading kernel :-D");
+        		println();
+                
+                executeOS(argc, argv);
             } else
                 return -1;
         }
@@ -5148,7 +6554,7 @@ int selfie(int argc, int* argv) {
 }
 
 int main(int argc, int *argv) {
-    initLibrary();
+	initLibrary();
 
     initScanner();
     
@@ -5164,7 +6570,7 @@ int main(int argc, int *argv) {
 
     if (selfie(argc, (int*) argv) != 0) {
         print(selfieName);
-        print((int*) ": usage: selfie { -c source | -o binary | -s assembly | -l binary } [ -m size ... | -d size ... | -k size ... ] ");
+        print((int*) ": usage: selfie { -c source | -o binary | -s assembly | -l binary } [ -m size ... | -d size ... ] ");
         println();
     }
 }
