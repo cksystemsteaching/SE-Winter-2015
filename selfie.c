@@ -5889,7 +5889,7 @@ void run() {
 		if (kernel_mode == 0)
 			instrCount = instrCount + 1;
 
-		if (instrCount == 4) {
+		if (instrCount == 3) {
 			trap(HYPERCALL_SWITCH_CONTEXT, -1);
 			instrCount = 0;
 		}
@@ -6237,6 +6237,27 @@ void kernel(int argc, int* argv) {
 
 }
 
+int continueInSearch(int a, int *b) {
+	int c;
+	int d;
+
+	if (a == LOCK_BLOCK) {
+		c = 1;
+	} else {
+		c = 0;
+	}
+
+	if ((int) b == 0) {
+		d = 0;
+		return 0;
+	} else {
+		d = 1;
+	}
+
+	return c;
+}
+
+
 
 void kernel_event_loop() {
 	int* sharedMemory;
@@ -6359,7 +6380,7 @@ void kernel_event_loop() {
 			unblockedProcess = osBlockedQueue;
 
 			if ((int) unblockedProcess != 0) {
-				while (*(unblockedProcess + 4) != LOCK_BLOCK) {
+				while (continueInSearch(*(unblockedProcess + 4), unblockedProcess)) {
 					unblockedProcess = *(unblockedProcess + 3);
 				}
 			}
@@ -6421,12 +6442,7 @@ void kernel_event_loop() {
 				}
 
 				osBlockedQueue = osBlockProcess(osCurrentProcess, WAIT_FOR_CHILD_BLOCK, waitForPID);
-
-				printNumber(getListLength(osProcessList, 3));
-
 				osProcessList = osDeleteProcess(osCurrentProcess, osProcessList);
-
-				printNumber(getListLength(osProcessList, 3));
 			} else {
 				waitForProcess = osFindProcess(waitForPID, osZombieQueue);
 
@@ -6552,6 +6568,10 @@ void kernel_event_loop() {
 			osCurrentProcess = osFindProcess(callerPid, osProcessList);
 
 			switch_context(callerPid);
+		}
+
+		if (getListLength(osProcessList, 3) == 0) {
+			stop = 1;
 		}
 	}
 }
