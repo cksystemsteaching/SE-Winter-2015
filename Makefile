@@ -1,16 +1,17 @@
 CFLAGS=-g
 LDFLAGS=
 CC=/usr/bin/gcc
-
-default: a6
-
-a6: selfie
-	./build.sh
+PAGER=more
+default: selfie
 
 
 
 selfie: selfie.c
+	cat README 
 	$(CC) $(CFLAGS) $< -o selfie
+	./selfie -c init.c -o init
+	./selfie -c kernel.c -k 64 init
+
 
 
 %.o: %c

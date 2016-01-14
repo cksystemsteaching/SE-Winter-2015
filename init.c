@@ -1,7 +1,16 @@
-int main() { 
-   int a; 
-   a = 0; 
-   while(a < 10) {
-        a = a + 1; 
-   }
+int main() {
+    int a;
+
+    a = fork();
+
+    if (a == 0) {
+        putchar('f');
+        putchar('o');
+        putchar('r');
+        putchar('k');
+        putchar(10);
+    } else {
+        wait(a);
+    }
+    exit(9);
 }
