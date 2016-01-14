@@ -18,21 +18,31 @@ int main() {
 
   pid = fork();
 
-  if( pid == 0) {
+  lock();
 
-    pid = fork()
+  putchar('l');
+  putchar('o');
+  putchar('c');
+  putchar('k');
 
-    if ( pid == 0) {
+  unlock();
 
-      yield();
+  if (pid > 0) {
+	wait(pid);
 
-      exit(20);
-    }
+	putchar('z');
 
-    yield();
-    exit(10);
+	exit(7);
+  } else {
+
+        putchar('k');
+        putchar('k');
+        putchar('k');
+        putchar('k');
+        putchar('k');
+        putchar('k');
+        putchar('k');
+
+  	exit(5);
   }
-
-  exit(5);
-
 }

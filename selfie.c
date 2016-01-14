@@ -690,6 +690,8 @@ int kernelCodeLength = 0; // length of code portion of kernel binary in bytes
 
 int *kernelBinaryName = (int*) 0; // file name of kernel binary
 
+int* lockOwner = (int*) 0;
+
 // -----------------------------------------------------------------
 // --------------------------- SYSCALLS ----------------------------
 // -----------------------------------------------------------------
@@ -723,6 +725,9 @@ void syscall_wait();
 void emitLock();
 void syscall_lock();
 
+void emitUnlock();
+void syscall_unlock();
+
 void emitYield();
 void syscall_yield();
 
@@ -739,6 +744,7 @@ int SYSCALL_FORK = 4006;
 int SYSCALL_WAIT = 4007;
 int SYSCALL_LOCK = 4008;
 int SYSCALL_YIELD = 4009;
+int SYSCALL_UNLOCK = 4010;
 
 int PAGE_FAULT = 6001;
 
@@ -747,6 +753,9 @@ int HYPERCALL_SWITCH_CONTEXT = 7002;
 int HYPERCALL_MAP_PAGE_IN_CONTEXT = 7004;
 int DEL_CTXT = 7004;
 int FLUSH_PAGE = 7005;
+
+int LOCK_BLOCK = 8001;
+int WAIT_FOR_CHILD_BLOCK = 8002;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -791,8 +800,18 @@ int* context_getNext(int* node);
 int context_getPID(int* node);
 
 int* osCreateProcess(int pid, int* prev, int* next);
+int* osProcessReady(int* unblockedProcess);
 int* osDeleteProcess(int* node, int* processList);
 int* osFindProcess(int pid, int* processList);
+
+int* osBlockedQFindProcess(int pid);
+int* osBlockedQFindProcessByReason(int pid, int reason);
+
+int* osBlockProcess(int* process, int reason, int arg);
+int* osUnBlockProcess(int pid);
+
+int* osZombifyProcess(int pid);
+int* osUnzombifyProcess(int pid);
 
 // -----------------------------------------------------------------
 // ------------------------- PAGE TABLE ---------------------------
@@ -803,10 +822,13 @@ void pagetable_setAddrAtIndex(int* pagetable, int idx, int data);
 
 int* pagetable_create();
 
+void copyPageFrame(int* oldFrame, int* newFrame);
+
 // -----------------------------------------------------------------
 // -------------------- Emulator Helper Functions ------------------
 // -----------------------------------------------------------------
 
+int* scheduleNextContext(int* list, int contextId);
 void saveContext();
 void restoreContext(int contextId);
 int createKernelContext();
@@ -837,13 +859,15 @@ int memorySize = 0; // size of memory in bytes
 
 int *memory = (int*) 0; // mipster memory
 
-int *context_lists = (int*) 0; // List of contexts
+int *osProcessList = (int*) 0; // List of contexts
+int *osBlockedQueue = (int*) 0;
+int *osZombieQueue = (int*) 0;
 
 int nextFreeContextId = 0;
 
 int* current_page_table;
 
-int* current_context;
+int* osCurrentProcess;
 
 int kernel_mode; // Set to true because we boot into the kernel mode
 
@@ -3496,6 +3520,7 @@ void compile() {
 	emitPMem();
 	emitFork();
 	emitLock();
+	emitUnlock();
 	emitWait();
 	emitYield();
 
@@ -3963,8 +3988,8 @@ void kernel(int argc, int* argv);
 void kernel_event_loop();
 void trap(int hypercallId, int argument);
 
-int* kernel_current_proc = (int*) 0;
-int* kernel_process_list = (int*) 0;
+int* kernelCurrentContext = (int*) 0;
+int* kernelProcessList = (int*) 0;
 
 int kernelPC = 0;
 
@@ -3978,7 +4003,13 @@ int kernelPC = 0;
 // --------------------------- SYSCALLS ----------------------------
 // -----------------------------------------------------------------
 
-int length_list(int* list) {
+void shout() {
+	println();
+	print((int*) "I'm process with PID: ");
+	printNumber(*osCurrentProcess);
+}
+
+int getListLength(int* list, int next) {
 	int* cursor;
 	int count;
 
@@ -3987,10 +4018,33 @@ int length_list(int* list) {
 
 	while ((int) cursor != 0) {
 		count = count + 1;
-		cursor = context_getNext(cursor);
+		cursor = *(cursor + next);
 	}
 
 	return count;
+}
+
+void printList(int* list) {
+        int* cursor;
+
+        cursor = list;
+
+	print((int*) "PRINT LIST");
+	println();
+	print((int*) "--------------");
+	println();
+
+        while (*cursor != 0) {
+		print((int*) "PID: ");
+		printNumber(*cursor);
+
+		cursor = cursor + 1;
+        }
+}
+
+void printNumber (int nr) {
+	print(itoa(nr, string_buffer, 10, 0, 0));
+	println();
 }
 
 void emitExit() {
@@ -4015,12 +4069,13 @@ void emitExit() {
 }
 
 void syscall_exit() {
+	int* waitingProcess;
 	int exitCode;
 
 	exitCode = *(registers + REG_A0);
 	*(registers + REG_V0) = exitCode;
 
-	if (context_getPID(current_context) == 0) {
+	if (context_getPID(osCurrentProcess) == 0) {
 		halt = 1;
 	}
 
@@ -4316,7 +4371,7 @@ void syscall_fork() {
 	*(registers + REG_V0) = childPID;
 	*(childRegisters + REG_V0) = 0;
 
-	kernel_process_list = contextInsert(childPID, childPC, childRegisters, childPageTable, kernel_process_list, (int*) 0);
+	kernelProcessList = contextInsert(childPID, childPC, childRegisters, childPageTable, kernelProcessList, (int*) 0);
 
 	nextFreeContextId = nextFreeContextId + 1;
 
@@ -4341,7 +4396,7 @@ void emitWait() {
 }
 
 void syscall_wait() {
-
+	trap(SYSCALL_WAIT, *(registers+REG_A0));
 }
 
 void emitLock() {
@@ -4356,11 +4411,28 @@ void emitLock() {
 	emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
 
 	emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
-
 }
 
 void syscall_lock() {
+	trap(SYSCALL_LOCK, -1);
+}
 
+void emitUnlock() {
+        createSymbolTableEntry(GLOBAL_TABLE, (int*) "unlock", 0, FUNCTION, INTSTAR_T,
+                        0, binaryLength);
+
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+
+        emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_UNLOCK);
+        emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+        emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_unlock() {
+	trap(SYSCALL_UNLOCK, -1);
 }
 
 void emitYield() {
@@ -4383,15 +4455,13 @@ void syscall_yield() {
 }
 
 void trap(int hypercallId, int argument) {
-
 	// save User Process context
 	// before unsetting kernel_mode again, save kernel context (kernel_pc, essentially)
 	*memory = hypercallId;
 	*(memory + 1) = argument;
-	*(memory + 2) = context_getPID(current_context);
+	*(memory + 2) = context_getPID(osCurrentProcess);
 
 	nextContextId = 0;
-
 }
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
@@ -4526,7 +4596,7 @@ int* contextFindContextByPID(int* contexts, int contextId) {
 int* processFindByPID(int pid) {
 	int* cursor;
 
-	cursor = context_lists;
+	cursor = osProcessList;
 
 	while ((int) cursor != 0) {
 		if (*cursor == pid) {
@@ -4650,7 +4720,7 @@ void pagetable_setAddrAtIndex(int* pagetable, int idx, int data) {
 
 
 void saveContext() {
-	context_setPC(current_context, pc);
+	context_setPC(osCurrentProcess, pc);
 }
 
 void restoreContext(int contextId) {
@@ -4661,14 +4731,18 @@ void restoreContext(int contextId) {
 	else
 		kernel_mode = 0;
 
-	next_context = contextFindContextByPID(kernel_process_list, contextId);
+	next_context = scheduleNextContext(kernelProcessList, contextId);
 	registers = context_getRegisters(next_context);
 
 	current_page_table = context_getPageTable(next_context);
 	pc = context_getPC(next_context);
 
-	current_context = next_context;
+	osCurrentProcess = next_context;
 
+}
+
+int* scheduleNextContext(int* list, int contextId) {
+	return contextFindContextByPID(list, contextId);
 }
 
 int createKernelContext() {
@@ -4680,8 +4754,8 @@ int createKernelContext() {
 	page_table = (int*) 0;
 	pc = 0;
 
-	kernel_process_list = contextInsert(nextFreeContextId, pc, registers, page_table, kernel_process_list, (int*) 0);
-	kernel_current_proc = kernel_process_list;
+	kernelProcessList = contextInsert(nextFreeContextId, pc, registers, page_table, kernelProcessList, (int*) 0);
+	kernelCurrentContext = kernelProcessList;
 
 	pid = nextFreeContextId;
 
@@ -4757,19 +4831,31 @@ int* osCreateProcess(int pid, int* prev, int* next) {
 	*(node + 2) = prev;
 	*(node + 3) = next;
 
-	if (prev != 0) {
-		*(prev + 3 ) = node;
+	if ((int) prev != 0) {
+		*(prev + 3) = node;
 	}
 
-	if (next != 0) {
+	if ((int) next != 0) {
 		*(next + 2) = node;
 	}
 
 	return node;
 }
 
-int* osDeleteProcess(int* node, int* processList) {
+int* osProcessReady(int* unblockedProcess) {
+	int* node;
 
+	node = malloc(4 * 4),
+
+	*node = *unblockedProcess;
+	*(node + 1) = *(unblockedProcess + 1);
+	*(node + 2) = (int*) 0;
+	*(node + 3) = osProcessList;
+
+	return node;
+}
+
+int* osDeleteProcess(int* node, int* processList) {
 	int* next;
 	int* prev;
 
@@ -4780,17 +4866,16 @@ int* osDeleteProcess(int* node, int* processList) {
 	prev = (int*) *(node + 2);
 
 	if ((int) prev != 0) {
-		*(prev+3) = next;
+		*(prev + 3) = next;
 	} else {
 		processList = next;
 	}
 
 	if ((int) next != 0) {
-		*(next+2) = prev;
+		*(next + 2) = prev;
 	}
 
 	return processList;
-
 }
 
 int* osFindProcess(int pid, int* processList) {
@@ -4808,8 +4893,125 @@ int* osFindProcess(int pid, int* processList) {
 	}
 
 	return (int*) 0;
+}
 
+int* osBlockedQFindProcess(int pid) {
+        int* cursor;
 
+        cursor = osBlockedQueue;
+
+        while ((int) cursor != 0) {
+                if (*cursor == pid) {
+                        return cursor;
+                }
+
+                cursor = (int*) *(cursor + 3);
+        }
+
+        return (int*) 0;
+
+}
+
+int* osBlockedQFindProcessByReason(int pid, int reason) {
+	int* cursor;
+
+	cursor = osBlockedQueue;
+
+	while ((int) cursor != 0) {
+		if (*(cursor + 5) == pid) {
+			if (*(cursor + 4) == reason) {
+				return cursor;
+			}
+		}
+
+		cursor = *(cursor + 3);
+	}
+
+	return (int*) 0;
+}
+
+int* osBlockProcess(int* blockedProcess, int reason, int waitForPid) {
+	int* blockingNode;
+
+	blockingNode = malloc(6 * 4);
+
+	*blockingNode = *blockedProcess;
+	*(blockingNode + 1) = *(blockedProcess + 1);
+	*(blockingNode + 2) = (int*) 0;
+	*(blockingNode + 3) = osBlockedQueue;
+	*(blockingNode + 4) = reason;
+	*(blockingNode + 5) = waitForPid;
+
+	return blockingNode;
+}
+
+int* osUnBlockProcess(int pid) {
+	int* unblockedProcess;
+	int* next;
+        int* prev;
+
+	unblockedProcess = osBlockedQFindProcess(pid);
+
+        if ((int) unblockedProcess == 0)
+                return osBlockedQueue;
+
+        next = (int*) *(unblockedProcess + 3);
+        prev = (int*) *(unblockedProcess + 2);
+
+        if ((int) prev != 0) {
+                *(prev + 3) = next;
+        } else {
+                osBlockedQueue = next;
+        }
+
+        if ((int) next != 0) {
+                *(next + 2) = prev;
+        }
+
+        return osBlockedQueue;
+}
+
+int* osZombifyProcess(int pid) {
+	int* zombieNode;
+	int* zombieProcess;
+
+	zombieNode = malloc(5 * 4);
+	zombieProcess = osFindProcess(pid, osZombieQueue);
+
+	*zombieNode = pid;
+	*(zombieNode + 1) = context_getPageTable(zombieProcess);
+	*(zombieNode + 2) = context_getRegisters(zombieProcess);
+	*(zombieNode + 3) = (int*) 0;
+	*(zombieNode + 4) = osZombieQueue;
+
+	return zombieNode;
+}
+
+int* osUnzombifyProcess(int pid) {
+	int* zombieProcess;
+
+	int* next;
+        int* prev;
+
+	zombieProcess = osFindProcess(pid, osZombieQueue);
+
+        if ((int) zombieProcess == 0)
+                return osZombieQueue;
+
+        next = (int*) *(zombieProcess + 2);
+        prev = (int*) *(zombieProcess + 3);
+
+        if ((int) prev != 0) {
+                *(prev + 4) = next;
+        } else {
+                osZombieQueue = next;
+        }
+
+        if ((int) next != 0) {
+                *(next + 3) = prev;
+        }
+
+	return osZombieQueue;
 }
 
 void hypercall_create_context() {
@@ -4826,7 +5028,7 @@ void hypercall_create_context() {
 	*(new_registers + REG_GP) = *(registers + REG_A0);
 	*(new_registers + REG_K1) = *(new_registers + REG_GP);
 
-	kernel_process_list = contextInsert(nextFreeContextId, new_pc, new_registers, new_page_table, kernel_process_list, (int*) 0);
+	kernelProcessList = contextInsert(nextFreeContextId, new_pc, new_registers, new_page_table, kernelProcessList, (int*) 0);
 
 	*(registers + REG_V0) = nextFreeContextId;
 
@@ -4835,12 +5037,11 @@ void hypercall_create_context() {
 }
 
 void hypercall_switch_context() {
-
 	nextContextId = *(registers + REG_A0);
 }
 
 void delete_context(int pid) {
-	kernel_process_list = remove_context(kernel_process_list, pid);
+	kernelProcessList = remove_context(kernelProcessList, pid);
 }
 
 void hypercall_map_page_in_context() {
@@ -4855,7 +5056,7 @@ void hypercall_map_page_in_context() {
 	index = *(registers + REG_A1);
 	paddr = *(registers + REG_A0);
 
-	context = contextFindContextByPID(kernel_process_list, pid);
+	context = contextFindContextByPID(kernelProcessList, pid);
 	page_table = context_getPageTable(context);
 	pagetable_setAddrAtIndex(page_table, index, paddr);
 }
@@ -4865,7 +5066,7 @@ void flush_page_in_context(int pid, int vaddr) {
 	int* page_table;
 	int index;
 
-	context = contextFindContextByPID(kernel_process_list, pid);
+	context = contextFindContextByPID(kernelProcessList, pid);
 	page_table = context_getPageTable(context);
 
 	pagetable_setAddrAtIndex(page_table, index, -1);
@@ -4908,6 +5109,8 @@ void fct_syscall() {
 			syscall_wait();
 		} else if (*(registers + REG_V0) == SYSCALL_FORK) {
 			syscall_fork();
+		} else if (*(registers + REG_V0) == SYSCALL_UNLOCK) {
+			syscall_unlock();
 		} else {
 			exception_handler(EXCEPTION_UNKNOWNSYSCALL);
 		}
@@ -5683,10 +5886,10 @@ void run() {
 			nextContextId = -1;
 		}
 
-		if ( kernel_mode == 0 )
+		if (kernel_mode == 0)
 			instrCount = instrCount + 1;
 
-		if (instrCount == 3) {
+		if (instrCount == 4) {
 			trap(HYPERCALL_SWITCH_CONTEXT, -1);
 			instrCount = 0;
 		}
@@ -5962,9 +6165,9 @@ void emulate(int argc, int *argv) {
 
 	// Create a new context for the user process
 	pid = create_context(4 * 1024 * 1024, binaryLength);
-	context_lists = osCreateProcess(pid, (int*) 0, context_lists);
+	osProcessList = osCreateProcess(pid, (int*) 0, osProcessList);
 
-	current_context = context_lists;
+	osCurrentProcess = osProcessList;
 
 	copyBinaryToMemory();
 
@@ -6017,7 +6220,7 @@ void kernel(int argc, int* argv) {
 	// Create a context for the kernel process
 	pid = createKernelContext();
 
-	current_context = contextFindContextByPID(kernel_process_list, pid);
+	osCurrentProcess = contextFindContextByPID(kernelProcessList, pid);
 
 	*(registers + REG_SP) = memorySize - 4; // initialize stack pointer
 
@@ -6034,10 +6237,8 @@ void kernel(int argc, int* argv) {
 
 }
 
-void copyPageFrame(int* blah, int* bleurgh);
 
 void kernel_event_loop() {
-
 	int* sharedMemory;
 	int eventType;
 	int arg;
@@ -6057,11 +6258,18 @@ void kernel_event_loop() {
 
 	int stop;
 
+	int* unblockedProcess;
+
+	int* nextProcess;
+
+	int* waitForPID;
+	int* waitForProcess;
+	int* waitingProcess;
 
 	sharedMemory = -SHARED_MEMORY_SIZE;
 	stop = 0;
 
-	while ( stop == 0) {
+	while (stop == 0) {
 		eventType = *sharedMemory;
 		arg = *(sharedMemory + 1);
 		callerPid = *(sharedMemory + 2);
@@ -6069,8 +6277,10 @@ void kernel_event_loop() {
 		count = 0;
 
 		if (eventType == PAGE_FAULT) {
-
-			print("OS - Handle page fault: PALLOC");
+			println();
+			print((int*) "-------------------------");
+			println();
+			print((int*) "OS: Handle Page Fault");
 			println();
 
 			page = palloc();
@@ -6082,21 +6292,178 @@ void kernel_event_loop() {
 
 			switch_context(callerPid);
 
+			print((int*) "-------------------------");
+			println();
 		} else if (eventType == HYPERCALL_SWITCH_CONTEXT) {
+			process = osFindProcess(callerPid, osProcessList);
+			process = (int*) *(process + 3);
 
-			process = osFindProcess(callerPid, context_lists);
-			process = (int*) *(process+3);
-
-			if ( (int) process == 0 ) {
-				process = context_lists;
+			if ((int) process == 0) {
+				process = osProcessList;
 			}
-			switch_context(*process);
 
-		} else if (eventType == HYPERCALL_CREATE_CONTEXT) {
-			print("OS - Create Context: FORK");
+			osCurrentProcess = process;
+
+			switch_context(*process);
+		} else if (eventType == SYSCALL_LOCK) {
+			println();
+			print((int*) "-------------------------");
+			println();
+			print((int*) "OS: Lock");
 			println();
 
-			context_lists = osCreateProcess(arg, (int*) 0, context_lists);
+			shout();
+
+			if ((int) lockOwner == 0) {
+				print((int*) "... taking the lock!");
+				println();
+
+				lockOwner = osCurrentProcess;
+
+				osCurrentProcess = osFindProcess(callerPid, osProcessList);
+
+				switch_context(callerPid);
+			} else {
+				print((int*) "... being blocked after requesting a lock!");
+				println();
+
+				osBlockedQueue = osBlockProcess(osCurrentProcess, LOCK_BLOCK, -1);
+				osProcessList = osDeleteProcess(osCurrentProcess, osProcessList);
+
+				process = *(osCurrentProcess + 3);
+
+				if ((int) process == 0) {
+					process = osProcessList;
+				}
+
+				osCurrentProcess = process;
+
+				switch_context(*process);
+			}
+
+			print((int*) "-------------------------");
+			println();
+		} else if (eventType == SYSCALL_UNLOCK) {
+			println();
+			print((int*) "-------------------------");
+			println();
+			print((int*) "OS: Unlock");
+			println();
+
+			shout();
+
+			print((int*) " ... unlocking!");
+			println();
+
+			lockOwner = (int*) 0;
+			unblockedProcess = osBlockedQueue;
+
+			if ((int) unblockedProcess != 0) {
+				while (*(unblockedProcess + 4) != LOCK_BLOCK) {
+					unblockedProcess = *(unblockedProcess + 3);
+				}
+			}
+
+			if ((int) unblockedProcess != 0) {
+				osBlockedQueue = osUnBlockProcess(*osBlockedQueue);
+				osProcessList = osProcessReady(unblockedProcess);
+			}
+
+                        process = *(osCurrentProcess + 3);
+
+                        if ((int) process == 0) {
+                                process = osProcessList;
+                        }
+
+			osCurrentProcess = process;
+
+                        switch_context(*process);
+
+			print((int*) "-------------------------");
+			println();
+		} else if (eventType == SYSCALL_WAIT) {
+			println();
+			print((int*) "-------------------------");
+			println();
+			print((int*) "OS: Wait");
+			println();
+
+			shout();
+
+			waitForPID = arg;
+			waitForProcess = osFindProcess(waitForPID, osProcessList);
+
+			print((int*) " ... and I have to wait for: ");
+			printNumber(waitForPID);
+
+			if ((int) waitForProcess == 0) {
+				print((int*) "No such process in the ready queue...");
+
+				waitForProcess = osBlockedQFindProcess(waitForPID);
+
+				if ((int) waitForProcess != 0) {
+					print((int*) " but in the blocking queue");
+				} else {
+					print((int*) ", nor in the blocking queue...");
+				}
+
+				println();
+			}
+
+			if ((int) waitForProcess != 0) {
+				print((int*) "Block process #");
+				printNumber(*osCurrentProcess);
+
+				process = *(osCurrentProcess + 3);
+
+				if ((int) process != 0) {
+					process = osProcessList;
+				}
+
+				osBlockedQueue = osBlockProcess(osCurrentProcess, WAIT_FOR_CHILD_BLOCK, waitForPID);
+
+				printNumber(getListLength(osProcessList, 3));
+
+				osProcessList = osDeleteProcess(osCurrentProcess, osProcessList);
+
+				printNumber(getListLength(osProcessList, 3));
+			} else {
+				waitForProcess = osFindProcess(waitForPID, osZombieQueue);
+
+				print((int*) "Process to wait for could be a zombie!");
+				println();
+
+				if (waitForProcess != 0) {
+					print((int*) "Indeed!");
+					println();
+
+					osZombieQueue = osUnzombifyProcess(waitForProcess);
+				} else {
+					print((int*) "No...");
+					println();
+				}
+
+                        	process = *(osCurrentProcess + 3);
+
+                      	  	if ((int) process == 0) {
+                        		process = osProcessList;
+                        	}
+			}
+
+			osCurrentProcess = waitForProcess;
+
+			switch_context(*waitForProcess);
+
+			print((int*) "-------------------------");
+			println();
+		} else if (eventType == HYPERCALL_CREATE_CONTEXT) {
+			println();
+			print((int*) "-------------------------");
+			println();
+			print((int*) "OS: Fork (Create Context)");
+			println();
+
+			osProcessList = osCreateProcess(arg, (int*) 0, osProcessList);
 
 			parentProcess = processFindByPID(callerPid);
 			pageTable = *(parentProcess + 1);
@@ -6118,33 +6485,71 @@ void kernel_event_loop() {
 				cursor = cursor + 1;
 			}
 
+			osCurrentProcess = osFindProcess(arg, osProcessList);
+
 			switch_context(arg);
-		}
-		else if (eventType == SYSCALL_EXIT) {
-			print("OS - Exit");
+
+			print((int*) "-------------------------");
+			println();
+		} else if (eventType == SYSCALL_EXIT) {
+			println();
+			print((int*) "-------------------------");
+			println();
+			print((int*) "OS: Exit");
+			println();
+
+			shout();
 
 			println();
 			print((int*) "exiting with error code ");
 			print(itoa(arg, string_buffer, 10, 0, 0));
 			println();
 
-			process = osFindProcess(callerPid,context_lists);
+			process = osFindProcess(callerPid, osProcessList);
 
-			context_lists = osDeleteProcess(process,context_lists);
+			osProcessList = osDeleteProcess(osFindProcess(callerPid, osProcessList), osProcessList);
 
 			delete_context(callerPid);
 
-			if (context_lists == 0) {
-				stop = 1;
-			}
-			else {
-				switch_context(*context_lists);
+			if (*osCurrentProcess > 1) {
+				waitingProcess = osBlockedQFindProcessByReason(*osCurrentProcess, WAIT_FOR_CHILD_BLOCK);
+
+				if ((int) waitingProcess != 0) {
+					print((int*) "Process ");
+					print(itoa(*waitingProcess, string_buffer, 10, 0, 0));
+					print((int*) " is waiting for me...");
+					println();
+
+					osProcessList = osProcessReady(waitingProcess);
+					osBlockedQueue = osUnBlockProcess(*waitingProcess);
+				} else {
+					print((int*) "Noone is waiting for me... I'm a zombie now.");
+					println();
+
+					osZombieQueue = osZombifyProcess(*osCurrentProcess);
+				}
 			}
 
-		}
-		else {
+			if (osProcessList == 0) {
+				stop = 1;
+			} else {
+                                process = *(osCurrentProcess + 3);
+
+                                if ((int) process == 0) {
+                                        process = osProcessList;
+                                }
+
+				osCurrentProcess = process;
+                                switch_context(*process);
+			}
+
+			print((int*) "-------------------------");
+			println();
+		} else {
 			print("Unknown event type");
 			println();
+
+			osCurrentProcess = osFindProcess(callerPid, osProcessList);
 
 			switch_context(callerPid);
 		}
@@ -6168,14 +6573,14 @@ int srvSchedule() {
 	int* next;
 	int next_pid;
 
-	next = context_getNext(kernel_current_proc);
+	next = context_getNext(kernelCurrentContext);
 
 	if ((int) next == 0) {
-		next = kernel_process_list;
-		next = context_getNext(kernel_process_list);
+		next = kernelProcessList;
+		next = context_getNext(kernelProcessList);
 	}
 
-	kernel_current_proc = next;
+	kernelCurrentContext = next;
 
 	if ((int) next == 0) {
 		next_pid = 0;
