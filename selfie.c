@@ -4026,19 +4026,72 @@ int getListLength(int* list, int next) {
 
 void printList(int* list) {
         int* cursor;
+	int* prevCursor;
 
         cursor = list;
-
-	print((int*) "PRINT LIST");
-	println();
-	print((int*) "--------------");
-	println();
 
         while (*cursor != 0) {
 		print((int*) "PID: ");
 		printNumber(*cursor);
 
-		cursor = cursor + 1;
+		print((int*) "PT: ");
+		printNumber(*(cursor+1));
+
+		print((int*) "Prev: ");
+		printNumber(*(cursor+2));
+		*(cursor + 2) = prevCursor;
+
+		print((int*) "Next: ");
+		printNumber(*(cursor+3));
+
+		prevCursor = cursor;
+		cursor = *(cursor + 3);
+        }
+}
+
+void printBlockedQueue() {
+        int* cursor;
+        int* prevCursor;
+
+        cursor = osBlockedQueue;
+
+        while (*cursor != 0) {
+                print((int*) "PID: ");
+                printNumber(*cursor);
+
+                print((int*) "PT: ");
+                printNumber(*(cursor+1));
+
+                print((int*) "Prev: ");
+                printNumber(*(cursor+2));
+
+                print((int*) "Next: ");
+                printNumber(*(cursor+3));
+
+                print((int*) "Reason: ");
+                printNumber(*(cursor+4));
+
+                print((int*) "WAIT FOR: ");
+                printNumber(*(cursor+5));
+
+                prevCursor = cursor;
+                cursor = *(cursor + 3);
+        }
+
+}
+
+void fixList(int* list) {
+        int* cursor;
+	int* prevCursor;
+
+        cursor = list;
+	prevCursor = 0;
+
+        while (*cursor != 0) {
+		*(cursor + 2) = prevCursor;
+
+		prevCursor = cursor;
+		cursor = *(cursor + 3);
         }
 }
 
@@ -4859,6 +4912,8 @@ int* osDeleteProcess(int* node, int* processList) {
 	int* next;
 	int* prev;
 
+	fixList(processList);
+
 	if ((int) node == 0)
 		return processList;
 
@@ -4874,6 +4929,7 @@ int* osDeleteProcess(int* node, int* processList) {
 	if ((int) next != 0) {
 		*(next + 2) = prev;
 	}
+
 
 	return processList;
 }
@@ -5889,7 +5945,7 @@ void run() {
 		if (kernel_mode == 0)
 			instrCount = instrCount + 1;
 
-		if (instrCount == 3) {
+		if (instrCount == 10) {
 			trap(HYPERCALL_SWITCH_CONTEXT, -1);
 			instrCount = 0;
 		}
@@ -6242,9 +6298,9 @@ int continueInSearch(int a, int *b) {
 	int d;
 
 	if (a == LOCK_BLOCK) {
-		c = 1;
-	} else {
 		c = 0;
+	} else {
+		c = 1;
 	}
 
 	if ((int) b == 0) {
@@ -6310,6 +6366,8 @@ void kernel_event_loop() {
 			pageTable = (int*) *(processFindByPID(callerPid) + 1);
 
 			pagetable_setAddrAtIndex(pageTable, arg/PAGE_FRAME_SIZE, page);
+
+			osCurrentProcess = osFindProcess(callerPid, osProcessList);
 
 			switch_context(callerPid);
 
@@ -6379,14 +6437,18 @@ void kernel_event_loop() {
 			lockOwner = (int*) 0;
 			unblockedProcess = osBlockedQueue;
 
-			if ((int) unblockedProcess != 0) {
-				while (continueInSearch(*(unblockedProcess + 4), unblockedProcess)) {
+			if ((int) osBlockedQueue != 0) {
+				if (*(osBlockedQueue + 4) != LOCK_BLOCK) {
 					unblockedProcess = *(unblockedProcess + 3);
+
+					while (continueInSearch(*(unblockedProcess + 4), unblockedProcess)) {
+						unblockedProcess = *(unblockedProcess + 3);
+					}
 				}
 			}
 
 			if ((int) unblockedProcess != 0) {
-				osBlockedQueue = osUnBlockProcess(*osBlockedQueue);
+				osBlockedQueue = osUnBlockProcess(*unblockedProcess);
 				osProcessList = osProcessReady(unblockedProcess);
 			}
 
@@ -6397,6 +6459,9 @@ void kernel_event_loop() {
                         }
 
 			osCurrentProcess = process;
+
+			print((int*) "Next up - Process#");
+			printNumber(*process);
 
                         switch_context(*process);
 
@@ -6442,7 +6507,8 @@ void kernel_event_loop() {
 				}
 
 				osBlockedQueue = osBlockProcess(osCurrentProcess, WAIT_FOR_CHILD_BLOCK, waitForPID);
-				osProcessList = osDeleteProcess(osCurrentProcess, osProcessList);
+				osProcessList = osDeleteProcess(osFindProcess(*osCurrentProcess, osProcessList), osProcessList);
+
 			} else {
 				waitForProcess = osFindProcess(waitForPID, osZombieQueue);
 
@@ -6454,6 +6520,7 @@ void kernel_event_loop() {
 					println();
 
 					osZombieQueue = osUnzombifyProcess(waitForProcess);
+
 				} else {
 					print((int*) "No...");
 					println();
@@ -6571,7 +6638,7 @@ void kernel_event_loop() {
 		}
 
 		if (getListLength(osProcessList, 3) == 0) {
-			stop = 1;
+//			stop = 1;
 		}
 	}
 }

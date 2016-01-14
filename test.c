@@ -18,10 +18,19 @@ int main() {
 
   pid = fork();
 
+  lock();
+
   putchar('l');
   putchar('o');
   putchar('c');
   putchar('k');
+
+  unlock();
+
+  putchar('t');
+  putchar('e');
+  putchar('s');
+  putchar('t');
 
   if (pid > 0) {
 	wait(pid);
