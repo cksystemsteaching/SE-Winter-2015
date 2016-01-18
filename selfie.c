@@ -4080,21 +4080,6 @@ void printBlockedQueue() {
 
 }
 
-void fixList(int* list) {
-        int* cursor;
-	int* prevCursor;
-
-        cursor = list;
-	prevCursor = 0;
-
-        while (*cursor != 0) {
-		*(cursor + 2) = prevCursor;
-
-		prevCursor = cursor;
-		cursor = *(cursor + 3);
-        }
-}
-
 void printNumber (int nr) {
 	print(itoa(nr, string_buffer, 10, 0, 0));
 	println();
@@ -4884,6 +4869,10 @@ int* osCreateProcess(int pid, int* prev, int* next) {
 	*(node + 2) = prev;
 	*(node + 3) = next;
 
+	if ((int) osProcessList != 0) {
+		*(osProcessList + 2) = node;
+	}
+
 	if ((int) prev != 0) {
 		*(prev + 3) = node;
 	}
@@ -4905,14 +4894,16 @@ int* osProcessReady(int* unblockedProcess) {
 	*(node + 2) = (int*) 0;
 	*(node + 3) = osProcessList;
 
+	if ((int) osProcessList != 0) {
+		*(osProcessList + 2) = node;
+	}
+
 	return node;
 }
 
 int* osDeleteProcess(int* node, int* processList) {
 	int* next;
 	int* prev;
-
-	fixList(processList);
 
 	if ((int) node == 0)
 		return processList;
@@ -4998,6 +4989,10 @@ int* osBlockProcess(int* blockedProcess, int reason, int waitForPid) {
 	*(blockingNode + 4) = reason;
 	*(blockingNode + 5) = waitForPid;
 
+	if ((int) osBlockedQueue != 0) {
+		*(osBlockedQueue + 2) = blockingNode;
+	}
+
 	return blockingNode;
 }
 
@@ -5039,6 +5034,10 @@ int* osZombifyProcess(int pid) {
 	*(zombieNode + 2) = context_getRegisters(zombieProcess);
 	*(zombieNode + 3) = (int*) 0;
 	*(zombieNode + 4) = osZombieQueue;
+
+	if ((int) osZombieQueue != 0) {
+		*(osZombieQueue + 3) = zombieNode;
+	}
 
 	return zombieNode;
 }
