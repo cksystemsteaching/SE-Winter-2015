@@ -731,6 +731,9 @@ void syscall_unlock();
 void emitYield();
 void syscall_yield();
 
+void emitCAS();
+void compare_and_swap();
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int SYSCALL_EXIT = 4001;
@@ -745,6 +748,8 @@ int SYSCALL_WAIT = 4007;
 int SYSCALL_LOCK = 4008;
 int SYSCALL_YIELD = 4009;
 int SYSCALL_UNLOCK = 4010;
+
+int COMPARE_AND_SWAP = 9001;
 
 int PAGE_FAULT = 6001;
 
@@ -812,6 +817,9 @@ int* osUnBlockProcess(int pid);
 
 int* osZombifyProcess(int pid);
 int* osUnzombifyProcess(int pid);
+
+int* treiberStack = (int*) 0;
+int* treiberStackTop = (int*) 0;
 
 // -----------------------------------------------------------------
 // ------------------------- PAGE TABLE ---------------------------
@@ -3523,6 +3531,7 @@ void compile() {
 	emitUnlock();
 	emitWait();
 	emitYield();
+	emitCAS();
 
 	// parser
 	gr_cstar();
@@ -4364,7 +4373,7 @@ void emitPutchar() {
 	emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
-void emitFork() {
+void emitFork(){
 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "fork", 0, FUNCTION, INTSTAR_T,
 			0, binaryLength);
 
@@ -4490,6 +4499,49 @@ void emitYield() {
 
 void syscall_yield() {
 	trap(HYPERCALL_SWITCH_CONTEXT, -1);
+}
+
+void emitCAS() {
+	createSymbolTableEntry(GLOBAL_TABLE, (int*) "cas", 0, FUNCTION, INTSTAR_T, 0, binaryLength);
+
+	emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+
+	emitIFormat(OP_LW, REG_SP, REG_A2, 0);
+	emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+	emitIFormat(OP_LW, REG_SP, REG_A1, 0);
+	emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+	emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+	emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+	emitIFormat(OP_ADDIU, REG_ZR, REG_V0, COMPARE_AND_SWAP);
+	emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+	emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void compare_and_swap() {
+	int* sourceAddr;
+	int* expected;
+	int  newVal;
+
+	print((int*) "CAS - ADDRESS EXPECTED NEW\n");
+
+	printNumber(*(registers+REG_A0));
+	printNumber(*(registers+REG_A1));
+	printNumber(*(registers+REG_A2));
+
+	sourceAddr = *(registers + REG_A0);
+	expected = *(registers + REG_A1);
+	newVal = *(registers + REG_A2);
+
+	if (*sourceAddr == expected) {
+		*sourceAddr = newVal;
+		*(registers + REG_V0) = 1;
+	} else {
+		*(registers + REG_V0) = 0;
+	}
 }
 
 void trap(int hypercallId, int argument) {
@@ -5069,6 +5121,64 @@ int* osUnzombifyProcess(int pid) {
 	return osZombieQueue;
 }
 
+void treiberPush(int* treiberStack, int value) {
+	int* node;
+	int* top;
+
+	int casSucceed;
+
+	casSucceed = 0;
+
+	node = malloc(2*4);
+
+	*node = value;
+	*(node + 1) = (int*) 0;
+
+	while (casSucceed == 0) {
+		top = treiberStackTop;
+		*(node + 1) = top;
+
+		casSucceed = cas(treiberStackTop, top, node);
+	}
+}
+
+int treiberPop(int* treiberStack, int* poppedValue) {
+	int* top;
+	int casSucceed;
+
+	casSucceed = 0;
+
+	while (casSucceed == 0) {
+		top = treiberStackTop;
+
+		if ((int) top == 0) {
+			return 0;
+		}
+
+		casSucceed = cas(treiberStackTop, top, *(top + 1));
+	}
+
+	*poppedValue = *top;
+
+	return 1;
+}
+
+void testTreiberStack() {
+	int* pop;
+
+	pop = malloc(4);
+
+	treiberPush(treiberStack, 23);
+
+	treiberPush(treiberStack, 66);
+
+	treiberPop(treiberStack, pop);
+
+	treiberPush(treiberStack, 42);
+
+	printNumber(*pop);
+}
+
 void hypercall_create_context() {
 
 	int* new_registers;
@@ -5166,6 +5276,8 @@ void fct_syscall() {
 			syscall_fork();
 		} else if (*(registers + REG_V0) == SYSCALL_UNLOCK) {
 			syscall_unlock();
+		} else if (*(registers + REG_V0) == COMPARE_AND_SWAP) {
+			compare_and_swap();
 		} else {
 			exception_handler(EXCEPTION_UNKNOWNSYSCALL);
 		}
@@ -6691,7 +6803,6 @@ int selfie(int argc, int* argv) {
 		return -1;
 	} else {
 		while (argc >= 2) {
-
 			if (stringCompare((int*) *argv, (int*) "-c")) {
 				sourceName = (int*) *(argv + 1);
 				binaryName = sourceName;
@@ -6741,6 +6852,8 @@ int selfie(int argc, int* argv) {
 			} else if (stringCompare((int*) *argv, (int*) "-m")) {
 
 				initMemory(atoi((int*) *(argv + 1)) * MEGABYTE);
+
+				testTreiberStack();
 
 				argc = argc - 1;
 				argv = argv + 1;
