@@ -4101,8 +4101,10 @@ void printNumber (int nr) {
 
 void printPageTable(int* pt) {
 	int count;
+	int div;
 
 	count = 0;
+	div = 0;
 
 	while ((int) pagetable_getAddrAtIndex(pt, count) != 0) {
 		print("{");
@@ -4110,9 +4112,14 @@ void printPageTable(int* pt) {
 		print((int*) " -> ");
 		print(itoa(pagetable_getAddrAtIndex(pt, count), string_buffer, 10, 0, 0));
 		print("}, ");
-		println();
+
+		if (div == 5) {
+			println();
+		div = 0;
+		}
 
 		count = count + 1;
+		div = div + 1;
 	}
 }
 
@@ -5020,9 +5027,9 @@ int* tPageTable(int* threadPageTable, int* processPageTable) {
 	while ((int) pagetable_getAddrAtIndex(processPageTable, count) != 0) {
 		page = palloc();
 
-		pagetable_setAddrAtIndex(threadPageTable, count, page);
+		pagetable_setAddrAtIndex(threadPageTable, count - 1, page);
 
-		copyPageFrame(pagetable_getAddrAtIndex(processPageTable, count), page);
+		copyPageFrame(pagetable_getAddrAtIndex(processPageTable, count - 1), page);
 
 		count = count + 1;
 	}
@@ -6528,11 +6535,11 @@ void kernel_event_loop() {
 		count = 0;
 
 		if (eventType == PAGE_FAULT) {
+			shout();
+
 			println();
 			print((int*) "-------------------------");
 			println();
-
-			shout();
 
 			print((int*) "OS: Handle Page Fault");
 			println();
@@ -6562,13 +6569,13 @@ void kernel_event_loop() {
 
 			switch_context(*process);
 		} else if (eventType == SYSCALL_LOCK) {
+			shout();
+
 			println();
 			print((int*) "-------------------------");
 			println();
 			print((int*) "OS: Lock");
 			println();
-
-			shout();
 
 			if ((int) lockOwner == 0) {
 				print((int*) "... taking the lock!");
@@ -6600,13 +6607,13 @@ void kernel_event_loop() {
 			print((int*) "-------------------------");
 			println();
 		} else if (eventType == SYSCALL_UNLOCK) {
+			shout();
+
 			println();
 			print((int*) "-------------------------");
 			println();
 			print((int*) "OS: Unlock");
 			println();
-
-			shout();
 
 			print((int*) " ... unlocking!");
 			println();
@@ -6645,13 +6652,13 @@ void kernel_event_loop() {
 			print((int*) "-------------------------");
 			println();
 		} else if (eventType == SYSCALL_WAIT) {
+			shout();
+
 			println();
 			print((int*) "-------------------------");
 			println();
 			print((int*) "OS: Wait");
 			println();
-
-			shout();
 
 			waitForPID = arg;
 			waitForProcess = osFindProcess(waitForPID, osProcessList);
@@ -6717,6 +6724,8 @@ void kernel_event_loop() {
 			print((int*) "-------------------------");
 			println();
 		} else if (eventType == HYPERCALL_CREATE_CONTEXT) {
+			shout();
+
 			println();
 			print((int*) "-------------------------");
 			println();
@@ -6752,30 +6761,30 @@ void kernel_event_loop() {
 			print((int*) "-------------------------");
 			println();
 		} else if (eventType == SYSCALL_FORK_THREAD) {
+			shout();
+
 			println();
 			print((int*) "-------------------------");
 			println();
 			print((int*) "OS: Thread Fork");
 			println();
 
-			shout();
-
 			osProcessList = osProcessForkThread(osCurrentProcess, arg);
 
-			switch_context(arg);
+			osCurrentProcess = osFindProcess(callerPid, osProcessList);
 
-			osCurrentProcess = osFindProcess(arg, osProcessList);
+			switch_context(callerPid);
 
 			print((int*) "-------------------------");
 			println();
 		} else if (eventType == SYSCALL_EXIT) {
+			shout();
+
 			println();
 			print((int*) "-------------------------");
 			println();
 			print((int*) "OS: Exit");
 			println();
-
-			shout();
 
 			println();
 			print((int*) "exiting with error code ");
