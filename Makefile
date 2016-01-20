@@ -1,9 +1,9 @@
-CC_OSX				:= clang
+CC_OSX			:= clang
 CC_OPT_OSX		:= -w -m32 -g -undefined dynamic_lookup -D'main(a, b)=main(int argc, char **argv)'
-CC_LINUX			:= gcc
-CC_OPT_LINUX	:= -w -m32 -Wl,--unresolved-symbols=ignore-in-object-files -D'main(a, b)=main(int argc, char **argv)'
+CC_LINUX		:= gcc
+CC_OPT_LINUX		:= -w -m32 -Wl,--unresolved-symbols=ignore-in-object-files -D'main(a, b)=main(int argc, char **argv)'
 EXEC			:= selfie
-MEM_SIZE	:= 32
+MEM_SIZE		:= 32
 RTS1			:= 2
 RTS2			:= 10
 RTS3			:= 100

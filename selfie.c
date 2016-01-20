@@ -734,6 +734,9 @@ void syscall_yield();
 void emitCAS();
 void compare_and_swap();
 
+void emitThreadFork();
+void syscall_thread_fork();
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int SYSCALL_EXIT = 4001;
@@ -748,6 +751,7 @@ int SYSCALL_WAIT = 4007;
 int SYSCALL_LOCK = 4008;
 int SYSCALL_YIELD = 4009;
 int SYSCALL_UNLOCK = 4010;
+int SYSCALL_FORK_THREAD = 4011;
 
 int COMPARE_AND_SWAP = 9001;
 
@@ -805,6 +809,7 @@ int* context_getNext(int* node);
 int context_getPID(int* node);
 
 int* osCreateProcess(int pid, int* prev, int* next);
+int* osProcessForkThread(int* osProcess);
 int* osProcessReady(int* unblockedProcess);
 int* osDeleteProcess(int* node, int* processList);
 int* osFindProcess(int pid, int* processList);
@@ -818,8 +823,7 @@ int* osUnBlockProcess(int pid);
 int* osZombifyProcess(int pid);
 int* osUnzombifyProcess(int pid);
 
-int* treiberStack = (int*) 0;
-int* treiberStackTop = (int*) 0;
+int* tPageTable(int* threadPT, int* parentProcessPT);
 
 // -----------------------------------------------------------------
 // ------------------------- PAGE TABLE ---------------------------
@@ -3532,6 +3536,7 @@ void compile() {
 	emitWait();
 	emitYield();
 	emitCAS();
+	emitThreadFork();
 
 	// parser
 	gr_cstar();
@@ -4027,7 +4032,7 @@ int getListLength(int* list, int next) {
 
 	while ((int) cursor != 0) {
 		count = count + 1;
-		cursor = *(cursor + next);
+		cursor = (int*) *(cursor + next);
 	}
 
 	return count;
@@ -4048,13 +4053,13 @@ void printList(int* list) {
 
 		print((int*) "Prev: ");
 		printNumber(*(cursor+2));
-		*(cursor + 2) = prevCursor;
+		*(cursor + 2) = (int) prevCursor;
 
 		print((int*) "Next: ");
 		printNumber(*(cursor+3));
 
 		prevCursor = cursor;
-		cursor = *(cursor + 3);
+		cursor = (int*) *(cursor + 3);
         }
 }
 
@@ -4084,7 +4089,7 @@ void printBlockedQueue() {
                 printNumber(*(cursor+5));
 
                 prevCursor = cursor;
-                cursor = *(cursor + 3);
+                cursor = (int*) *(cursor + 3);
         }
 
 }
@@ -4350,7 +4355,7 @@ void syscall_pmem() {
 
 	a = *(registers + REG_A0);
 
-	*(registers + REG_V0) = memory + tlb(a);
+	*(registers + REG_V0) = (int) memory + 4 * tlb(a);
 
 }
 
@@ -4392,7 +4397,7 @@ void copyRegisters (int* oldRegisters, int* newRegisters) {
 
 	cursor = oldRegisters;
 
-	while ((int) cursor != oldRegisters + 32) {
+	while ((int) cursor != (int) oldRegisters + 4*32) {
 		*newRegisters = *cursor;
 
 		newRegisters = newRegisters + 1;
@@ -4532,16 +4537,34 @@ void compare_and_swap() {
 	printNumber(*(registers+REG_A1));
 	printNumber(*(registers+REG_A2));
 
-	sourceAddr = *(registers + REG_A0);
-	expected = *(registers + REG_A1);
+	sourceAddr = (int*) *(registers + REG_A0);
+	expected = (int*) *(registers + REG_A1);
 	newVal = *(registers + REG_A2);
 
-	if (*sourceAddr == expected) {
+	if (sourceAddr == expected) {
 		*sourceAddr = newVal;
 		*(registers + REG_V0) = 1;
 	} else {
 		*(registers + REG_V0) = 0;
 	}
+}
+
+void emitThreadFork() {
+        createSymbolTableEntry(GLOBAL_TABLE, (int*) "tfork", 0, FUNCTION, INTSTAR_T,
+                        0, binaryLength);
+
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+        emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+
+        emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_FORK_THREAD);
+        emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+        emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_thread_fork() {
+	trap(SYSCALL_FORK_THREAD, -1);
 }
 
 void trap(int hypercallId, int argument) {
@@ -4693,7 +4716,7 @@ int* processFindByPID(int pid) {
 			return cursor;
 		}
 
-		cursor = *(cursor + 3);
+		cursor = (int*) *(cursor + 3);
 	}
 
 	return (int*) 0;
@@ -4797,7 +4820,7 @@ int* pagetable_create() {
 }
 
 int* pagetable_getAddrAtIndex(int* pagetable, int idx) {
-	return *(pagetable + idx);
+	return (int*)*(pagetable + idx);
 }
 
 void pagetable_setAddrAtIndex(int* pagetable, int idx, int data) {
@@ -4914,40 +4937,104 @@ void emitMapPageInContext() {
 int* osCreateProcess(int pid, int* prev, int* next) {
 	int* node;
 
-	node = malloc(4 * 4);
+	node = malloc(5 * 4);
 
 	*node = pid;
-	*(node + 1) = pagetable_create();
-	*(node + 2) = prev;
-	*(node + 3) = next;
+	*(node + 1) = (int) pagetable_create();
+	*(node + 2) = (int) prev;
+	*(node + 3) = (int) next;
+	*(node + 4) = (int) 0;
 
 	if ((int) osProcessList != 0) {
-		*(osProcessList + 2) = node;
+		*(osProcessList + 2) = (int) node;
 	}
 
 	if ((int) prev != 0) {
-		*(prev + 3) = node;
+		*(prev + 3) = (int) node;
 	}
 
 	if ((int) next != 0) {
-		*(next + 2) = node;
+		*(next + 2) = (int) node;
 	}
 
 	return node;
 }
 
+int* tPageTable(int* threadPageTable, int* processPageTable) {
+	int* cursor;
+	int count;
+
+	count = 0;
+	cursor = pagetable_getAddrAtIndex(processPageTable, count);
+
+	// Setting page table for new thread for code, globals and heap
+	while (*cursor != -1) {
+		pagetable_setAddrAtIndex(threadPageTable, count, cursor);
+
+		count = count + 1;
+		cursor = pagetable_getAddrAtIndex(processPageTable, count);
+	}
+
+	// Setting page table for new thread for empty part between heap and stack
+	while (*cursor == -1) {
+		pagetable_setAddrAtIndex(threadPageTable, count, cursor);
+
+		count = count + 1;
+		cursor = pagetable_getAddrAtIndex(processPageTable, count);
+	}
+
+	// Setting page table for new thread for the stack
+	// Allocate new frames, copy frames from the OS process
+	while ((int) cursor != 0) {
+		pagetable_setAddrAtIndex(threadPageTable, count, palloc());
+
+		copyPageFrame(*cursor, pagetable_getAddrAtIndex(threadPageTable, count));
+
+		count = count + 1;
+		cursor = pagetable_getAddrAtIndex(processPageTable, count);
+	}
+}
+
+int* osProcessForkThread(int* osProcess) {
+	int* threadNode;
+	int* threadListOfOSProcess;
+	int* threadPageTable;
+
+	int* threadPrevious;
+
+	int* processPageTable;
+
+	threadNode = malloc(4 * 4);
+	threadListOfOSProcess = (int*) *(osProcess + 4);
+	threadPageTable = (int*) malloc(4 * PAGE_TABLE_SIZE);
+
+	processPageTable = (int*) *(osProcess + 1);
+
+	*threadNode = (int) *osProcess;
+	*(threadNode + 1) = (int) tPageTable(threadPageTable, processPageTable);
+	*(threadNode + 2) = (int) 0;
+	*(threadNode + 3) = (int) threadListOfOSProcess;
+
+	if ((int) threadListOfOSProcess != 0) {
+		threadPrevious = (int*)*(threadListOfOSProcess + 2);
+		threadPrevious = threadNode;
+	}
+
+	return threadNode;
+}
+
 int* osProcessReady(int* unblockedProcess) {
 	int* node;
 
-	node = malloc(4 * 4),
+	node = malloc(4 * 4);
 
 	*node = *unblockedProcess;
 	*(node + 1) = *(unblockedProcess + 1);
-	*(node + 2) = (int*) 0;
-	*(node + 3) = osProcessList;
+	*(node + 2) = (int) 0;
+	*(node + 3) = (int) osProcessList;
 
 	if ((int) osProcessList != 0) {
-		*(osProcessList + 2) = node;
+		*(osProcessList + 2) = (int) node;
 	}
 
 	return node;
@@ -4964,13 +5051,13 @@ int* osDeleteProcess(int* node, int* processList) {
 	prev = (int*) *(node + 2);
 
 	if ((int) prev != 0) {
-		*(prev + 3) = next;
+		*(prev + 3) = (int) next;
 	} else {
 		processList = next;
 	}
 
 	if ((int) next != 0) {
-		*(next + 2) = prev;
+		*(next + 2) = (int) prev;
 	}
 
 
@@ -5023,7 +5110,7 @@ int* osBlockedQFindProcessByReason(int pid, int reason) {
 			}
 		}
 
-		cursor = *(cursor + 3);
+		cursor = (int*) *(cursor + 3);
 	}
 
 	return (int*) 0;
@@ -5035,14 +5122,14 @@ int* osBlockProcess(int* blockedProcess, int reason, int waitForPid) {
 	blockingNode = malloc(6 * 4);
 
 	*blockingNode = *blockedProcess;
-	*(blockingNode + 1) = *(blockedProcess + 1);
-	*(blockingNode + 2) = (int*) 0;
-	*(blockingNode + 3) = osBlockedQueue;
+	*(blockingNode + 1) = (int) *(blockedProcess + 1);
+	*(blockingNode + 2) = (int) 0;
+	*(blockingNode + 3) = (int) osBlockedQueue;
 	*(blockingNode + 4) = reason;
 	*(blockingNode + 5) = waitForPid;
 
 	if ((int) osBlockedQueue != 0) {
-		*(osBlockedQueue + 2) = blockingNode;
+		*(osBlockedQueue + 2) = (int) blockingNode;
 	}
 
 	return blockingNode;
@@ -5062,13 +5149,13 @@ int* osUnBlockProcess(int pid) {
         prev = (int*) *(unblockedProcess + 2);
 
         if ((int) prev != 0) {
-                *(prev + 3) = next;
+                *(prev + 3) = (int) next;
         } else {
                 osBlockedQueue = next;
         }
 
         if ((int) next != 0) {
-                *(next + 2) = prev;
+                *(next + 2) = (int) prev;
         }
 
         return osBlockedQueue;
@@ -5082,13 +5169,13 @@ int* osZombifyProcess(int pid) {
 	zombieProcess = osFindProcess(pid, osZombieQueue);
 
 	*zombieNode = pid;
-	*(zombieNode + 1) = context_getPageTable(zombieProcess);
-	*(zombieNode + 2) = context_getRegisters(zombieProcess);
-	*(zombieNode + 3) = (int*) 0;
-	*(zombieNode + 4) = osZombieQueue;
+	*(zombieNode + 1) = (int) context_getPageTable(zombieProcess);
+	*(zombieNode + 2) = (int) context_getRegisters(zombieProcess);
+	*(zombieNode + 3) = (int) 0;
+	*(zombieNode + 4) = (int) osZombieQueue;
 
 	if ((int) osZombieQueue != 0) {
-		*(osZombieQueue + 3) = zombieNode;
+		*(osZombieQueue + 3) = (int) zombieNode;
 	}
 
 	return zombieNode;
@@ -5109,74 +5196,16 @@ int* osUnzombifyProcess(int pid) {
         prev = (int*) *(zombieProcess + 3);
 
         if ((int) prev != 0) {
-                *(prev + 4) = next;
+                *(prev + 4) = (int) next;
         } else {
                 osZombieQueue = next;
         }
 
         if ((int) next != 0) {
-                *(next + 3) = prev;
+                *(next + 3) = (int) prev;
         }
 
 	return osZombieQueue;
-}
-
-void treiberPush(int* treiberStack, int value) {
-	int* node;
-	int* top;
-
-	int casSucceed;
-
-	casSucceed = 0;
-
-	node = malloc(2*4);
-
-	*node = value;
-	*(node + 1) = (int*) 0;
-
-	while (casSucceed == 0) {
-		top = treiberStackTop;
-		*(node + 1) = top;
-
-		casSucceed = cas(treiberStackTop, top, node);
-	}
-}
-
-int treiberPop(int* treiberStack, int* poppedValue) {
-	int* top;
-	int casSucceed;
-
-	casSucceed = 0;
-
-	while (casSucceed == 0) {
-		top = treiberStackTop;
-
-		if ((int) top == 0) {
-			return 0;
-		}
-
-		casSucceed = cas(treiberStackTop, top, *(top + 1));
-	}
-
-	*poppedValue = *top;
-
-	return 1;
-}
-
-void testTreiberStack() {
-	int* pop;
-
-	pop = malloc(4);
-
-	treiberPush(treiberStack, 23);
-
-	treiberPush(treiberStack, 66);
-
-	treiberPop(treiberStack, pop);
-
-	treiberPush(treiberStack, 42);
-
-	printNumber(*pop);
 }
 
 void hypercall_create_context() {
@@ -5278,6 +5307,8 @@ void fct_syscall() {
 			syscall_unlock();
 		} else if (*(registers + REG_V0) == COMPARE_AND_SWAP) {
 			compare_and_swap();
+		} else if (*(registers + REG_V0) == SYSCALL_FORK_THREAD) {
+			syscall_thread_fork();
 		} else {
 			exception_handler(EXCEPTION_UNKNOWNSYSCALL);
 		}
@@ -6331,7 +6362,7 @@ void emulate(int argc, int *argv) {
 	free_list = memory;
 
 	// Create a new context for the user process
-	pid = create_context(4 * 1024 * 1024, binaryLength);
+	pid = (int) create_context(4 * 1024 * 1024, binaryLength);
 	osProcessList = osCreateProcess(pid, (int*) 0, osProcessList);
 
 	osCurrentProcess = osProcessList;
@@ -6424,14 +6455,14 @@ int continueInSearch(int a, int *b) {
 	return c;
 }
 
-
-
 void kernel_event_loop() {
 	int* sharedMemory;
 	int eventType;
 	int arg;
 	int callerPid;
 	int* page;
+
+	int* threadList;
 
 	int* parentProcess;
 	int* childProcess;
@@ -6450,7 +6481,7 @@ void kernel_event_loop() {
 
 	int* nextProcess;
 
-	int* waitForPID;
+	int waitForPID;
 	int* waitForProcess;
 	int* waitingProcess;
 
@@ -6520,7 +6551,7 @@ void kernel_event_loop() {
 				osBlockedQueue = osBlockProcess(osCurrentProcess, LOCK_BLOCK, -1);
 				osProcessList = osDeleteProcess(osCurrentProcess, osProcessList);
 
-				process = *(osCurrentProcess + 3);
+				process = (int*) *(osCurrentProcess + 3);
 
 				if ((int) process == 0) {
 					process = osProcessList;
@@ -6550,10 +6581,10 @@ void kernel_event_loop() {
 
 			if ((int) osBlockedQueue != 0) {
 				if (*(osBlockedQueue + 4) != LOCK_BLOCK) {
-					unblockedProcess = *(unblockedProcess + 3);
+					unblockedProcess = (int*)*(unblockedProcess + 3);
 
 					while (continueInSearch(*(unblockedProcess + 4), unblockedProcess)) {
-						unblockedProcess = *(unblockedProcess + 3);
+						unblockedProcess = (int*)*(unblockedProcess + 3);
 					}
 				}
 			}
@@ -6563,7 +6594,7 @@ void kernel_event_loop() {
 				osProcessList = osProcessReady(unblockedProcess);
 			}
 
-                        process = *(osCurrentProcess + 3);
+                        process = (int*)*(osCurrentProcess + 3);
 
                         if ((int) process == 0) {
                                 process = osProcessList;
@@ -6611,7 +6642,7 @@ void kernel_event_loop() {
 				print((int*) "Block process #");
 				printNumber(*osCurrentProcess);
 
-				process = *(osCurrentProcess + 3);
+				process = (int*)*(osCurrentProcess + 3);
 
 				if ((int) process != 0) {
 					process = osProcessList;
@@ -6626,7 +6657,7 @@ void kernel_event_loop() {
 				print((int*) "Process to wait for could be a zombie!");
 				println();
 
-				if (waitForProcess != 0) {
+				if ((int) waitForProcess != 0) {
 					print((int*) "Indeed!");
 					println();
 
@@ -6637,7 +6668,7 @@ void kernel_event_loop() {
 					println();
 				}
 
-                        	process = *(osCurrentProcess + 3);
+                        	process = (int*) *(osCurrentProcess + 3);
 
                       	  	if ((int) process == 0) {
                         		process = osProcessList;
@@ -6660,12 +6691,12 @@ void kernel_event_loop() {
 			osProcessList = osCreateProcess(arg, (int*) 0, osProcessList);
 
 			parentProcess = processFindByPID(callerPid);
-			pageTable = *(parentProcess + 1);
+			pageTable = (int*) *(parentProcess + 1);
 
 			cursor = pageTable;
 
 			childProcess = processFindByPID(arg);
-			childProcessPageTable = *(childProcess + 1);
+			childProcessPageTable = (int*) *(childProcess + 1);
 
 			while (count < PAGE_TABLE_SIZE) {
 				if (*cursor != -1) {
@@ -6682,6 +6713,22 @@ void kernel_event_loop() {
 			osCurrentProcess = osFindProcess(arg, osProcessList);
 
 			switch_context(arg);
+
+			print((int*) "-------------------------");
+			println();
+		} else if (eventType == SYSCALL_FORK_THREAD) {
+			println();
+			print((int*) "-------------------------");
+			println();
+			print((int*) "OS: Thread Fork");
+			println();
+
+			shout();
+
+			threadList = (int*)*(osCurrentProcess + 4);
+			threadList = osProcessForkThread(osCurrentProcess);
+
+			switch_context(callerPid);
 
 			print((int*) "-------------------------");
 			println();
@@ -6724,10 +6771,10 @@ void kernel_event_loop() {
 				}
 			}
 
-			if (osProcessList == 0) {
+			if ((int) osProcessList == 0) {
 				stop = 1;
 			} else {
-                                process = *(osCurrentProcess + 3);
+                                process = (int*) *(osCurrentProcess + 3);
 
                                 if ((int) process == 0) {
                                         process = osProcessList;
@@ -6759,7 +6806,7 @@ void copyPageFrame(int* parentFrame, int* childFrame) {
 
 	cursor = parentFrame;
 
-	while ((int) cursor != parentFrame + PAGE_FRAME_SIZE) {
+	while ((int) cursor != (int) parentFrame + PAGE_FRAME_SIZE) {
 		*childFrame = *cursor;
 		childFrame = childFrame + 1;
 		cursor = cursor + 1;
@@ -6852,8 +6899,6 @@ int selfie(int argc, int* argv) {
 			} else if (stringCompare((int*) *argv, (int*) "-m")) {
 
 				initMemory(atoi((int*) *(argv + 1)) * MEGABYTE);
-
-				testTreiberStack();
 
 				argc = argc - 1;
 				argv = argv + 1;
