@@ -22,6 +22,7 @@ cean: clean
 calen: clean
 clea: clean
 cclean: clean
+lcean: clean
 
 compile_osx:
 	$(CC_OSX) $(CC_OPT_OSX) $(EXEC).c -o $(EXEC)

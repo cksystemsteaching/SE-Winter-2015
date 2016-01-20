@@ -58,7 +58,11 @@ void testTreiberStack() {
 }
 
 int main() {
-	testTreiberStack();
+	int pid;
+
+	pid = tfork();
+	pid = tfork();
+	pid = tfork();
 
 	exit(0);
 }

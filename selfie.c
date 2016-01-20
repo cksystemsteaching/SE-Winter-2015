@@ -809,7 +809,7 @@ int* context_getNext(int* node);
 int context_getPID(int* node);
 
 int* osCreateProcess(int pid, int* prev, int* next);
-int* osProcessForkThread(int* osProcess);
+int* osProcessForkThread(int* osProcess, int pid);
 int* osProcessReady(int* unblockedProcess);
 int* osDeleteProcess(int* node, int* processList);
 int* osFindProcess(int pid, int* processList);
@@ -4099,6 +4099,23 @@ void printNumber (int nr) {
 	println();
 }
 
+void printPageTable(int* pt) {
+	int count;
+
+	count = 0;
+
+	while ((int) pagetable_getAddrAtIndex(pt, count) != 0) {
+		print("{");
+		print(itoa(count, string_buffer, 10, 0, 0));
+		print((int*) " -> ");
+		print(itoa(pagetable_getAddrAtIndex(pt, count), string_buffer, 10, 0, 0));
+		print("}, ");
+		println();
+
+		count = count + 1;
+	}
+}
+
 void emitExit() {
 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "exit", 0, FUNCTION, INT_T, 0,
 			binaryLength);
@@ -4564,7 +4581,29 @@ void emitThreadFork() {
 }
 
 void syscall_thread_fork() {
-	trap(SYSCALL_FORK_THREAD, -1);
+	int childPID;
+        int* childRegisters;
+        int* childPageTable;
+        int childPC;
+
+        childRegisters = malloc(32*4);
+        childPageTable = pagetable_create();
+
+        copyRegisters(registers, childRegisters);
+
+        childPC = *(registers + REG_RA);
+        childPID = nextFreeContextId;
+
+        *(registers + REG_V0) = childPID;
+        *(childRegisters + REG_V0) = 0;
+
+        kernelProcessList = contextInsert(childPID, childPC, childRegisters, childPageTable, kernelProcessList, (int*) 0);
+
+	childPID = nextFreeContextId;
+
+        nextFreeContextId = nextFreeContextId + 1;
+
+	trap(SYSCALL_FORK_THREAD, childPID);
 }
 
 void trap(int hypercallId, int argument) {
@@ -4615,9 +4654,6 @@ int tlb(int vaddr) {
 	if ((int) page_addr != (-1)) {
 		return (page_addr + offset + SHARED_MEMORY_SIZE) / 4;
 	} else {
-
-		// TODO: Call kernel and handle the page fault
-		// Call trap here (syscall id as arg)
 		print(" --------------- PAGE FAULT ---------------------");
 		println();
 
@@ -4943,7 +4979,6 @@ int* osCreateProcess(int pid, int* prev, int* next) {
 	*(node + 1) = (int) pagetable_create();
 	*(node + 2) = (int) prev;
 	*(node + 3) = (int) next;
-	*(node + 4) = (int) 0;
 
 	if ((int) osProcessList != 0) {
 		*(osProcessList + 2) = (int) node;
@@ -4961,45 +4996,42 @@ int* osCreateProcess(int pid, int* prev, int* next) {
 }
 
 int* tPageTable(int* threadPageTable, int* processPageTable) {
-	int* cursor;
+	int* page;
 	int count;
 
 	count = 0;
-	cursor = pagetable_getAddrAtIndex(processPageTable, count);
 
 	// Setting page table for new thread for code, globals and heap
-	while (*cursor != -1) {
-		pagetable_setAddrAtIndex(threadPageTable, count, cursor);
+	while ((int) pagetable_getAddrAtIndex(processPageTable, count) != -1) {
+		pagetable_setAddrAtIndex(threadPageTable, count, pagetable_getAddrAtIndex(processPageTable, count));
 
 		count = count + 1;
-		cursor = pagetable_getAddrAtIndex(processPageTable, count);
 	}
 
 	// Setting page table for new thread for empty part between heap and stack
-	while (*cursor == -1) {
-		pagetable_setAddrAtIndex(threadPageTable, count, cursor);
+	while ((int) pagetable_getAddrAtIndex(processPageTable, count) == -1) {
+		pagetable_setAddrAtIndex(threadPageTable, count, -1);
 
 		count = count + 1;
-		cursor = pagetable_getAddrAtIndex(processPageTable, count);
 	}
 
 	// Setting page table for new thread for the stack
 	// Allocate new frames, copy frames from the OS process
-	while ((int) cursor != 0) {
-		pagetable_setAddrAtIndex(threadPageTable, count, palloc());
+	while ((int) pagetable_getAddrAtIndex(processPageTable, count) != 0) {
+		page = palloc();
 
-		copyPageFrame(*cursor, pagetable_getAddrAtIndex(threadPageTable, count));
+		pagetable_setAddrAtIndex(threadPageTable, count, page);
+
+		copyPageFrame(pagetable_getAddrAtIndex(processPageTable, count), page);
 
 		count = count + 1;
-		cursor = pagetable_getAddrAtIndex(processPageTable, count);
 	}
 }
 
-int* osProcessForkThread(int* osProcess) {
+int* osProcessForkThread(int* osProcess, int pid) {
 	int* threadNode;
 	int* threadListOfOSProcess;
 	int* threadPageTable;
-
 	int* threadPrevious;
 
 	int* processPageTable;
@@ -5010,7 +5042,7 @@ int* osProcessForkThread(int* osProcess) {
 
 	processPageTable = (int*) *(osProcess + 1);
 
-	*threadNode = (int) *osProcess;
+	*threadNode = pid;
 	*(threadNode + 1) = (int) tPageTable(threadPageTable, processPageTable);
 	*(threadNode + 2) = (int) 0;
 	*(threadNode + 3) = (int) threadListOfOSProcess;
@@ -6499,6 +6531,9 @@ void kernel_event_loop() {
 			println();
 			print((int*) "-------------------------");
 			println();
+
+			shout();
+
 			print((int*) "OS: Handle Page Fault");
 			println();
 
@@ -6725,10 +6760,11 @@ void kernel_event_loop() {
 
 			shout();
 
-			threadList = (int*)*(osCurrentProcess + 4);
-			threadList = osProcessForkThread(osCurrentProcess);
+			osProcessList = osProcessForkThread(osCurrentProcess, arg);
 
-			switch_context(callerPid);
+			switch_context(arg);
+
+			osCurrentProcess = osFindProcess(arg, osProcessList);
 
 			print((int*) "-------------------------");
 			println();
@@ -6793,10 +6829,6 @@ void kernel_event_loop() {
 			osCurrentProcess = osFindProcess(callerPid, osProcessList);
 
 			switch_context(callerPid);
-		}
-
-		if (getListLength(osProcessList, 3) == 0) {
-//			stop = 1;
 		}
 	}
 }
