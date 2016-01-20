@@ -718,6 +718,8 @@ void syscall_threadfork();
 void emitWait();
 void syscall_wait();
 
+void emitCAS();
+void syscall_CAS();
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -732,6 +734,7 @@ int SYSCALL_UNLOCK 		= 5004;
 int SYSCALL_FORK   		= 5005;
 int SYSCALL_WAIT   		= 5006;
 int SYSCALL_THREADFORK  = 5007;
+int SYSCALL_CAS  		= 5008;
 
 // -----------------------------------------------------------------
 // -------------------------- HYPERCALLS ---------------------------
@@ -803,6 +806,7 @@ void handleLock();
 void handleUnlock();
 void handleFork(int isThread);
 void handleWait();
+void handleCAS();
 void freePageTable(int* pagetable);
 void pfree(int* page);
 int* copyCurrentProcess(int isThread);
@@ -4427,6 +4431,45 @@ void syscall_wait() {
 	switchToProcess(OSPid);
 }
 
+void emitCAS() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "CAS", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A2, 0); // new value
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0); // old value
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0); // location
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_CAS);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_CAS() {
+	int location;
+	int oldValue;
+	int newValue;
+
+	location = tlb(*(registers+REG_A0));
+	oldValue = *(registers+REG_A1);
+	newValue = *(registers+REG_A2);
+	
+    passParameterToOS(SYSCALL_CAS, 0);	
+	passParameterToOS(currentProcessPid, 1);
+	passParameterToOS(location, 2);
+	passParameterToOS(oldValue, 3);
+	passParameterToOS(newValue, 4);
+	passParameterToOS(*(registers+REG_A0), 5);
+	switchToProcess(OSPid);
+}
+
 
 // -----------------------------------------------------------------
 // -------------------------- HYPERCALLS ---------------------------
@@ -4475,6 +4518,8 @@ void hypercall_switch_context() {
 				childRegisters = *(processTable + 3 * result + 1);
 				*(childRegisters + REG_V0) = 0;			
 			}
+		} else if (OSevent == SYSCALL_CAS) {
+			*(registers + REG_V0) = getParameterFromOS(2);
 		}
 		
 	} //TODO else
@@ -4721,6 +4766,8 @@ void executeOS(int argc, int* argv) {
 			handleFork(1);
 		} else if (event == SYSCALL_WAIT) {
 			handleWait();
+		} else if (event == SYSCALL_CAS) {
+			handleCAS();
 		} else {
 			switch_context(callerPid); // unknown events are ignored
 		}
@@ -5243,6 +5290,30 @@ void handleWait() {
 	schedule();
 }
 
+void handleCAS() {
+	int* plocation;
+	int oldValue;
+	int newVAlue;
+	int vlocation;
+	int* pageTable;
+
+	plocation = (int*) *(communicationChunk + 2);
+	oldValue = *(communicationChunk + 3);
+	newValue = *(communicationChunk + 4);
+	vlocation = *(communicationChunk + 5);
+
+	
+
+	if (*plocation == oldValue) {
+		*plocation = newValue;
+		*(communicationChunk + 2) = 1;
+	} else {
+		*(communicationChunk + 2) = 0;
+	}
+
+	schedule();
+}
+
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -5403,6 +5474,8 @@ void fct_syscall() {
             syscall_threadfork();
         } else if (*(registers+REG_V0) == SYSCALL_WAIT) {
             syscall_wait();
+        } else if (*(registers+REG_V0) == SYSCALL_CAS) {
+            syscall_CAS();
         } else if (*(registers+REG_V0) == HYPERCALL_SWITCH_CONTEXT) {
             hypercall_switch_context();
         } else if (*(registers+REG_V0) == HYPERCALL_MAP_PAGE_IN_CONTEXT) {
