@@ -712,22 +712,26 @@ void syscall_unlock();
 void emitFork();
 void syscall_fork();
 
+void emitThreadfork();
+void syscall_threadfork();
+
 void emitWait();
 void syscall_wait();
 
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
-int SYSCALL_EXIT   = 4001;
-int SYSCALL_READ   = 4003;
-int SYSCALL_WRITE  = 4004;
-int SYSCALL_OPEN   = 4005;
-int SYSCALL_MALLOC = 5001;
-int SYSCALL_YIELD  = 5002;
-int SYSCALL_LOCK   = 5003;
-int SYSCALL_UNLOCK = 5004;
-int SYSCALL_FORK   = 5005;
-int SYSCALL_WAIT   = 5006;
+int SYSCALL_EXIT   		= 4001;
+int SYSCALL_READ   		= 4003;
+int SYSCALL_WRITE  		= 4004;
+int SYSCALL_OPEN   		= 4005;
+int SYSCALL_MALLOC 		= 5001;
+int SYSCALL_YIELD  		= 5002;
+int SYSCALL_LOCK   		= 5003;
+int SYSCALL_UNLOCK 		= 5004;
+int SYSCALL_FORK   		= 5005;
+int SYSCALL_WAIT   		= 5006;
+int SYSCALL_THREADFORK  = 5007;
 
 // -----------------------------------------------------------------
 // -------------------------- HYPERCALLS ---------------------------
@@ -797,11 +801,11 @@ void handlePageFault();
 void handleExit();
 void handleLock();
 void handleUnlock();
-void handleFork();
+void handleFork(int isThread);
 void handleWait();
 void freePageTable(int* pagetable);
 void pfree(int* page);
-int* copyCurrentProcess();
+int* copyCurrentProcess(int isThread);
 void copyMemSpace(int* from, int* to, int size);
 
 
@@ -3612,6 +3616,7 @@ void compile() {
 	emitLock();
 	emitUnlock();
 	emitFork();
+	emitThreadfork();
 	emitWait();
     emitSwitch_context();
     emitMap_page_in_context();
@@ -4373,6 +4378,26 @@ void syscall_fork() {
 	switchToProcess(OSPid);
 }
 
+void emitThreadfork() {
+ 	createSymbolTableEntry(GLOBAL_TABLE, (int*) "threadfork", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_THREADFORK);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_threadfork() {
+	passParameterToOS(SYSCALL_THREADFORK, 0);	
+	passParameterToOS(currentProcessPid, 1);
+	switchToProcess(OSPid);
+}
+
 void emitWait() {
  	createSymbolTableEntry(GLOBAL_TABLE, (int*) "wait", 0, FUNCTION, INT_T, 0, binaryLength);
 
@@ -4437,6 +4462,13 @@ void hypercall_switch_context() {
 				*(processTable + 3 * getParameterFromOS(1)) = *(processTable + 3 * getParameterFromOS(1)) - 4; 
 			}
 		} else if (OSevent == SYSCALL_FORK) {
+			*(registers + REG_V0) = getParameterFromOS(2);
+			if (*(registers + REG_V0) != -1) {
+				result = *(registers + REG_V0);
+				childRegisters = *(processTable + 3 * result + 1);
+				*(childRegisters + REG_V0) = 0;			
+			}
+		} else if (OSevent == SYSCALL_THREADFORK) {
 			*(registers + REG_V0) = getParameterFromOS(2);
 			if (*(registers + REG_V0) != -1) {
 				result = *(registers + REG_V0);
@@ -4684,11 +4716,13 @@ void executeOS(int argc, int* argv) {
 			handleUnlock();
 			switch_context(*(currentProcess + 2));	
 		} else if (event == SYSCALL_FORK) {
-			handleFork();
+			handleFork(0);
+		} else if (event == SYSCALL_THREADFORK) {
+			handleFork(1);
 		} else if (event == SYSCALL_WAIT) {
 			handleWait();
 		} else {
-			switch_context(callerPid);//TODO does this make sense?
+			switch_context(callerPid); // unknown events are ignored
 		}
 
 	}
@@ -4779,6 +4813,10 @@ void initOS(int argc, int* argv) {
 			halt();			
 		}
 		
+		//print((int*) "initFirstProcess3: ");//DEBUG
+		//print(itoa(i, string_buffer, 10, 0, 0));			
+		//println();
+		
 		map_page_in_context(pid, i, *(pageTable + i));
 		i = i + 1;
 	}
@@ -4797,6 +4835,10 @@ void initOS(int argc, int* argv) {
 		halt();
 	}
     
+    //print((int*) "initFirstProcess4: ");//DEBUG
+	//print(itoa(1023, string_buffer, 10, 0, 0));			
+	//println();
+				
 	map_page_in_context(pid, 1023, *(pageTable + 1023));
 	stackPage = *(pageTable + 1023);
 	
@@ -4817,13 +4859,14 @@ int* createProcess(int parentPid) {
 	//prev
 	//pid
 	//page table
-	//children
+	//list of child processes
 	//pid of child which is waited for
+	//list of child threads
 
 	int* processEntry;
 	int* childrenlist; 	
 
-	processEntry = malloc(6 * 4);
+	processEntry = malloc(7 * 4);
 	*processEntry = 0;
 	*(processEntry + 1) = 0;
 	*(processEntry + 3) = palloc();
@@ -4835,10 +4878,13 @@ int* createProcess(int parentPid) {
 	*(processEntry + 2) = create_context(parentPid);
 	*(processEntry + 4) = malloc(2 * 4);
 	*(processEntry + 5) = 0;
+	*(processEntry + 6) = malloc(2 * 4);
 	
-	//enqueue(readyQueue, processEntry);
+	childrenlist = *(processEntry + 4); //processes
+	*(childrenlist) = 0;
+	*(childrenlist + 1) = 0;
 	
-	childrenlist = *(processEntry + 4);
+	childrenlist = *(processEntry + 6); //threads
 	*(childrenlist) = 0;
 	*(childrenlist + 1) = 0;
 
@@ -4919,6 +4965,10 @@ void handlePageFault() {
 		handleExit();
 		//schedule();
 	} else {
+		//print((int*) "handlePageFault5: ");//DEBUG
+		//print(itoa(page, string_buffer, 10, 0, 0));			
+		//println();
+		
 		map_page_in_context(*(currentProcess + 2), page, *(pageTable + page));
 		switch_context(*(currentProcess + 2));
 	}
@@ -4928,6 +4978,8 @@ void handlePageFault() {
 void handleExit() {
 	int exitCode;
 	int* parent;
+	int* childrenList;
+	int* child;
 	
 	exitCode = *(communicationChunk + 2); 
 
@@ -4947,13 +4999,35 @@ void handleExit() {
 		*(parent + 5) = 0;
 
 		remove(*(parent + 4), *(currentProcess + 2), 2);
+		remove(*(parent + 6), *(currentProcess + 2), 2);
 		remove(blockingQueue, *(parent + 2), 2);
 		enqueue(readyQueue, parent);
 	} else {
 		enqueue(zombieQueue, currentProcess);
 	} 
-   
-    freePageTable(*(currentProcess + 3));
+	
+   	//assumptions: only main thread can call threadfork (no unbounded hierachy of threads), //TODO which semantics do we want??? discuss!
+   	// all threads/processes are waited for
+   	//memory is freed when main thread exits, all other threads should already have exited
+   	if (parent == (int*) 0)//TODO get rid of this hack based on the assumptions above!!
+    	freePageTable(*(currentProcess + 3));
+    	
+    //TODO free stack pages
+    
+    //remove children which have not been waited for from zombieQueue
+    childrenList = *(currentProcess + 4);
+    child = *childrenList;
+    while (child != 0) {
+    	remove(zombieQueue, *(child + 2), 2);
+    	child = *child;
+    }
+    
+    childrenList = *(currentProcess + 6);
+    child = *childrenList;
+    while (child != 0) {
+    	remove(zombieQueue, *(child + 2), 2);
+    	child = *child;
+    }
  
     delete_context(*(currentProcess + 2));
     
@@ -5020,12 +5094,12 @@ void handleUnlock() {
 	}
 }
 
-void handleFork() {
+void handleFork(int isThread) {
 	int* child;
 	int* childRegisters;
 	int* childElement;
 
-	child = copyCurrentProcess();
+	child = copyCurrentProcess(isThread);
 	
 	if (child == (int*) 0) {
     	*(communicationChunk + 2) = -1;
@@ -5038,9 +5112,10 @@ void handleFork() {
 	*(childElement + 1) = 0;
 	*(childElement + 2) = *(child + 2);
 
-	enqueue((int*) *(currentProcess + 4), childElement);
-
-	//*(child + 2) = *(child + 2) + 4;
+	if (isThread == 0)	
+		enqueue((int*) *(currentProcess + 4), childElement);
+	else
+		enqueue((int*) *(currentProcess + 6), childElement);
 
 	enqueue(readyQueue, child);
 
@@ -5049,12 +5124,13 @@ void handleFork() {
 	switch_context(*(currentProcess + 2));
 }
 
-int* copyCurrentProcess() {
+int* copyCurrentProcess(int isThread) {
 	int* child;
 	int* pagetableToCopy;
 	int* newPagetable;
 	int* listEntry;
 	int i;
+	int isStack;
 
 	child = createProcess(*(currentProcess + 2));
 
@@ -5065,38 +5141,58 @@ int* copyCurrentProcess() {
 	newPagetable = *(child + 3);
 
 	pagetableToCopy = (int*) *(currentProcess + 3);
-	//child = malloc(6 * 4);
-
-	//*child = 0;
-	//*(child + 1) = 0;
-	//*(child + 2) = create_context();
-	//*(child + 3) = newPagetable;
-	//*(child + 4) = malloc(2 * 4);
-	//*(child + 5) = 0;
-
-	//listEntry = *(child + 4);
-	//*listEntry = 0;
-	//*(listEntry + 1) = 0;
 
 	i = 0;
-
+	isStack = 0;
+	
 	while (i < 4 * KILOBYTE / 4) {
 		if (*(pagetableToCopy + i) != 0) {
-			*(newPagetable + i) = palloc();
+			if (isThread == 0) {
+				*(newPagetable + i) = palloc();
+				
+				if (*(newPagetable + i) == 0) {
+					freePageTable(newPagetable);
+					return 0;
+				}
+				
+				//print((int*) "copyCurrentProcess1: ");//DEBUG
+				//print(itoa(i, string_buffer, 10, 0, 0));			
+				//println();
+				
+				map_page_in_context(*(child + 2), i, *(newPagetable + i));
 
-			if (*(newPagetable + i) == 0) {
-				freePageTable(newPagetable);
-				return 0;
-			}
+				copyMemSpace(*(pagetableToCopy + i), *(newPagetable + i), 4 * KILOBYTE / 4);
+			} else if (isStack == 0) {
+				*(newPagetable + i) = *(pagetableToCopy + i);
+				
+				//print((int*) "copyCurrentProcess2: ");//DEBUG
+				//print(itoa(i, string_buffer, 10, 0, 0));			
+				//println();
+				
+				map_page_in_context(*(child + 2), i, *(newPagetable + i));
+ 			} else if (isStack == 1) {
+ 				*(newPagetable + i) = palloc();
+				
+				if (*(newPagetable + i) == 0) {//TODO free stack pages + pageTable
+					return 0;
+				}
+				
+				//print((int*) "copyCurrentProcess1: ");//DEBUG
+				//print(itoa(i, string_buffer, 10, 0, 0));			
+				//println();
+				
+				map_page_in_context(*(child + 2), i, *(newPagetable + i));
 
-			map_page_in_context(*(child + 2), i, *(newPagetable + i));
-
-			copyMemSpace(*(pagetableToCopy + i), *(newPagetable + i), 4 * KILOBYTE / 4);
+				copyMemSpace(*(pagetableToCopy + i), *(newPagetable + i), 4 * KILOBYTE / 4);
+ 			}
+			
+		} else {//assumption: there is at least one unmapped page between stack and heap //TODO get rid of this assumption?
+			isStack = 1;
 		}
 
 		i = i + 1; 
 	}
-
+	
 	return child;
 }
 
@@ -5121,14 +5217,19 @@ void handleWait() {
 	childEntry = search(*(currentProcess + 4), pid, 2);
 	
 	if (childEntry == (int*) 0) {
-		switch_context(*(currentProcess + 2));
-		return;
+		childEntry = search(*(currentProcess + 6), pid, 2);
+		
+		if (childEntry == (int*) 0) {
+			switch_context(*(currentProcess + 2));
+			return;
+		}
 	}
 	
 	childEntry = search(zombieQueue, pid, 2);
 	
 	if (childEntry != (int*) 0) {
 		remove(*(currentProcess + 4), pid, 2);
+		remove(*(currentProcess + 6), pid, 2);
 		remove(zombieQueue, pid, 2);
 		switch_context(*(currentProcess + 2));
 		return;
@@ -5136,7 +5237,7 @@ void handleWait() {
 	
 	*(currentProcess + 5) = pid;
 	notReady = 1;
-	//*(currentProcess + 2) = pc + 4;
+
 	enqueue(blockingQueue, currentProcess);
 
 	schedule();
@@ -5184,6 +5285,8 @@ int tlb(int vaddr) {
 		exit(-1);
 	} else if (vaddr >= 4 * MEGABYTE) {
 		print((int*) "Segmentation fault");
+		print(itoa(vaddr, string_buffer, 10, 0, 0));
+		println();
 		//syscall_exit();//TODO kill only current process
 		//return -1;
 		exit(-1);
@@ -5296,6 +5399,8 @@ void fct_syscall() {
             syscall_unlock();
         } else if (*(registers+REG_V0) == SYSCALL_FORK) {
             syscall_fork();
+        } else if (*(registers+REG_V0) == SYSCALL_THREADFORK) {
+            syscall_threadfork();
         } else if (*(registers+REG_V0) == SYSCALL_WAIT) {
             syscall_wait();
         } else if (*(registers+REG_V0) == HYPERCALL_SWITCH_CONTEXT) {
@@ -6431,16 +6536,16 @@ void emulate(int argc, int *argv) {
 // -----------------------------------------------------------------
 
 int selfie(int argc, int* argv) {
-	//if (argc == 0) {   
-		//print(selfieName);
-        //print((int*) ": loading kernel :-D");
-        //println();
-        
-		//executeOS();
+	if (argc <= 0) {  //DEBUG
+	    print((int*) "default: selfcompilation");
+	    println();
+		sourceName = "selfie.c";
+		binaryName = "selfie2.mips";
+        compile();
+        emit();
 
-        //return 0;
-	//} else
-	if (argc < 2) {
+        return 0;
+	} else if (argc < 2) {
         return -1;
 	} else {
 		numberOfInstructions = 10000;
