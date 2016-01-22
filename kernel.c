@@ -15,6 +15,7 @@ int CMD_DELETECONTEXT = 4;
 int CMD_MAPPAGEINCCONTEXT = 5;
 int CMD_FLUSHPAGEINCCONTEXT = 6;
 int CMD_HALT = 7;
+int CMD_TFORK = 8;
 
 void printBoot();
 int* create_Context();
@@ -22,6 +23,9 @@ void delete_Context();
 int* getPFree();
 void addPFree(int* addr);
 
+int* dummyP1;
+int* dummyP2;
+int i;
 int main()
 {
     if (bootPrep == 1) {
@@ -42,7 +46,7 @@ int main()
             *node = (int)amalloc(1024 * 4, 1); //Aligned Malloc with 4KB = 1Page
         }
         else {
-            *node = getPFree();
+            *node = (int)getPFree();
         }
         mapPageInContext();
     }
@@ -70,6 +74,30 @@ int main()
     else if (*args == CMD_CREATECONTEXT) {
         node = create_Context();
         createContext(*(node + 1), *(node + 2), *(node + 3), *(node + 4));
+    }else if(*args == CMD_TFORK){
+       *(readyQ + 1) = *(args + 1); //Save pc
+       *(readyQ + 2) = *(args + 2); //Save pT
+       *(readyQ + 3) = *(args + 3); //Save registers
+       node = create_Context();
+       //Copy pageTable unitl we read a zero, or we are on the last 8KB
+       dummyP1 = (int*)*(node+2);
+       dummyP2 =(int*)*(readyQ + 2);
+       i = 0;
+       while(*(dummyP2+i) != 0){
+            *(dummyP1 + i) = *(dummyP2 + i);
+            i = i + 1;
+       }
+       i = 0;
+       dummyP1 = (int*)*(node + 3);
+       dummyP2 = (int*)*(readyQ + 3);
+       while(i < 32){
+            *(dummyP1 + i) = *(dummyP2 + i);
+            i = i + 1;
+       }
+       *(dummyP1 + 2) = 0; //Child has internal PID 0 after fork
+       *(dummyP2 + 2) = *(node + 4); //Parent has in REG_V0 the pid of the child
+       *(node + 1) = *(readyQ + 1);
+       createContext(*(readyQ + 1), *(readyQ + 2), *(readyQ + 3), *(readyQ + 4)); //Restore Parent
     }
     else if (*args == CMD_HALT) {
         exit(0);
@@ -123,14 +151,14 @@ void delete_Context()
     int* pTable;
     i = 0;
     ptr = readyQ;
-    pTable = (int*)*(ptr + 2);
+    //pTable = (int*)*(ptr + 2);
     //Recycle pages
-    while (i < 1024) {
-        if (*(pTable + i) != 0) {
-            addPFree(pTable + i);
-        }
-        i = i + 1;
-    }
+    //while (i < 1024) {
+    //    if (*(pTable + i) != 0) {
+    //        addPFree(pTable + i);
+    //    }
+    //    i = i + 1;
+    //}
     //Is last entry?
     if (*ptr == (int)ptr) {
         readyQ = (int*)0;

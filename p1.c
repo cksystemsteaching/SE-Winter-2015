@@ -1,17 +1,20 @@
 //TestFile for asg 6 and 7
+void fork(int pId);
 
 int main(){
-    putchar('H');
-    putchar('e');
-    putchar('l');
-    putchar('l');
-    putchar('o');
-    putchar(' ');
-    putchar('W');
-    putchar('o');
-    putchar('r');
-    putchar('l');
-    putchar('d');
-    putchar(10);
-    exit(0);
+     fork(0);
+    
+}
+
+void fork(int pid){
+    pid = tfork();
+    putchar('a');
+
+    if(pid != 0){
+        putchar('P');
+        exit(pid);
+    }else{
+        putchar('C');
+        exit(pid);
+    }
 }

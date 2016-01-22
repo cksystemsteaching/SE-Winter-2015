@@ -128,7 +128,6 @@ int l_print();
 void l_emit_itoa();
 int l_itoa();
 
-
 //==============================
 //Kernel Server Forwardings
 //==============================
@@ -772,6 +771,9 @@ void syscall_malloc();
 void emitAMalloc();
 void syscall_amalloc();
 
+void emitTFork();
+void syscall_tfork();
+
 void emitPutchar();
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
@@ -785,6 +787,7 @@ int SYSCALL_AMALLOC = 5002;
 
 int SYSCALL_PRINT = 5003;
 int SYSCALL_ITOA = 5004;
+int SYSCALL_TFORK = 5005;
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -3568,6 +3571,7 @@ void compile()
     emitMalloc();
     emitAMalloc();
     emitPutchar();
+    emitTFork();
     l_emit_syscall_itoa();
     l_emit_syscall_print();
     mc_emit_hyperCall_switchContext();
@@ -4064,6 +4068,34 @@ void syscall_exit()
     }
 }
 
+void emitTFork()
+{
+    createSymbolTableEntry(GLOBAL_TABLE, (int*)"tfork", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    // load the correct syscall number and invoke syscall
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_TFORK);
+    emitRFormat(0, 0, 0, 0, FCT_SYSCALL);
+
+    // jump back to caller, return value is in REG_V0
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_tfork()
+{
+    //Restore Kernel Context
+    pc = pc + 4; //Set PC to JR
+    mc_restoreKernelContext();
+    storeMemory(mc_kernel_argsAddr, 8); //tfork
+    storeMemory(mc_kernel_argsAddr + 4, *mc_currentUserProcess);
+    storeMemory(mc_kernel_argsAddr + 8, (*(mc_currentUserProcess + 2) - (int)memory));
+    storeMemory(mc_kernel_argsAddr + 12, (*(mc_currentUserProcess + 1) - (int)memory));
+}
+
 void emitRead()
 {
     createSymbolTableEntry(GLOBAL_TABLE, (int*)"read", 0, FUNCTION, INT_T, 0, binaryLength);
@@ -4377,7 +4409,7 @@ void l_emit_syscall_print()
 
 void l_syscall_print()
 {
-    print(memory + *(registers + REG_A0)/4);
+    print(memory + *(registers + REG_A0) / 4);
     println(); //Prints only after println() O.o
 }
 
@@ -4397,7 +4429,7 @@ void l_emit_syscall_itoa()
     emitIFormat(OP_LW, REG_SP, REG_A0, 0); //String
     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
-    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_PRINT);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_ITOA);
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
 
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
@@ -4410,8 +4442,6 @@ int l_syscall_itoa()
     buffer = *(registers + REG_A0);
     print(buffer);
 }
-
-
 
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
@@ -4456,7 +4486,7 @@ int tlb(int vaddr)
         debug = db;
         pAddr = (int)mc_getPageTableEntry(vpn);
     }
-    if(pAddr == 0){
+    if (pAddr == 0) {
         //TODO Trap something went wrong with paging
         exit(200);
     }
@@ -4535,6 +4565,9 @@ void fct_syscall()
         }
         else if (*(registers + REG_V0) == SYSCALL_ITOA) {
             l_syscall_itoa();
+        }
+        else if (*(registers + REG_V0) == SYSCALL_TFORK) {
+            syscall_tfork();
         }
         else {
             exception_handler(EXCEPTION_UNKNOWNSYSCALL);
@@ -5321,18 +5354,19 @@ void run()
         fetch();
         decode();
         execute();
-        if(mc_currentPId > 0){
-           if(mc_switchAfterMInstructions == iCount){
+        if (mc_currentPId > 0) {
+            if (mc_switchAfterMInstructions == iCount) {
                 mc_restoreKernelContext();
-                
+
                 storeMemory(mc_kernel_argsAddr, 3); //Switch Context
                 storeMemory(mc_kernel_argsAddr + 4, *mc_currentUserProcess);
                 storeMemory(mc_kernel_argsAddr + 8, (*(mc_currentUserProcess + 2) - (int)memory));
-                storeMemory(mc_kernel_argsAddr + 12,(*(mc_currentUserProcess + 1) - (int)memory));
+                storeMemory(mc_kernel_argsAddr + 12, (*(mc_currentUserProcess + 1) - (int)memory));
                 iCount = 0;
-           }else{
-               iCount = iCount + 1;
-           }
+            }
+            else {
+                iCount = iCount + 1;
+            }
         }
     }
 
@@ -5764,17 +5798,16 @@ int main(int argc, int* argv)
 void mc_emit_hyperCall_createContext()
 {
     createSymbolTableEntry(GLOBAL_TABLE, (int*)"createContext", 0, FUNCTION, INT_T, 0, binaryLength);
-
-    emitIFormat(OP_LW, REG_SP, REG_A3, 0); //pid
+    emitIFormat(OP_LW, REG_SP, REG_A3, 0);
     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
-    emitIFormat(OP_LW, REG_SP, REG_A2, 0); //reg
+    emitIFormat(OP_LW, REG_SP, REG_A2, 0);
     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
-    emitIFormat(OP_LW, REG_SP, REG_A1, 0); //pt
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0);
     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
-    emitIFormat(OP_LW, REG_SP, REG_A0, 0); // pc
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_V0, MC_HYPERCALL_CREATECONTEXT);
@@ -5789,6 +5822,11 @@ int mc_hyperCall_createContext()
     if (mc_currentPId != 0) {
         //TODO Implement userMode Trap
     }
+    mc_currentPId = *(registers + REG_A3);
+    pc = *(registers + REG_A0);
+    mc_currentPageTable = (int*)(memory + (*(registers + REG_A1) / 4));
+    registers = (int*)(memory + (*(registers + REG_A2) / 4));
+
 }
 
 void mc_emit_hyperCall_loadBinary()
@@ -5808,7 +5846,6 @@ void mc_emit_hyperCall_loadBinary()
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_V0, MC_HYPERCALL_LOADBINARY);
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
-
 }
 
 int mc_hyperCall_loadBinary()
@@ -5835,17 +5872,17 @@ int mc_hyperCall_loadBinary()
 void mc_emit_hyperCall_switchContext()
 {
     createSymbolTableEntry(GLOBAL_TABLE, (int*)"switchContext", 0, FUNCTION, INT_T, 0, binaryLength);
-    
-    emitIFormat(OP_LW, REG_SP, REG_A3, 0); 
+
+    emitIFormat(OP_LW, REG_SP, REG_A3, 0);
     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
-    emitIFormat(OP_LW, REG_SP, REG_A2, 0); 
+    emitIFormat(OP_LW, REG_SP, REG_A2, 0);
     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
-    emitIFormat(OP_LW, REG_SP, REG_A1, 0); 
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0);
     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
-    emitIFormat(OP_LW, REG_SP, REG_A0, 0); 
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_V0, MC_HYPERCALL_SWITCHCONTEXT);
@@ -5894,13 +5931,19 @@ int mc_hyperCall_deleteContext()
             if (*(registers + REG_A2) == 0) {
                 if (*(registers + REG_A3) == 0) {
                     mc_restoreKernelContext();
-                    storeMemory(mc_kernel_argsAddr, 7); //Delete Context
+                    storeMemory(mc_kernel_argsAddr, 7); //Halt
                     storeMemory(mc_kernel_argsAddr + 4, 0);
                     storeMemory(mc_kernel_argsAddr + 8, 0);
                     storeMemory(mc_kernel_argsAddr + 12, 0);
                 }
             }
         }
+    }
+    else {
+        mc_currentPId = *(registers + REG_A3);
+        pc = *(registers + REG_A0);
+        mc_currentPageTable = (int*)(memory + (*(registers + REG_A1) / 4));
+        registers = (int*)(memory + (*(registers + REG_A2) / 4));
     }
 }
 
@@ -5930,8 +5973,8 @@ int mc_hyperCall_mapPageInContext()
         print((int*)"Hypercall mapPageInContext");
         println();
     }
-    mc_restoreUserContext();
     halt = 1;
+    mc_restoreUserContext();
 }
 
 void mc_emit_hyperCall_flushPageInContext()
@@ -6007,10 +6050,10 @@ void mc_setPageTableEntry(int offset, int value)
 
 void mc_restoreKernelContext()
 {
-    *mc_currentUserProcess = pc-4;                        //Programcounter
-    *(mc_currentUserProcess + 1) = (int)registers;      //registers
+    *mc_currentUserProcess = pc - 4;                         //Programcounter
+    *(mc_currentUserProcess + 1) = (int)registers;           //registers
     *(mc_currentUserProcess + 2) = (int)mc_currentPageTable; //page table
-    *(mc_currentUserProcess + 3) = mc_currentPId;       //pID
+    *(mc_currentUserProcess + 3) = mc_currentPId;            //pID
     pc = 0;
     registers = (int*)*(mc_kernel_context + 1);
     mc_currentPageTable = (int*)*(mc_kernel_context + 2);
