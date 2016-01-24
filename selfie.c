@@ -774,6 +774,9 @@ void syscall_amalloc();
 void emitTFork();
 void syscall_tfork();
 
+void emitCAS();
+void syscall_cas();
+
 void emitPutchar();
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
@@ -788,7 +791,7 @@ int SYSCALL_AMALLOC = 5002;
 int SYSCALL_PRINT = 5003;
 int SYSCALL_ITOA = 5004;
 int SYSCALL_TFORK = 5005;
-
+int SYSCALL_CAS = 5006;
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -3572,6 +3575,7 @@ void compile()
     emitAMalloc();
     emitPutchar();
     emitTFork();
+    emitCAS();
     l_emit_syscall_itoa();
     l_emit_syscall_print();
     mc_emit_hyperCall_switchContext();
@@ -4148,6 +4152,60 @@ void syscall_read()
     }
 }
 
+void emitCAS()
+{
+    createSymbolTableEntry(GLOBAL_TABLE, (int*)"cas", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A2, 0); // newval
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0); // oldval
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0); // *pointer
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_CAS);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    // jump back to caller, return value is in REG_V0
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void syscall_cas()
+{
+    int oldval;
+    int newval;
+    int vaddr;
+    int* pointer;
+
+    newval = *(registers + REG_A2);
+    oldval = *(registers + REG_A1);
+    vaddr = *(registers + REG_A0);
+
+    pointer = memory + tlb(vaddr);
+
+    if (*pointer == oldval) {
+        *pointer = newval;
+        *(registers + REG_V0) = 1;
+        if (debug) {
+            print(itoa(mc_currentPId, string_buffer, 10, 0, 0));
+            print((int*)" CAS: Successfully written new value");
+            println();
+        }
+    }
+    else {
+        *(registers + REG_V0) = 0;
+        if (debug) {
+            print(itoa(mc_currentPId, string_buffer, 10, 0, 0));
+            print((int*)" CAS: Cannot write new value, value has changed");
+            println();
+        }
+    }
+}
+
 void emitWrite()
 {
     createSymbolTableEntry(GLOBAL_TABLE, (int*)"write", 0, FUNCTION, INT_T, 0, binaryLength);
@@ -4568,6 +4626,9 @@ void fct_syscall()
         }
         else if (*(registers + REG_V0) == SYSCALL_TFORK) {
             syscall_tfork();
+        }
+        else if (*(registers + REG_V0) == SYSCALL_CAS) {
+            syscall_cas();
         }
         else {
             exception_handler(EXCEPTION_UNKNOWNSYSCALL);
@@ -5826,7 +5887,6 @@ int mc_hyperCall_createContext()
     pc = *(registers + REG_A0);
     mc_currentPageTable = (int*)(memory + (*(registers + REG_A1) / 4));
     registers = (int*)(memory + (*(registers + REG_A2) / 4));
-
 }
 
 void mc_emit_hyperCall_loadBinary()
