@@ -26,7 +26,7 @@ run:
 	./selfie -l kernel.mips32 -m 12
 
 cas_:
-	cp testPCP_CAS.c p1.c 
+	cp ./testPCP_CAS.c p1.c 
 
 ncas_: 
 	cp ./testPCP_noCAS.c p1.c

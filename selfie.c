@@ -110,7 +110,7 @@ int MC_HYPERCALL_LOADBINARY = 6005; //Loads binary p1.mips32 hardcoded for now
 int* mc_kernel_context = (int*)0; //Our kernel has his own pointer.
 int mc_kernel_argsAddr = 0;
 int* mc_currentPageTable = (int*)0;
-int mc_switchAfterMInstructions = 10;
+int mc_switchAfterMInstructions = 4;
 int* mc_currentUserProcess;
 void mc_restoreUserContext();
 //==============================
