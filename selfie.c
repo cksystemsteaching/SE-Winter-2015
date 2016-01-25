@@ -825,6 +825,8 @@ int* osUnzombifyProcess(int pid);
 
 int* tPageTable(int* threadPT, int* parentProcessPT);
 
+void freePageTable(int* page_table, int pid);
+
 // -----------------------------------------------------------------
 // ------------------------- PAGE TABLE ---------------------------
 // -----------------------------------------------------------------
@@ -5035,6 +5037,36 @@ int* tPageTable(int* threadPageTable, int* processPageTable) {
 	}
 }
 
+void pfree(int* frame) {
+	int* cursor;
+
+	cursor = frame;
+
+	while ((int) cursor != (int) frame + PAGE_FRAME_SIZE) {
+		*cursor = 0;
+		cursor = cursor + 1;
+	}
+
+	*frame = free_list;
+
+	free_list = frame;
+}
+
+void freePageTable(int* page_table, int pid) {
+	int index;
+
+	index = 0;
+
+	while (index < PAGE_TABLE_SIZE) {
+		if (*(page_table + index) != -1) {
+			pfree(*(page_table + index));
+			flush_page_in_context(pid, index);
+		}
+
+		index = index + 1;
+	}
+}
+
 int* osProcessForkThread(int* osProcess, int pid) {
 	int* threadNode;
 	int* threadListOfOSProcess;
@@ -5294,10 +5326,9 @@ void hypercall_map_page_in_context() {
 	pagetable_setAddrAtIndex(page_table, index, paddr);
 }
 
-void flush_page_in_context(int pid, int vaddr) {
+void flush_page_in_context(int pid, int index) {
 	int* context;
 	int* page_table;
-	int index;
 
 	context = contextFindContextByPID(kernelProcessList, pid);
 	page_table = context_getPageTable(context);
@@ -6494,6 +6525,29 @@ int continueInSearch(int a, int *b) {
 	return c;
 }
 
+void mapPages(int callerPid, int idx, int* paddr) {
+	int* cursor;
+	int* pageTable;
+	int* prevPage;
+	int* prevPageTable;
+	int* callerProcess;
+
+	cursor = osProcessList;
+	callerProcess = osFindProcess(callerPid, osProcessList);
+	prevPageTable = *(callerProcess + 1);
+	prevPage = pagetable_getAddrAtIndex(prevPageTable, idx);
+
+	while ((int) cursor != 0) {
+		pageTable = *(cursor + 1);
+
+		if (pagetable_getAddrAtIndex(pageTable, idx) == prevPage) {
+			map_page_in_context(*cursor, idx, paddr);
+		}
+
+		cursor = *(cursor + 3);
+	}
+}
+
 void kernel_event_loop() {
 	int* sharedMemory;
 	int eventType;
@@ -6545,7 +6599,8 @@ void kernel_event_loop() {
 			println();
 
 			page = palloc();
-			map_page_in_context(callerPid, arg / PAGE_FRAME_SIZE, page);
+
+			mapPages(callerPid, arg / PAGE_FRAME_SIZE, page);
 
 			pageTable = (int*) *(processFindByPID(callerPid) + 1);
 
@@ -6771,9 +6826,9 @@ void kernel_event_loop() {
 
 			osProcessList = osProcessForkThread(osCurrentProcess, arg);
 
-			osCurrentProcess = osFindProcess(callerPid, osProcessList);
+			osCurrentProcess = osProcessList;
 
-			switch_context(callerPid);
+			switch_context(arg);
 
 			print((int*) "-------------------------");
 			println();
@@ -6816,10 +6871,12 @@ void kernel_event_loop() {
 				}
 			}
 
+			freePageTable(*(process + 1), *osCurrentProcess);
+
 			if ((int) osProcessList == 0) {
 				stop = 1;
 			} else {
-                                process = (int*) *(osCurrentProcess + 3);
+	                        process = (int*) *(osCurrentProcess + 3);
 
                                 if ((int) process == 0) {
                                         process = osProcessList;
