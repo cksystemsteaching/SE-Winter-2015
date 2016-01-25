@@ -169,6 +169,7 @@ void delete_Context()
             ptr = (int*)*ptr;
         }
         *ptr = (int)newStart;
+        readyQ = newStart;
     }
 }
 
