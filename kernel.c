@@ -87,6 +87,15 @@ int main()
             *(dummyP1 + i) = *(dummyP2 + i);
             i = i + 1;
        }
+       *(dummyP1 + 1023) = (int)amalloc(1024 * 4 , 1);
+       //*(dummyP1 + (VMEMSIZE / 4)-2) = amalloc(1024 * 4, 1);
+       dummyP1 = (int*)*(dummyP1 + (VMEMSIZE /4));
+       dummyP2 = (int*)*(dummyP2 + (VMEMSIZE /4));
+       i = 0;
+       while(*(dummyP2+i) != 0){
+            *(dummyP1 +i) = *(dummyP2 + i);
+            i = i + 1;
+       }
        i = 0;
        dummyP1 = (int*)*(node + 3);
        dummyP2 = (int*)*(readyQ + 3);

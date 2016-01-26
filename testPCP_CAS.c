@@ -1,45 +1,55 @@
 //TestFile Consumer Producer
+//
+// Stack Structure
+//                   top
+//                    |
+//                    v
+//  | next | <---- | next |
+//  | val  |       | val  |
+//  If we pop from the stack, top becomes next
+//
+//    top
+//     |
+//     v
+//  | next |
+//  | val  |
+//  If we push onto the stack,top becomes the new entry end next is the old top
+//
+//                                       top (new node)
+//                                        |
+//                                        v
+//  | next |<-----| next |<-(oldTop)---| next |
+//  | val  |      | val  |             | val  |
+//  our emulator has some restrictions thus we have no free, so
+//  we have a lot of unused/unreachable list entry's once removed from pop
+//
 
-int old;
-int* p;
-int ret;
-
-int listSize = 10; //Our Array has max 10 entrys
-int fillCount;
-int runs = 10;
+int runs = 26;
 int ascii = 65; //Start char A
 int item;
-int* mutex; //We use a mutex with cas to ensure that only one process can read and write at a time
-            //My understanding is that this is also a Treiber Stack, because it's a lock free implementation
+int* top;
+int nodeCount;
 int push(int item);
 int pop();
-
+int* createNode();
 int main()
 {
     int pid;
-    p = malloc(4 * listSize);
-    mutex = malloc(4);
-    *mutex = 0;
-    fillCount = -1;
+    top = malloc(4);
+    *top = 0;
     pid = tfork();
-
+    nodeCount = 0;
     if (pid != 0) {
-        while (runs >= 0) {
-            if (fillCount > listSize - 1) {
+            while (runs > 0) {
+                push(ascii);
             }
-            else {
-                if (push(ascii) == 1) {
-                    runs = runs - 1;
-                }
-            }
-        }
-        exit(0);
+            exit(0);
     }
     else {
         while (1) {
-            if (fillCount < 0) {
-                if(runs < 0){
-                    exit(0);
+            if (nodeCount <= 0) {
+                if (runs <= 0) {
+                    exit(pid);
                 }
             }
             else {
@@ -52,25 +62,49 @@ int main()
     }
 }
 
-int push(int item)
+int push(int itm)
 {
-    if (cas(mutex, 0, 1) == 1) {
-        fillCount = fillCount + 1;
-        *(p + fillCount) = item;
-        ascii = ascii + 1;
-        *mutex = 0; //Done
-        return 1;
+    int* node;
+    int old;
+    node = createNode();
+    while (1) {
+        old = *top;
+        *(node + 1) = ascii;
+
+        if (cas(top, old, node) == 1) {
+            *node = old;
+            ascii = ascii + 1;
+            runs = runs - 1;
+
+            nodeCount = nodeCount + 1;
+
+            return 1;
+        }
     }
-    return 0;
 }
 
 int pop()
 {
-    if (cas(mutex, 0, 1) == 1) {
-        item = *(p + fillCount);
-        fillCount = fillCount - 1;
-        *mutex = 0;
-        return 1;
+    int newTop;
+    int* oldTop;
+    int old;
+    int value;
+    while (1) {
+        oldTop = (int*)*top;
+        value = *(oldTop + 1);
+        old = *top;
+        newTop = *oldTop;
+        if (cas(top, old, newTop) == 1) {
+            item = *(oldTop + 1);
+            nodeCount = nodeCount - 1;
+            return 1;
+        }
     }
-    return 0;
+}
+
+int* createNode()
+{
+    int* node;
+    node = malloc(4 * 2);
+    return node;
 }

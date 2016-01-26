@@ -110,7 +110,7 @@ int MC_HYPERCALL_LOADBINARY = 6005; //Loads binary p1.mips32 hardcoded for now
 int* mc_kernel_context = (int*)0; //Our kernel has his own pointer.
 int mc_kernel_argsAddr = 0;
 int* mc_currentPageTable = (int*)0;
-int mc_switchAfterMInstructions = 4;
+int mc_switchAfterMInstructions = 36;
 int* mc_currentUserProcess;
 void mc_restoreUserContext();
 //==============================
@@ -4180,13 +4180,12 @@ void syscall_cas()
     int newval;
     int vaddr;
     int* pointer;
-
     newval = *(registers + REG_A2);
     oldval = *(registers + REG_A1);
     vaddr = *(registers + REG_A0);
 
     pointer = memory + tlb(vaddr);
-
+   
     if (*pointer == oldval) {
         *pointer = newval;
         *(registers + REG_V0) = 1;
@@ -4237,12 +4236,13 @@ void syscall_write()
     size = *(registers + REG_A2);
     vaddr = *(registers + REG_A1);
     fd = *(registers + REG_A0);
+    
 
     buffer = memory + tlb(vaddr);
-
+    
     size = write(fd, buffer, size);
-
     *(registers + REG_V0) = size;
+    
 
     if (debug_write) {
         print(binaryName);
