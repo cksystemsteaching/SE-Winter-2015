@@ -1,21 +1,17 @@
 int main(){
-	putchar(10);
-	putchar(10);
+	int pid;
+	pid = getPID();
 	putchar(10);
 	putchar('h');
-	putchar(10);
-	putchar(10);
 	putchar('a');
-	putchar(10);
-	putchar(10);
 	putchar('l');
-	putchar(10);
-	putchar(10);
 	putchar('l');
-	putchar(10);
-	putchar(10);
 	putchar('o');
+	putchar(' ');
+	putchar(pid+'0');
 	putchar(10);
+	//yield();
+//	calculateSum();
 	exit(30);
 }
 void calculateSum(){

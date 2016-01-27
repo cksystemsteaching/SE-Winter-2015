@@ -24,6 +24,7 @@ int* initList();
 int* findProcessByPid(int *queue, int pid);
 int* removeFirst(int *queue);
 void deleteProcess(int *queue, int pid);
+int* removeFromList(int *queue, int pid);
 void appendProcess(int *queue, int *process);
 int* pollHead(int *queue);
 int* pollTail(int *queue);
@@ -46,19 +47,34 @@ int main(){
 	putchar('E');
 	putchar('L');
 	putchar(10);
+	putchar(10);
 
 	ipc = allocIpc(4);
 	processQueue = initList();
+	
 	currProcess = createProcess();
 	hcLoadBinary(getPid(currProcess));
+	
 	appendProcess(processQueue, currProcess);
+	
+//	printProcessQueue(processQueue);
+	
 	currProcess = createProcess();
 	hcLoadBinary(getPid(currProcess));
+	//appendProcess(processQueue, currProcess);
+	
+	//currProcess = (int*)0;
 	hcSwitchContext(getPid(currProcess));
 	
 	
 	while(1){
-	
+	//	putchar('i');
+	//	putchar('p');
+	//	putchar('c');
+	//	putchar(' ');
+	//	putchar(*ipc+'0');
+	//	putchar(10);
+		
 		if(*ipc == CREATECONTEXT){
 			putchar('c');
 			putchar('r');
@@ -79,21 +95,39 @@ int main(){
 			putchar(10);
 		
 		} else if(*ipc == SWITCHCONTEXT){
-			putchar('s');
-			putchar('w');
-			putchar('i');
-			putchar('t');
-			putchar('c');
-			putchar('h');
-			putchar(10);
+//			putchar(10);
+//			putchar(10);
+//			putchar('s');
+//			putchar('w');
+//			putchar('i');
+//			putchar('t');
+//			putchar('c');
+//			putchar('h');
+//			putchar(10);
+			
+			
 			
 			if((int)currProcess != 0)
 				appendProcess(processQueue, currProcess);
-	
+//			printProcessQueue(processQueue);
+			currProcess = (int*)0;
 			currProcess = removeFirst(processQueue);
-			if((int)currProcess != 0)
+//			printProcessQueue(processQueue);
+				//putchar('p');
+				//putchar('i');
+				//putchar('d');
+				//putchar(' ');
+				//putchar(getPid(currProcess));
+				//putchar(10);
+			if((int)currProcess != 0){
+				//putchar('p');
+				//putchar('i');
+				//putchar('d');
+				//putchar(' ');
 				hcSwitchContext(getPid(currProcess));
-			exit(0);		
+	
+			} else 
+				exit(10);		
 		} else if(*ipc == DELETECONTEXT){
 			putchar('d');
 			putchar('e');
@@ -182,23 +216,25 @@ int* removeFirst(int *queue){
 	int *first;
 	if(*queue == 0)
 		return (int*)0;
-	first = (int*)*queue;
+	first = pollHead(queue);
 	if(*queue == (int)pollTail(queue)){
 		*queue = 0;
 		*(queue + 1) = 0;
 	} else {
 		*queue = (int)getNextProcess(first);
 	}
+	setNextProcess(first, (int*)0);
 	return first;
 }
 
 void deleteProcess(int *queue, int pid){
 	int *process;
 	process = (int*)0;
-	if((int)currProcess!=0){
-		if(getPid(currProcess) == pid)
+	if((int)currProcess != 0){
+		if(getPid(currProcess) == pid){
 			process = currProcess;
-		else
+			currProcess = (int*)0;
+		} else
 			process = removeFromList(queue, pid);
 	} else 
 		process = removeFromList(queue, pid);
@@ -240,8 +276,10 @@ void appendProcess(int *queue, int *process){
 		setNextProcess(tail, process);
 		setPrevProcess(process, tail);
 	}
+	setNextProcess(process, (int*)0);
 	*(queue+1) = (int)process;
 }
+
 void printProcessQueue(int *queue){
 	int *curr;
 	curr = pollHead(queue);
@@ -257,13 +295,24 @@ void printProcessQueue(int *queue){
 	putchar('R');
 	putchar('T');
 	putchar(10);
-	putchar('p');
-	putchar('i');
-	putchar('d');
-	putchar(':');
-	putchar(' ');
+	if((int)curr == 0){
+		putchar(' ');
+		putchar(' ');
+		putchar('E');
+		putchar('M');
+		putchar('P');
+		putchar('T');
+		putchar('Y');
+	
+	} else {
+		putchar('p');
+		putchar('i');
+		putchar('d');
+		putchar(':');
+		putchar(' ');
+	}
 	while((int)curr != 0){
-		putchar(getPid(curr));
+		putchar(getPid(curr)+'0');
 		curr = getNextProcess(curr);
 		if((int)curr != 0){
 			putchar(',');
