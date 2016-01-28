@@ -31,11 +31,9 @@ test_binary_osx:
 	$(CC_OSX) $(CC_OPT_OSX) $(EXEC).c -o $(EXEC)
 	touch $(TEST_BINARY)
 	touch $(KERNEL_BINARY)
-	touch $(OS_BINARY)
 	./$(EXEC) -c $(TEST_INPUT) -o $(TEST_BINARY)
 	./$(EXEC) -c $(EXEC).c -o $(KERNEL_BINARY)
-	./$(EXEC) -c $(EXEC).c -o $(OS_BINARY)
-	./$(EXEC) -k 64 $(KERNEL_BINARY) ./$(EXEC) -l $(TEST_BINARY) -m 16
+	./$(EXEC) -k 64 $(KERNEL_BINARY) -l $(TEST_BINARY) -m 16
 
 compile_linux:
 	$(CC_LINUX) $(CC_OPT_LINUX) $(EXEC).c -o $(EXEC)
@@ -44,14 +42,12 @@ test_binary_linux:
 	$(CC_LINUX) $(CC_OPT_LINUX) $(EXEC).c -o $(EXEC)
 	touch $(TEST_BINARY)
 	touch $(KERNEL_BINARY)
-	touch $(OS_BINARY)
 	./$(EXEC) -c $(TEST_INPUT) -o $(TEST_BINARY)
 	./$(EXEC) -c $(EXEC).c -o $(KERNEL_BINARY)
-	./$(EXEC) -c $(EXEC).c -o $(OS_BINARY)
-	./$(EXEC) -k 64 $(KERNEL_BINARY) ./$(EXEC) -l $(TEST_BINARY) -m 16
+	./$(EXEC) -k 64 $(KERNEL_BINARY) -l $(TEST_BINARY) -m 16
 
 debug:
-	ggdb --args ./$(EXEC) -k 64 $(KERNEL_BINARY) ./$(EXEC) -l $(TEST_BINARY) -m 16
+	ggdb --args ./$(EXEC) -k 64 $(KERNEL_BINARY) -l $(TEST_BINARY) -m 16
 
 clean:
 	rm -f *.mips*

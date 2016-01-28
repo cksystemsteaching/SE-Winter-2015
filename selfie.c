@@ -4431,7 +4431,6 @@ void copyRegisters (int* oldRegisters, int* newRegisters) {
 	}
 }
 
-
 void syscall_fork() {
 	int childPID;
 	int* childRegisters;
@@ -4608,7 +4607,7 @@ void syscall_thread_fork() {
 
         kernelProcessList = contextInsert(childPID, childPC, childRegisters, childPageTable, kernelProcessList, (int*) 0);
 
-	childPID = nextFreeContextId;
+	childPID = nextFreeContextId + 1;
 
         nextFreeContextId = nextFreeContextId + 1;
 
@@ -5029,9 +5028,9 @@ int* tPageTable(int* threadPageTable, int* processPageTable) {
 	while ((int) pagetable_getAddrAtIndex(processPageTable, count) != 0) {
 		page = palloc();
 
-		pagetable_setAddrAtIndex(threadPageTable, count - 1, page);
+		pagetable_setAddrAtIndex(threadPageTable, count, page);
 
-		copyPageFrame(pagetable_getAddrAtIndex(processPageTable, count - 1), page);
+		copyPageFrame(pagetable_getAddrAtIndex(processPageTable, count), page);
 
 		count = count + 1;
 	}
@@ -5047,7 +5046,7 @@ void pfree(int* frame) {
 		cursor = cursor + 1;
 	}
 
-	*frame = free_list;
+	*frame = (int) free_list;
 
 	free_list = frame;
 }
@@ -5077,7 +5076,7 @@ int* osProcessForkThread(int* osProcess, int pid) {
 
 	threadNode = malloc(4 * 4);
 	threadListOfOSProcess = (int*) *(osProcess + 4);
-	threadPageTable = (int*) malloc(4 * PAGE_TABLE_SIZE);
+	threadPageTable = (int*) malloc(4 * PAGE_TABLE_SIZE + 4);
 
 	processPageTable = (int*) *(osProcess + 1);
 
@@ -5087,8 +5086,7 @@ int* osProcessForkThread(int* osProcess, int pid) {
 	*(threadNode + 3) = (int) threadListOfOSProcess;
 
 	if ((int) threadListOfOSProcess != 0) {
-		threadPrevious = (int*)*(threadListOfOSProcess + 2);
-		threadPrevious = threadNode;
+		*(threadListOfOSProcess + 2) = threadNode;
 	}
 
 	return threadNode;
@@ -6346,9 +6344,7 @@ int printCounters(int total, int *counters, int max) {
 	print(itoa(*(counters + a / 4), string_buffer, 10, 0, 0));
 
 	print((int*) "(");
-	print(
-			itoa(fixedPointRatio(total, *(counters + a / 4)), string_buffer, 10,
-					0, 2));
+	print(itoa(fixedPointRatio(total, *(counters + a / 4)), string_buffer, 10, 0, 2));
 	print((int*) "%)");
 
 	if (*(counters + a / 4) != 0) {
@@ -6534,17 +6530,17 @@ void mapPages(int callerPid, int idx, int* paddr) {
 
 	cursor = osProcessList;
 	callerProcess = osFindProcess(callerPid, osProcessList);
-	prevPageTable = *(callerProcess + 1);
+	prevPageTable = (int*) *(callerProcess + 1);
 	prevPage = pagetable_getAddrAtIndex(prevPageTable, idx);
 
 	while ((int) cursor != 0) {
-		pageTable = *(cursor + 1);
+		pageTable = (int*) *(cursor + 1);
 
 		if (pagetable_getAddrAtIndex(pageTable, idx) == prevPage) {
 			map_page_in_context(*cursor, idx, paddr);
 		}
 
-		cursor = *(cursor + 3);
+		cursor = (int*)*(cursor + 3);
 	}
 }
 
@@ -6843,8 +6839,7 @@ void kernel_event_loop() {
 
 			println();
 			print((int*) "exiting with error code ");
-			print(itoa(arg, string_buffer, 10, 0, 0));
-			println();
+			printNumber(arg);
 
 			process = osFindProcess(callerPid, osProcessList);
 
@@ -6908,7 +6903,6 @@ void copyPageFrame(int* parentFrame, int* childFrame) {
 		*childFrame = *cursor;
 		childFrame = childFrame + 1;
 		cursor = cursor + 1;
-
 	}
 }
 
@@ -7043,8 +7037,8 @@ int selfie(int argc, int* argv) {
 				kernelBinaryName = (int*) *(argv + 2);
 				initMemory(128 * *(argv + 1));
 
-				argc = argc - 3;
-				argv = argv + 3;
+				argc = argc - 2;
+				argv = argv + 2;
 
 				interpret = 1;
 
