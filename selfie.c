@@ -711,6 +711,12 @@ void emitWait();
 
 void emitExec();
 
+void emitShmat();
+
+void emitCAS();
+
+void emitShmalloc();
+
 void emitSwitchCtx();
 void hypercall_switchctx();
 
@@ -731,6 +737,9 @@ int SYSCALL_MALLOC  = 5001;
 int SYSCALL_LOCK    = 6000;
 int SYSCALL_UNLOCK  = 6001;
 int SYSCALL_EXEC    = 7000;
+int SYSCALL_SHMAT   = 7001;
+int SYSCALL_CAS     = 7002;
+int SYSCALL_SHMALLOC = 7003;
 
 int HYPERCALL_SWITCHCTX = 1;
 int HYPERCALL_HALT = 2;
@@ -3225,6 +3234,9 @@ void compile() {
     emitFork();
     emitWait();
     emitExec();
+    emitShmat();
+    emitCAS();
+    emitShmalloc();
 
     emitSwitchCtx();
     emitHalt();
@@ -3802,7 +3814,7 @@ void initRegisterPointers(int argc, int* argv) {
     *(registers+REG_K1) = *(registers+REG_GP) + 35*4;
     // initialize stack pointer
     // upper half user space, lower half kernel space
-    *(registers+REG_SP) = memorySize / 2;
+    *(registers+REG_SP) = memorySize / 2 - 4;
 
     // copy arguments onto kernel heap/stack
     up_copyArguments(argc, argv);
@@ -4195,6 +4207,68 @@ void emitExec() {
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
+void emitShmat() {
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "shmat", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    // load the correct syscall number and invoke syscall
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_SHMAT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    // jump back to caller, return value is in REG_V0
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+
+void emitCAS() {
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "CAS", binaryLength, FUNCTION, INT_T, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    // load the correct syscall number and invoke syscall
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_CAS);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    // jump back to caller, return value is in REG_V0
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+void emitShmalloc() {
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "shmalloc", binaryLength, FUNCTION, INTSTAR_T, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+
+    // load argument for shmalloc (size)
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+
+    // remove the argument from the stack
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    // load the correct syscall number and invoke syscall
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_SHMALLOC);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    // jump back to caller, return value is in REG_V0
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+}
+
+
 void emitSwitchCtx() {
     createSymbolTableEntry(GLOBAL_TABLE, (int*) "switch_ctx", binaryLength, FUNCTION, VOID_T, 0);
 
@@ -4294,11 +4368,11 @@ int tlb(int vaddr, int readOrWrite) {
 
     if (isEmulator) {
         if (kernelEmulation) {
-          if (isKernel) {
-              return vaddr/4;
-          } else {
-              return os_pageFrameLookup(vaddr, readOrWrite);
-          }
+            if (isKernel) {
+                return vaddr/4;
+            } else {
+                return os_pageFrameLookup(vaddr, readOrWrite);
+            }
         } else {
             return vaddr / 4;
         }
@@ -4379,6 +4453,15 @@ void fct_syscall() {
         pc = pc + 4;
         // filename needs to be referred in kernel
         *(registers+REG_A0) = (tlb(*(registers+REG_A0),1))*4;
+        os_syscall();
+    } else if (v0 == SYSCALL_SHMAT) {
+        pc = pc + 4;
+        os_syscall();
+    } else if (v0 == SYSCALL_CAS) {
+        pc = pc + 4;
+        os_syscall();
+    } else if (v0 == SYSCALL_SHMALLOC) {
+        pc = pc + 4;
         os_syscall();
     } else if (v0 == HYPERCALL_SWITCHCTX) {
         pc = pc + 4;
@@ -4815,17 +4898,19 @@ void run() {
 
     isKernel = 1;
     currentInstCount = 0;
-    instrPerContextSwitch = 10;
+    instrPerContextSwitch = 100;
 
     while (1) {
         if (kernelEmulation) {
             if (isKernel == 0) {
-                 debug_disassemble = 0;
-                 if (currentInstCount == instrPerContextSwitch) {
+                debug_disassemble = 0;
+                debug_registers = 0;
+                if (currentInstCount == instrPerContextSwitch) {
                    os_timer();
-                 }
+                }
             } else
               debug_disassemble = 0;
+              debug_registers = 0;
         }
 
         fetch();

@@ -59,6 +59,9 @@ int SYSCALL_LOCK    = 6000;
 int SYSCALL_UNLOCK  = 6001;
 int SYSCALL_MALLOC  = 5001;
 int SYSCALL_EXEC    = 7000;
+int SYSCALL_SHMAT   = 7001;
+int SYSCALL_CAS     = 7002;
+int SYSCALL_SHMALLOC = 7003;
 
 // ------ processes ------
 int pid = 0;  // last process identifier
@@ -77,6 +80,8 @@ int  pageSize = 4096;             // pageSize in bytes
 int  maxPages;                    // maxium of pages
 int  allocatedPages = 0;
 int  freep = 0;
+
+int sharedMemoryBump;
 
 int *userSpace;
 int  bumpPtr;
@@ -98,6 +103,11 @@ int debug_wait    = 0;
 int debug_malloc  = 0;
 int debug_exec    = 0;
 int debug_pr      = 0;
+int debug_server  = 0;
+int debug_load    = 0;
+int debug_shmat   = 0;
+int debug_cas     = 0;
+int debug_shmalloc = 0;
 
 
 // ------ library ------
@@ -162,6 +172,10 @@ void syscall_lock();
 void syscall_unlock();
 void syscall_malloc();
 void syscall_wait();
+void syscall_exec();
+void syscall_shmat();
+void syscall_cas();
+void syscall_shmalloc();
 
 // ------ paging ------
 int  os_pageFaultHandler(int *process, int vpn);
@@ -171,8 +185,11 @@ void os_insertIntoPageTable(int* process, int vpn, int rpn, int mode);
 void os_pageDaemon(int refCount, int rpn);
 void os_updatePage(int *process, int vpn, int newRpn);
 void os_copyPageFrame(int fromRpn, int toRpn);
+int os_getVirtualPageNr(int vaddr);
 int  os_getPageFlag(int* process, int vpn);
+int os_getPageOffset(int vaddr);
 int  os_getRPNfromPageTable(int* process, int vpn);
+int* os_replaceVPNWithRPN(int *process, int vaddr);
 
 // ------ queues ------
 int* os_createQueue();
@@ -235,6 +252,7 @@ int* malloc(int size);
 // ---------------------------------------------------------------------
 // ---------------------------------------------------------------------
 // ---------------------------------------------------------------------
+
 int main(int argc, int *argv, int kernelBP) {
     bumpPtr = kernelBP;
 
@@ -245,9 +263,11 @@ int main(int argc, int *argv, int kernelBP) {
 
 
     while (1) {
-       // print("server nr: ");
-       // print((int*)itoa(whichServer,string_buffer,10,0));
-       // println();
+        if (debug_server) {
+            print("server nr: ");
+            print((int*)itoa(whichServer,string_buffer,10,0));
+            println();
+        }
         if (whichServer == OS_TIMER) {
             server_timer();
         } else if (whichServer == OS_PAGER) {
@@ -274,6 +294,7 @@ void init(int argc, int* argv, int kernelBP) {
 
     maxPages = virtualMemorySize/pageSize;
     pageFrameRefs = kmalloc(4*((int)(userSpace/(int*)pageSize)));
+    sharedMemoryBump = virtualMemorySize - 2*pageSize;
 
     print("bumpPointer: ");
     print(itoa(kernelBP, string_buffer, 10, 0));
@@ -317,9 +338,11 @@ void load(int *process, int *path) {
         //halt(-1);
     }
 
-    //print((int*) "Loading code from input file ");
-    //print(path);
-    //println();
+    if (debug_load) {
+        print((int*) "Loading code from input file ");
+        print(path);
+        println();
+    }
 
     vpn = 0;
     pageOffset = 0;
@@ -378,7 +401,8 @@ void initRegisterPointers(int* process) {
 
     *(process_regs+REG_GP) = binaryLength;
     *(process_regs+REG_K1) = *(process_regs+REG_GP);
-    *(process_regs+REG_SP) = virtualMemorySize;
+    // leave one page free for shared memory!
+    *(process_regs+REG_SP) = virtualMemorySize -4 -2*pageSize;
 }
 
 int* kmalloc(int size) {
@@ -448,12 +472,18 @@ int server_syscall() {
         syscall_wait();
     } else if (user_V0 == SYSCALL_EXEC) {
         syscall_exec();
+    } else if (user_V0 == SYSCALL_SHMAT) {
+        syscall_shmat();
+    } else if (user_V0 == SYSCALL_CAS) {
+        syscall_cas();
+    } else if (user_V0 == SYSCALL_SHMALLOC) {
+        syscall_shmalloc();
     } else {
         // unkown syscall
         halt(-2);
     }
-
     server_timer();
+
 }
 
 
@@ -579,13 +609,13 @@ void syscall_yield() {
     process = os_getHead(readyQ);
 
     if (debug_yield) {
-         print((int*)"PID ");
+        print((int*)"PID ");
         print(itoa(os_getProcessID(process),string_buffer,10,0));
         print((int*) ": yield");
         println();
     }
-    os_removeQueue(readyQ, process);
-    os_appendQueue(readyQ, process);
+   // os_removeQueue(readyQ, process);
+   // os_appendQueue(readyQ, process);
 }
 
 void syscall_lock() {
@@ -697,7 +727,7 @@ void syscall_wait() {
     int *process_regs;
     int pid;
 
-    process_regs = os_getProcessRegisters(process);
+
     parent = os_getHead(readyQ);
     parent_regs = os_getProcessRegisters(parent);
     pid = user_A0;
@@ -765,6 +795,112 @@ void syscall_exec() {
     *(process+3) = 0;   // reset pc to 0
 
 }
+
+void syscall_shmat() {
+    int *process;
+    int *pt;
+    int *ptflags;
+    int *regs;
+
+    process = os_getHead(readyQ);
+    pt = os_getProcessPageTable(process);
+    ptflags = os_getProcessPageTableFlags(process);
+    regs = os_getProcessRegisters(process);
+
+    //map last two pages (1023/1022) to sharedMemory frames
+    *(pt+1023) = palloc();
+    *(ptflags+1023) = readAndWritePage;
+    *(pt+1022) = palloc();
+    *(ptflags+1022) = readAndWritePage;
+
+    *(regs + REG_V0) = virtualMemorySize - 2*pageSize;
+
+    if (debug_shmat) {
+        print((int*)"PID ");
+        print(itoa(os_getProcessID(process),string_buffer,10,0));
+        print((int*) ": share memory at ");
+        print(itoa(virtualMemorySize-2*pageSize,string_buffer,16,8));
+        println();
+    }
+}
+
+void syscall_cas() {
+    int top;
+    int expected;
+    int counter;
+    int node;
+    int *process;
+    int *regs;
+    int *top_paddr;
+
+    top = user_A0;         // top pointer
+    expected = user_A1;    // next value of top pointer
+    node = user_A2;        // next top pointer
+    counter = user_A3;
+
+    process = os_getHead(readyQ);
+    regs = os_getProcessRegisters(process);
+    top_paddr = os_replaceVPNWithRPN(process, top);
+
+    if (debug_cas) {
+        print("top: ");
+        print(itoa(*top_paddr,string_buffer,16,8));
+        print(" exp: ");
+        print(itoa(expected,string_buffer,10,0));
+        print(" node: ");
+        print(itoa(node,string_buffer,10,0));
+        print(" counter: ");
+        print(itoa(counter,string_buffer,10,0));
+    }
+
+    if (*top_paddr != expected) {
+        *(regs+REG_V0) = 0;
+
+        if (debug_cas) {
+            print(" --> didn't work!");
+            println();
+        }
+    } else {
+        *top_paddr = node;
+        *(top_paddr+1) = counter;
+        *(regs+REG_V0) = 1;
+
+        if (debug_cas) {
+            print(" --> worked!");
+            println();
+        }
+    }
+}
+
+void syscall_shmalloc() {
+    int *regs;
+    int size;
+
+    regs = os_getProcessRegisters(os_getHead(readyQ));
+
+    size = user_A0;
+
+    if (size % 4 != 0)
+        size = size + 4 - size % 4;
+
+    if (sharedMemoryBump + size >= virtualMemorySize)
+        *(regs+REG_V0) = 0;
+    else {
+        *(regs+REG_V0) = sharedMemoryBump;
+        sharedMemoryBump = sharedMemoryBump + size;
+    }
+
+    if (debug_shmalloc) {
+        print((int*)"PID ");
+        print(itoa(os_getProcessID(os_getHead(readyQ)),string_buffer,10,0));
+        print((int*) ": shmalloc ");
+        print(itoa(size, string_buffer, 10, 0));
+        print((int*) " bytes returning address ");
+        print(itoa(sharedMemoryBump-size, string_buffer, 16, 8));
+        println();
+    }
+}
+
 
 // -----------------------------------------------------------------
 // ----------------------------- PAGING ----------------------------
@@ -870,6 +1006,7 @@ void os_copyPageFrame(int fromRpn, int toRpn) {
     }
 }
 
+
 // purpose: return the page flag  table for a process
 int os_getPageFlag(int* process, int vpn) {
     int* table;
@@ -877,6 +1014,25 @@ int os_getPageFlag(int* process, int vpn) {
 
     return *(table + vpn);
 }
+
+// purpose: return virtual page number (vpn) of a virtual address
+//          +-------------------------------+
+//          |         ++++++++++------------|
+//          +---------^^^^^^^^^^------------+
+//                     VPN
+int os_getVirtualPageNr(int vaddr) {
+    return rightShift(leftShift(vaddr, 10), 22);
+}
+
+// purpose: return virtual page number (vpn) of a virtual address
+//          +-------------------------------+
+//          |         ----------++++++++++++|
+//          +-------------------^^^^^^^^^^^^+
+//                                  RPN
+int os_getPageOffset(int vaddr) {
+    return rightShift(leftShift(vaddr, 20), 20);
+}
+
 
 // purpose: return real page number (rpn) for process and a given
 //          virtual page number:  [ rpn -> vpn ]
@@ -886,6 +1042,18 @@ int os_getRPNfromPageTable(int* process, int vpn) {
     table = (int*)*(process + 10);
 
     return *(table + vpn);
+}
+
+int* os_replaceVPNWithRPN(int *process, int vaddr) {
+    int vpn;
+    int offset;
+    int rpn;
+
+    vpn = os_getVirtualPageNr(vaddr);
+    offset = os_getPageOffset(vaddr);
+    rpn = os_getRPNfromPageTable(process, vpn);
+
+    return userSpace + (leftShift(rpn,12) + offset)/4;
 }
 
 // -----------------------------------------------------------------
@@ -1121,7 +1289,6 @@ void os_contextSwitch() {
     if (process == (int*)0)
         halt(0);     //FINITO!
 
-
     pc_ptr = process+3;
     userRegs = os_getProcessRegisters(process);
     pt = os_getProcessPageTable(process);
@@ -1132,6 +1299,7 @@ void os_contextSwitch() {
         print((int*)itoa(os_getProcessID(process),string_buffer,10,0));
         println();
     }
+
     switch_ctx(pc_ptr, userRegs, pt, pt_flags);
 
 }
@@ -1192,6 +1360,9 @@ void os_forkPageTable(int *process, int *new_process) {
         }
         i = i + 1;
     }
+
+    *(to_pTableFlags+1022) = readAndWritePage;
+    *(to_pTableFlags+1023) = readAndWritePage;
 }
 
 // purpose: increase the number of references to a physical page rpn
