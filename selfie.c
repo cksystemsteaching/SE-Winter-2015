@@ -3622,6 +3622,7 @@ void compile() {
 	emitFork();
 	emitThreadfork();
 	emitWait();
+	emitCAS();
     emitSwitch_context();
     emitMap_page_in_context();
     emitFlush_page_in_context();
@@ -4456,8 +4457,21 @@ void syscall_CAS() {
 	int location;
 	int oldValue;
 	int newValue;
+	//int x;
 
-	location = tlb(*(registers+REG_A0));
+	//x = tlb(*(registers+REG_A0));
+
+	print((int*) "UUU");//DEBUG
+	println();
+	print(itoa(tlb(*(registers+REG_A0)), string_buffer, 10, 0, 0));
+	println();
+	//print(itoa(*(registers+REG_A1), string_buffer, 10, 0, 0));
+	//println();
+	//print(itoa(*(registers+REG_A2), string_buffer, 10, 0, 0));
+	//println();
+
+	//location = tlb(*(registers+REG_A0));
+	location = *(registers+REG_A0);
 	oldValue = *(registers+REG_A1);
 	newValue = *(registers+REG_A2);
 	
@@ -4466,7 +4480,7 @@ void syscall_CAS() {
 	passParameterToOS(location, 2);
 	passParameterToOS(oldValue, 3);
 	passParameterToOS(newValue, 4);
-	passParameterToOS(*(registers+REG_A0), 5);
+	//passParameterToOS(*(registers+REG_A0), 5);
 	switchToProcess(OSPid);
 }
 
@@ -5291,27 +5305,44 @@ void handleWait() {
 }
 
 void handleCAS() {
+	int location;
 	int* plocation;
 	int oldValue;
-	int newVAlue;
-	int vlocation;
+	int newValue;
 	int* pageTable;
+	int* pageTableEntry;
 
-	plocation = (int*) *(communicationChunk + 2);
+	location = (int*) *(communicationChunk + 2);
 	oldValue = *(communicationChunk + 3);
 	newValue = *(communicationChunk + 4);
-	vlocation = *(communicationChunk + 5);
 
-	
+	//print((int*) "XXX");//DEBUG
+	//println();
+	//print(itoa(*plocation, string_buffer, 10, 0, 0));
+	//println();
+	//print((int*) "YYY");
+	//println();
+	//print(itoa(oldValue, string_buffer, 10, 0, 0));
+	//println();
+	//print((int*) "ZZZ");
+	//println();
+	//print(itoa(newValue, string_buffer, 10, 0, 0));
+	//println();
+
+	pageTable = *(currentProcess + 3);
+	pageTableEntry = pageTable + location / (4 * KILOBYTE);
+	plocation = (*pageTableEntry + location % (4 * KILOBYTE));
 
 	if (*plocation == oldValue) {
+		//print((int*) "XXX");//DEBUG
 		*plocation = newValue;
 		*(communicationChunk + 2) = 1;
 	} else {
+		//print((int*) "YYY");//DEBUG
 		*(communicationChunk + 2) = 0;
 	}
 
-	schedule();
+	switch_context(*(currentProcess + 2));
 }
 
 
@@ -5330,6 +5361,8 @@ int tlb(int vaddr) {
 	int* pageTableEntry;
 	
     if (vaddr % 4 != 0){
+    	print(itoa(vaddr, string_buffer, 10, 0, 0));
+    	println();
         exception_handler(EXCEPTION_ADDRESSERROR);
     }  
     
