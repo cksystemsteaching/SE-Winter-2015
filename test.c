@@ -1,11 +1,11 @@
 int main(){
-	int pid;
-	int *a;
-	int i;
-	i = 0; 
+//	int pid;
+//	int *a;
+//	int i;
+//	i = 0; 
 	//while(i < 10)
 	//	a = malloc(4096*4096);
-	pid = getPID();
+//	pid = getPID();
 	putchar(10);
 	putchar('h');
 	putchar('a');
@@ -14,7 +14,7 @@ int main(){
 	putchar('l');
 	putchar('o');
 	putchar(' ');
-	putchar(pid+'0');
+//	putchar(pid+'0');
 	putchar(10);
 //	calculateSum();
 	exit(30);
