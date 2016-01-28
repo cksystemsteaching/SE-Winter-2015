@@ -6,12 +6,14 @@ int *processQueue;
 int pid;
 int *ipc;
 int *binaryName;
+int *pfreeList;
 
 
 // --- constants ---
 int PAGESIZE = 4096;		// Byte, 4KB
 int PAGEFRAMESIZE = 4096;	// Byte, 4KB
 int VMEMORYSIZE = 4194304;	// Byte, 4MB
+int BOOT = 1;
 int CREATECONTEXT = 1;
 int SWITCHCONTEXT = 2;
 int DELETECONTEXT = 3;
@@ -21,6 +23,11 @@ int EXITKERNEL = 6;
 
 // --- methods ---
 int* createProcess();
+int* createPageTable();
+void loadBinary();
+int* initFreeList(int *memoryStart, int memorySize);
+int  palloc();
+void mapPageInContext(int pid, int ptOffset);
 int* initList();
 int* findProcessByPid(int *queue, int pid);
 int* removeFirst(int *queue);
@@ -30,46 +37,53 @@ void appendProcess(int *queue, int *process);
 int* pollHead(int *queue);
 int* pollTail(int *queue);
 void printProcessQueue(int *queue);
-
+void printNumber(int number);
 void setPrevProcess(int *process, int *prev);
 void setNextProcess(int *process, int *next);
 void setPid(int *process, int pid);
+void setPageTable(int *process, int *pt);
 
 int* getPrevProcess(int *process);
 int* getNextProcess(int *process);
 int  getPid(int *process);
+int* getPageTable(int *process);
 
 int main(){
-	putchar(10);
-	putchar('K');
-	putchar('E');
-	putchar('R');
-	putchar('N');
-	putchar('E');
-	putchar('L');
-	putchar(10);
-	putchar(10);
+		
+	if(BOOT){
+		putchar(10);
+		putchar('K');
+		putchar('E');
+		putchar('R');
+		putchar('N');
+		putchar('E');
+		putchar('L');
+		putchar(10);
+		putchar(10);
 
-	ipc = allocIpc(4*4);
-	processQueue = initList();
-	binaryName = malloc(4*4);
-	binaryName = "test.mips";
-	currProcess = createProcess();
-	hcLoadBinary(getPid(currProcess));
+		ipc = allocIpc(4*4);
+		pfreeList = initFreeList((int*)*(ipc+1), *(ipc+2));
+		processQueue = initList();
+		BOOT = 0;
+	}
+//	binaryName = malloc(4*4);
+//	binaryName = "test.mips";
+//	currProcess = createProcess();
 	
-	appendProcess(processQueue, currProcess);
+	//exit(0);
+//	appendProcess(processQueue, currProcess);
 	
 //	printProcessQueue(processQueue);
 	
-	currProcess = createProcess();
-	hcLoadBinary(getPid(currProcess));
+//	currProcess = createProcess();
+//	hcLoadBinary(getPid(currProcess));
 	//appendProcess(processQueue, currProcess);
 	
 	//currProcess = (int*)0;
-	hcSwitchContext(getPid(currProcess));
-	
-	
-	while(1){
+//	hcSwitchContext(getPid(currProcess));
+//	putchar(*ipc);
+//	putchar(10);
+//	while(1){
 	//	putchar('i');
 	//	putchar('p');
 	//	putchar(10);
@@ -88,7 +102,8 @@ int main(){
 			putchar(10);
 
 			currProcess = createProcess();
-			loadBinary();
+			hcLoadBinary(getPid(currProcess));
+			//loadBinary();
 			putchar('p');
 			putchar('i');
 			putchar('d');
@@ -155,8 +170,7 @@ int main(){
 			putchar('a');
 			putchar('p');
 			putchar(10);
-			exit(0);
-			hcMapPageInContext(*(ipc+1), *(ipc+2));
+			mapPageInContext((int*)*(ipc+1), *(ipc+2));
 		
 		} else if(*ipc == FLUSHPAGEINCONTEXT){
 			putchar('f');
@@ -169,11 +183,12 @@ int main(){
 		} else if(*ipc == EXITKERNEL){
 			exit(0);
 		
-		} else {
-			*ipc = -1;
-			exit(-1);
-		}
-	}
+		} 
+	//	else {
+	//		*ipc = -1;
+	//		exit(-1);
+	//	}
+//	}
 }
 
 
@@ -181,18 +196,106 @@ int* createProcess(){
 	int *process;
 	int pid;
 
-	process = malloc(3*4);
+	process = malloc(4*4);
 	pid = hcCreateContext();
-
+	
 	setPid(process, pid);
-
+	setPageTable(process, createPageTable());
 	return process;
+}
+int* createPageTable(){
+	int ptEntries;
+	int ptSize;
+	int *pt;
+	int i;
+	i = 0;
+	ptEntries = VMEMORYSIZE/PAGESIZE;
+	ptSize = ptEntries *4;
+	pt = malloc(ptSize);
+	while(i < ptEntries){
+		*(pt+i) = 0;
+		i = i + 1;
+	}
+}
+void mapPageInContext(int pid, int ptOffset){
+	int *process;
+	int *pt;
+	int pageFrame;
+	if((int)currProcess != 0){
+		if(getPid(currProcess) == pid)
+			process = currProcess;
+		else
+			process = findProcessByPid(processQueue, pid);
+		
+	} else
+		process = findProcessByPid(processQueue, pid);
+	if((int)process != 0){
+		pageFrame = palloc();
+		pt = getPageTable(process);
+		*(pt + ptOffset) = pageFrame;
+		
+//		putchar(10);
+//		putchar(10);
+	//	putchar(10);
+//		putchar(ptOffset + '0');
+		//printNumber(pageFrame);
+//		putchar(10);
+//		putchar(10);
+	//	putchar(10);
+		hcMapPageInContext(pid, ptOffset, (int)pageFrame);
+	} else {
+	
+		exit(-1);
+	}
 }
 void loadBinary(){
 	//*ipc = (int)binaryName;
 	hcLoadBinary(getPid(currProcess));
 
 }
+int* initFreeList(int *memoryStart, int memorySize){
+	int *list;
+	int i;
+	int counterPageFrames;
+	
+	//printNumber((int)memorySize);
+	i = 0;
+//	if(memorySize % PAGEFRAMESIZE != 0){
+//		memorySize = memorySize - memorySize % PAGEFRAMESIZE;
+//	}
+//	if((int)memoryStart % 4 != 0){
+//		memoryStart = (int*)((int)memoryStart + 4 - (int)memoryStart % 4);
+//	}
+	//putchar('a');
+	counterPageFrames = memorySize / PAGEFRAMESIZE;
+	list = memoryStart;
+//	putchar('a');
+	while(i < counterPageFrames){
+	//putchar('a');
+		if(i+1 == counterPageFrames)
+			*(memoryStart+i) = 0;//(int)memoryStart + PAGEFRAMESIZE;
+		else
+			*(memoryStart+i) = (int)memoryStart + (i+1) * PAGEFRAMESIZE;
+//			putchar(i+'0');
+//			putchar(10);
+		i = i +1;
+	}
+	return list;
+}
+
+int palloc(){
+	int pageFrame;
+
+	if(*pfreeList != 0){
+		pageFrame = *pfreeList;
+		pfreeList = (int*)*pfreeList;
+		return pageFrame;
+	}
+	//print((int*)"no free pages left");
+	exit(-1);
+
+}
+
 int* initList(){
 	int *list;
 	list = malloc(2 * 4);
@@ -336,6 +439,40 @@ void printProcessQueue(int *queue){
 	
 }
 
+void printNumber(int number){
+	int size;
+	int subtract;
+	int numberCopy;
+	int *numbArray;
+	int i;
+	i = 0;
+	subtract = 10;
+	size = 1;
+	numberCopy = number;
+	while(number > 0){
+		if(number - subtract < 0 ){
+			number = number -subtract;
+		} else {
+			subtract = subtract * 10;
+			size = size +1;
+		}
+	}
+	numbArray = malloc(size*4);
+	number = numberCopy;	
+	while(i < size ){
+		*(numbArray+i) = number%10;
+		number = number /10;
+		i = i+1;
+	}
+	putchar(10);
+	while(size > 0 ){
+		i = *(numbArray+(size-1));
+		putchar(i+'0');
+		size = size -1;	
+	}
+	putchar(10);
+}
+
 // --- SETTER ---
 void setPrevProcess(int *process, int *prev){
 	*process = (int)prev;
@@ -345,6 +482,9 @@ void setNextProcess(int *process, int *next){
 }
 void setPid(int *process, int pid){
 	*(process+2) = pid;
+}
+void setPageTable(int *process, int *pt){
+	*(process+3) = (int)pt;
 }
 
 // --- GETTER ---
@@ -356,6 +496,9 @@ int* getNextProcess(int *process){
 }
 int getPid(int *process){
 	return *(process+2);
+}
+int* getPageTable(int *process){
+	return (int*)*(process+3);
 }
 
 
