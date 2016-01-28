@@ -770,6 +770,8 @@ int *currPageTable = (int*)0;
 int *contextQueue = (int*)0;
 int  kernelMode = 0;
 int  nextValidUID = 1;
+int * top;
+
 void createKernelContext();
 int* createContext();
 int* createPageTable();
@@ -802,24 +804,6 @@ int  getUID(int *context);
 int  getPC(int *context);
 int* getRegisters(int *context);
 int* getPageTable(int *context);
-//====================================================
-// A8 ------Treiber Stack--------
-void init_Tstack(int *head);
-void push_Tstack(int *head, int value);
-int  pop_Tstack(int *head, int *value);
-
-int  *create_pointer();
-void set_pointer_node(int *pointer, int *ptr);
-void set_pointer_index(int *pointer, int index);
-int  *get_pointer_node(int *pointer);
-int  get_pointer_count(int *pointer);
-
-int  *create_node();
-void set_node_value(int *node, int value);
-void set_node_next(int *node, int *next);
-int  get_node_value(int *node);
-int  *get_node_next(int *node);
-// =====================================================
 
 // -----------------------------------------------------------------
 // ---------------------------- MEMORY -----------------------------
@@ -4807,51 +4791,6 @@ int* getRegisters(int *context){
 int* getPageTable(int *context){
 	return (int*)*(context+5);
 }
-// =======================================================
-//A8
-int  *create_pointer(){
-	int pointer_;
-	pointer_ = (int *)malloc(2*4);
-	set_pointer_node(pointer_, 0);
-	set_pointer_index(pointer_, 0);
-	return pointer_;
-}
-
-void set_pointer_node(int *pointer, int *ptr){
-	*pointer = (int *)ptr;
-}
-void set_pointer_index(int *pointer, int index){
-	*(pointer + 1) = index;
-}
-int  *get_pointer_node(int *pointer){
-	return (int *)pointer;
-}
-int  get_pointer_count(int *pointer){
-	return *(pointer + 1);
-}
-
-int  *create_node(){
-	int *node;
-	int *next;
-	node = (int *)malloc(2*4);
-	next = create_pointer();
-	set_node_value(node, 0);
-	set_node_next (node,next);
-	return node;
-}
-void set_node_value(int *node, int value){
-	*node = value;
-}
-void set_node_next(int *node, int *next){
-	*(node + 1) = (int)next ;
-}
-int  get_node_value(int *node){
-	return *node;
-}
-int  *get_node_next(int *node){
-	return (int *)*(node + 1);
-}
-//=============================================
 
 // -----------------------------------------------------------------
 // ---------------------------- MEMORY -----------------------------

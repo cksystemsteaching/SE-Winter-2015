@@ -38,6 +38,25 @@ void setPid(int *process, int pid);
 int* getPrevProcess(int *process);
 int* getNextProcess(int *process);
 int  getPid(int *process);
+//====================================================
+//A8 ------Treiber Stack--------
+void init_Tstack(int *head);
+void push_Tstack(int *head, int value);
+int  pop_Tstack();
+
+int  *create_pointer();
+void set_pointer_node(int *pointer, int *ptr);
+void set_pointer_index(int *pointer, int index);
+int  *get_pointer_node(int *pointer);
+int  get_pointer_count(int *pointer);
+
+int  *create_node();
+void set_node_value(int *node, int value);
+void set_node_next(int *node, int *next);
+int  get_node_value(int *node);
+int  *get_node_next(int *node);
+int* top;
+// =====================================================
 
 int main(){
 	putchar(10);
@@ -354,6 +373,103 @@ int* getNextProcess(int *process){
 int getPid(int *process){
 	return *(process+2);
 }
+
+// =======================================================
+//A8
+void init_Tstack(int *head){
+	int * node; // struct node_
+	int * ptr; // struct ptr_
+
+    node = create_node();
+    ptr = get_node_next(node);
+    set_pointer_node(top,node);
+
+}
+
+void push_Tstack(int *head, int value){
+	int * newNode;
+	int old;
+	newNode = create_node();
+	set_node_value(newNode, value);
+	set_node_next(newNode, 0);
+	while(1){
+		old = get_node_value(get_pointer_node(top));
+		if(cas(top,old,newNode) == 1){
+			set_pointer_node(top,newNode);
+			set_pointer_index(top,get_pointer_count(top) + 1);	
+			return 1;
+		}	
+		
+	}
+}
+
+int  pop_Tstack(){
+	
+	int *first_element;	
+    int *old;
+    int *next;
+    int value;
+    
+    if (*top == 0)
+    	return 0;
+    old = (int*)*top;
+    value = *(old + 1);
+    next = (int*)*old;
+    while (1) {
+        if (cas(top, old, next) == 1) {
+        	
+         	first_element = (int*)*top;
+         	old = top;
+         set_pointer_index(top,get_pointer_count(top) - 1);	
+            return 1;
+        }
+    }
+}
+
+int  *create_pointer(){
+	int pointer_;
+	pointer_ = (int *)malloc(2*4);
+	set_pointer_node(pointer_, 0);
+	set_pointer_index(pointer_, 0);
+	return pointer_;
+}
+
+void set_pointer_node(int *pointer, int *ptr){
+	*pointer = (int *)ptr;
+}
+void set_pointer_index(int *pointer, int index){
+	*(pointer + 1) = index;
+}
+int  *get_pointer_node(int *pointer){
+	return (int *)pointer;
+}
+int  get_pointer_count(int *pointer){
+	return *(pointer + 1);
+}
+
+int  *create_node(){
+	int *node;
+	int *next;
+	node = (int *)malloc(2*4);
+	next = create_pointer();
+	set_node_value(node, 0);
+	set_node_next (node,next);
+	return node;
+}
+void set_node_value(int *node, int value){
+	*node = value;
+}
+void set_node_next(int *node, int *next){
+	*(node + 1) = (int)next ;
+}
+int  get_node_value(int *node){
+	return *node;
+}
+int  *get_node_next(int *node){
+	return (int *)*(node + 1);
+}
+
+//=============================================
 
 
 
