@@ -3908,6 +3908,14 @@ void syscall_exit() {
     *(registers+REG_V0) = exitCode;
 
 	if(getListSize(contextQueue) > 1){
+		if(getUID(currContext) == 0){
+			if(loadMemory(ipc) == -1){
+				print(binaryName);
+				print((int*) ": an error occured, error code ");
+				halt = 1;
+				println();
+			}
+		}
 	    print((int*) "\ncontext [");
 	    printNumber(getUID(currContext));
 		print((int*) "] exiting with error code ");
@@ -3918,7 +3926,8 @@ void syscall_exit() {
 	} else {
 		print(binaryName);
 		print((int*) ": exiting with error code ");
-		print(itoa(exitCode, string_buffer, 10, 0, 0));
+						
+		printNumber(exitCode);
 		println();
 
 		halt = 1;
@@ -4180,12 +4189,14 @@ void emitYield(){
     emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_YIELD);
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
 
-    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+    //emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 	
 }
 void syscall_yield(){
-	//storeMemory(ipc, SWITCHCONTEXT);
-	//run();
+//	print((int*)"\nsyscall_yield\n");
+	saveContextState();
+	setContextState(0);
+	storeMemory(ipc, SWITCHCONTEXT);
 }
 void emitGetPID(){
     createSymbolTableEntry(GLOBAL_TABLE, (int*) "getPID", 0, FUNCTION, INT_T, 0, binaryLength);
@@ -4371,7 +4382,7 @@ void hypercall_mapPageInContext(){
 	context = findContextByUID(contextQueue, uid);
 	*(pt+index) = (int)palloc();
 
-	exit(0);
+	//exit(0);
 	if(debug_hypercalls){
 		print((int*)"hypercall_mapPageInContext (currUID [");
 		printNumber(getUID(currContext));
@@ -4388,7 +4399,7 @@ void emitLoadBinary(){
     emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
 
 //    emitIFormat(OP_LW, REG_SP, REG_A1, 0);	// file should be passed by the process
-//    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+ //   emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
     emitIFormat(OP_LW, REG_SP, REG_A0, 0);
     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
@@ -4442,8 +4453,15 @@ void hypercall_loadBinary(){
 	
 	binaryName = malloc(12*4);
 	binaryName = "test.mips";
+//	*binaryName = loadMemory(ipc);//(*((int*)ipc);//(int*)*(registers+REG_A1);//"test.mips";
+//	print((int*)"load_binary binaryName: ");
+//	print(binaryName);
+//	println();
+//	exit(0);
 	load();
 	copyBinaryToMemory();
+//	print((int*)"hier load");
+//	exit(0);
 	*(registers+REG_GP) = binaryLength;
 	*(registers+REG_K1) = *(registers+REG_GP);
 	
@@ -4481,7 +4499,7 @@ void createKernelContext(){
 	int i;
 	i=0;
 	
-	ptEntries = VMEMORYSIZE / PAGESIZE;
+	ptEntries = memorySize / PAGESIZE;
 	
 	currContext = malloc(6 * 4);
 	currPageTable = malloc(ptEntries *4);
@@ -4657,12 +4675,12 @@ void appendContext(int *queue, int *context){
 	*(queue+1) = (int)context;
 }
 int* palloc(){
-	int *page;
+	int *pageFrame;
 
 	if(*pfreeList != 0){
-		page = (int*)*pfreeList;
+		pageFrame = (int*)*pfreeList;
 		pfreeList = pfreeList + 1;
-		return page;
+		return pageFrame;
 	}
 
 	print((int*)"no free pages left");
@@ -4734,9 +4752,9 @@ int* getPageTable(int *context){
 int tlb(int vaddr) {
 	int ptOffset;
 	int pfOffset;
-	int *newPage;
+//	int *newPage;
 	int paddr;
-	
+	int uid;
 	if (vaddr % 4 != 0)
 	    exception_handler(EXCEPTION_ADDRESSERROR);
 
@@ -4746,20 +4764,30 @@ int tlb(int vaddr) {
 	}
 
 	ptOffset = vaddr/ PAGESIZE;
-	pfOffset = vaddr % PAGESIZE;
+	pfOffset = vaddr % PAGEFRAMESIZE;
 
 	if(*(currPageTable+ptOffset) == 0){
-		print((int*)"PAGEFAULT\n");
+		//print((int*)"PAGEFAULT\n");
+		
+		
 		// map page not working yet
+		*(currPageTable+ptOffset) = (int)palloc();
+		
 			//printNumber(ptOffset);
 			//println();
-			//storeMemory(ipc+4, getUID(currContext));
-			//storeMemory(ipc+8, ptOffset);
-			//storeMemory(ipc, MAPPAGEINCONTEXT);
-			
+//			uid = getUID(currContext);
+//			saveContextState();
+//			setContextState(0);
+//			storeMemory(ipc, MAPPAGEINCONTEXT);
+//			storeMemory(ipc+4, uid);
+//			storeMemory(ipc+8, ptOffset);
+			//exit(0);
+//			run();
+//			exit(0);
+//			setContextState(uid);
 		//saveContextState();
 		//setContextState(0);
-		exit(0);
+		//exit(0);
 	}
 	paddr = *(currPageTable+ptOffset) + pfOffset - (int)memory;
 
@@ -4820,6 +4848,9 @@ void fct_syscall() {
         } else if (*(registers+REG_V0) == HYPERCALL_LOADBINARY) {
             hypercall_loadBinary();
         } else {
+        print((int*)"reg v0: ");
+        printNumber(*(registers+REG_V0));
+        println();
             exception_handler(EXCEPTION_UNKNOWNSYSCALL);
         }
 
@@ -5473,8 +5504,12 @@ void exception_handler(int enumber) {
     print((int*) ": exception: ");
     printException(enumber);
     println();
-
-    exit(enumber);
+    if(getUID(currContext) > 0){
+		setContextState(0);
+		storeMemory(ipc, DELETECONTEXT);
+	}
+	else
+	exit(enumber);
 }
 
 void fetch() {
@@ -5560,7 +5595,7 @@ void run() {
 	int i;
 	i=0;
 	counterInstr = 0;
-	maxInstr = 2000;
+	maxInstr = 10;
     halt = 0;
 
     while (halt == 0) {
@@ -5865,7 +5900,7 @@ void emulateKernel(int argc, int *argv) {
 
     resetInterpreter();
 
-    *(registers+REG_SP) = VMEMORYSIZE - 4; // initialize stack pointer
+    *(registers+REG_SP) = memorySize - 4; // initialize stack pointer
 
     *(registers+REG_GP) = binaryLength; // initialize global pointer
 

@@ -5,6 +5,7 @@ int *currPageTable;
 int *processQueue;
 int pid;
 int *ipc;
+int *binaryName;
 
 
 // --- constants ---
@@ -49,9 +50,10 @@ int main(){
 	putchar(10);
 	putchar(10);
 
-	ipc = allocIpc(4);
+	ipc = allocIpc(4*4);
 	processQueue = initList();
-	
+	binaryName = malloc(4*4);
+	binaryName = "test.mips";
 	currProcess = createProcess();
 	hcLoadBinary(getPid(currProcess));
 	
@@ -70,6 +72,7 @@ int main(){
 	while(1){
 	//	putchar('i');
 	//	putchar('p');
+	//	putchar(10);
 	//	putchar('c');
 	//	putchar(' ');
 	//	putchar(*ipc+'0');
@@ -85,7 +88,7 @@ int main(){
 			putchar(10);
 
 			currProcess = createProcess();
-			hcLoadBinary(getPid(currProcess));
+			loadBinary();
 			putchar('p');
 			putchar('i');
 			putchar('d');
@@ -152,7 +155,7 @@ int main(){
 			putchar('a');
 			putchar('p');
 			putchar(10);
-			
+			exit(0);
 			hcMapPageInContext(*(ipc+1), *(ipc+2));
 		
 		} else if(*ipc == FLUSHPAGEINCONTEXT){
@@ -164,14 +167,11 @@ int main(){
 			putchar(10);
 		
 		} else if(*ipc == EXITKERNEL){
-			putchar(10);
-			putchar('E');
-			putchar('X');
-			putchar('I');
-			putchar('T');
-			putchar(10);
 			exit(0);
 		
+		} else {
+			*ipc = -1;
+			exit(-1);
 		}
 	}
 }
@@ -188,7 +188,11 @@ int* createProcess(){
 
 	return process;
 }
+void loadBinary(){
+	//*ipc = (int)binaryName;
+	hcLoadBinary(getPid(currProcess));
 
+}
 int* initList(){
 	int *list;
 	list = malloc(2 * 4);

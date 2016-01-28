@@ -1,16 +1,21 @@
 int main(){
 	int pid;
+	int *a;
+	int i;
+	i = 0; 
+	//while(i < 10)
+	//	a = malloc(4096*4096);
 	pid = getPID();
 	putchar(10);
 	putchar('h');
 	putchar('a');
 	putchar('l');
+	//yield();
 	putchar('l');
 	putchar('o');
 	putchar(' ');
 	putchar(pid+'0');
 	putchar(10);
-	//yield();
 //	calculateSum();
 	exit(30);
 }
