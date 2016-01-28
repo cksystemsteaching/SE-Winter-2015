@@ -1,293 +1,360 @@
 
-// a context has following structure:
-//
-// 0 +-----+
-//   |prev | pointer to previous element in list
-// 1 +-----+  
-//   |next | pointer to next element in list
-// 2 +-----+  
-//   | uid | unique PID
-// 3 +-----+  
-//   | pc  | program counter
-// 4 +-----+  
-//   |reg  | pointer to registers
-// 5 +-----+  
-//   | PT  | pointer to page table
-// 6 +-----+ 
+//--- variables ---
 
-//------------- methods -------------------------
-int* createContext();
-void createFirstContext();
-void switchContext();
-void deleteContext();
-void mapPageInContext();
-void flushPageInContext();
+int *currProcess;
+int *currPageTable;
+int *processQueue;
+int pid;
+int *ipc;
 
-int* initList();
-void appendContext(int *context);
-int* removeFirstContext();
-int* createEmptyPageTable();
-int* createEmptyRegisters();
 
-//	--- GETTER ---
-int* getPrev(int *context);
-int* getNext(int *context);
-int  getUID(int *context);
-int  getPC(int *context);
-int* getRegisters(int *context);
-int* getPageTable(int *context);
-
-//	--- SETTER ---
-void setPrev(int *context, int *prev);
-void setNext(int *context, int *next);
-void setUID(int *context, int uid);
-void setPC(int *context, int pc);
-void setRegisters(int *context, int *regs);
-void setPageTable(int *context, int *pt);
-
-//------------- constants ------------------------
-
-int ANY2 = 36;
-int ANY = 34;
-int HYPERCALL_CREATECONTEXT		= 7001;
-int HYPERCALL_SWITCHCONTEXT		= 7002;
-int HYPERCALL_DELETECONTEXT		= 7003;
-int HYPERCALL_MAPPAGEINCONTEXT	= 7004;
-int HYPERCALL_FLUSHPAGEINCONTEXT= 7005;
-int HYPERCALL_LOADBINARY		= 7006;
-
-int VMEMORYSIZE = 4194304;	// Byte, 4MB
+// --- constants ---
 int PAGESIZE = 4096;		// Byte, 4KB
-int BOOT = 1;
-//------------- variables ------------------------
-int *readyQueue = (int*)0;
-int *currContext = (int*)0;
-int nextValidUID = 1;
-int *cmd;
+int PAGEFRAMESIZE = 4096;	// Byte, 4KB
+int VMEMORYSIZE = 4194304;	// Byte, 4MB
+int CREATECONTEXT = 1;
+int SWITCHCONTEXT = 2;
+int DELETECONTEXT = 3;
+int MAPPAGEINCONTEXT = 4;
+int FLUSHPAGEINCONTEXT = 5;
+int EXITKERNEL = 6;
+
+// --- methods ---
+int* createProcess();
+int* initList();
+int* findProcessByPid(int *queue, int pid);
+int* removeFirst(int *queue);
+void deleteProcess(int *queue, int pid);
+int* removeFromList(int *queue, int pid);
+void appendProcess(int *queue, int *process);
+int* pollHead(int *queue);
+int* pollTail(int *queue);
+void printProcessQueue(int *queue);
+
+void setPrevProcess(int *process, int *prev);
+void setNextProcess(int *process, int *next);
+void setPid(int *process, int pid);
+
+int* getPrevProcess(int *process);
+int* getNextProcess(int *process);
+int  getPid(int *process);
 
 int main(){
-	
-
-//	switchContext();
-	if(BOOT){
-		cmd = allocCMD();
-		BOOT = 1;
-		putchar(10);
-		putchar('k');
-		putchar('e');
-		putchar('r');
-		putchar('n');
-		putchar('e');
-		putchar('l');
-		putchar(10);
-	
-	}
-	//*cmd = *cmd -1
-	if(*cmd == ANY){
-		putchar(10);
-		putchar('a');
-		putchar('n');
-		putchar('y');
-		putchar(10);
-	}
-	else if(*cmd == HYPERCALL_CREATECONTEXT){
-		putchar(10);
-		putchar('c');
-		putchar('r');
-		putchar('e');
-		putchar('a');
-		putchar('t');
-		putchar('e');
-		putchar(10);
-	} else if(*cmd == HYPERCALL_SWITCHCONTEXT){
-		putchar(10);
-		putchar('s');
-		putchar('w');
-		putchar('i');
-		putchar('t');
-		putchar('c');
-		putchar('h');
-		putchar(10);
-
-//		currContext = createContext();
-	} else if(*cmd == HYPERCALL_DELETECONTEXT){
-		putchar(10);
-		putchar('d');
-		putchar('e');
-		putchar('l');
-		putchar('e');
-		putchar('t');
-		putchar('e');
-		putchar(10);
-	} else if(*cmd == HYPERCALL_MAPPAGEINCONTEXT){
-		putchar(10);
-		putchar('m');
-		putchar('a');
-		putchar('p');
-		putchar(10);
-	} else if(*cmd == HYPERCALL_FLUSHPAGEINCONTEXT){
-		putchar(10);
-		putchar('f');
-		putchar('l');
-		putchar('u');
-		putchar('s');
-		putchar('h');
-		putchar(10);
-	}
 	putchar(10);
-//		putchar('e');
-//		putchar('n');
-//		putchar('d');
-//	putchar(10);
+	putchar('K');
+	putchar('E');
+	putchar('R');
+	putchar('N');
+	putchar('E');
+	putchar('L');
+	putchar(10);
+	putchar(10);
+
+	ipc = allocIpc(4);
+	processQueue = initList();
 	
-	exit(0);
-}
-
-int* createContext(){
-	int *context;
-	context = malloc(6*4);
-	setPrev(context, (int*)0);
-	setNext(context, (int*)0);
-	setUID(context, nextValidUID);
-	setPC(context, 0);
-	setRegisters(context, createEmptyRegisters());
-	setPageTable(context, createEmptyPageTable());
+	currProcess = createProcess();
+	hcLoadBinary(getPid(currProcess));
 	
-	nextValidUID = nextValidUID + 1;
+	appendProcess(processQueue, currProcess);
+	
+//	printProcessQueue(processQueue);
+	
+	currProcess = createProcess();
+	hcLoadBinary(getPid(currProcess));
+	//appendProcess(processQueue, currProcess);
+	
+	//currProcess = (int*)0;
+	hcSwitchContext(getPid(currProcess));
+	
+	
+	while(1){
+	//	putchar('i');
+	//	putchar('p');
+	//	putchar('c');
+	//	putchar(' ');
+	//	putchar(*ipc+'0');
+	//	putchar(10);
+		
+		if(*ipc == CREATECONTEXT){
+			putchar('c');
+			putchar('r');
+			putchar('e');
+			putchar('a');
+			putchar('t');
+			putchar('e');
+			putchar(10);
 
-	hc_createContext(getUID(context), getPC(context), getRegisters(context), getPageTable(context));
-    appendContext(readyQueue);  //I think we should append any new context????
-	return context;
-}
+			currProcess = createProcess();
+			hcLoadBinary(getPid(currProcess));
+			putchar('p');
+			putchar('i');
+			putchar('d');
+			putchar('[');
+			putchar(getPid(currProcess)+'0');
+			putchar(']');
+			putchar(10);
+		
+		} else if(*ipc == SWITCHCONTEXT){
+//			putchar(10);
+//			putchar(10);
+//			putchar('s');
+//			putchar('w');
+//			putchar('i');
+//			putchar('t');
+//			putchar('c');
+//			putchar('h');
+//			putchar(10);
+			
+			
+			
+			if((int)currProcess != 0)
+				appendProcess(processQueue, currProcess);
+//			printProcessQueue(processQueue);
+			currProcess = (int*)0;
+			currProcess = removeFirst(processQueue);
+//			printProcessQueue(processQueue);
+				//putchar('p');
+				//putchar('i');
+				//putchar('d');
+				//putchar(' ');
+				//putchar(getPid(currProcess));
+				//putchar(10);
+			if((int)currProcess != 0){
+				//putchar('p');
+				//putchar('i');
+				//putchar('d');
+				//putchar(' ');
+				hcSwitchContext(getPid(currProcess));
+	
+			} else 
+				exit(10);		
+		} else if(*ipc == DELETECONTEXT){
+			putchar('d');
+			putchar('e');
+			putchar('l');
+			putchar('e');
+			putchar('t');
+			putchar('e');
+			putchar(' ');
+			putchar('p');
+			putchar('i');
+			putchar('d');
+			putchar(' ');
+			putchar('[');
+			putchar(getPid(currProcess)+'0');
+			putchar(']');
+			putchar(10);
+			
 
-
-void switchContext(){
-	if((int)currContext == 0){
-		appendContext(currContext);
+			deleteProcess(processQueue, getPid(currProcess));
+		} else if(*ipc == MAPPAGEINCONTEXT){
+			putchar('m');
+			putchar('a');
+			putchar('p');
+			putchar(10);
+			
+			hcMapPageInContext(*(ipc+1), *(ipc+2));
+		
+		} else if(*ipc == FLUSHPAGEINCONTEXT){
+			putchar('f');
+			putchar('l');
+			putchar('u');
+			putchar('s');
+			putchar('h');
+			putchar(10);
+		
+		} else if(*ipc == EXITKERNEL){
+			putchar(10);
+			putchar('E');
+			putchar('X');
+			putchar('I');
+			putchar('T');
+			putchar(10);
+			exit(0);
+		
+		}
 	}
-	currContext = removeFirstContext();
-}
-
-void deleteContext(){
-	currContext = (int*)0;
-	// we need to delete it from the contextList????????????
-}
-void mapPageInContext(){//{int *context, int *page){
-	int *pageTable;
-	pageTable = getPageTable(currContext);
-}
-
-void flushPageInContext(int *context, int *page){
 }
 
 
-int* createEmptyRegisters(){
-	return malloc(32*4);
+int* createProcess(){
+	int *process;
+	int pid;
+
+	process = malloc(3*4);
+	pid = hcCreateContext();
+
+	setPid(process, pid);
+
+	return process;
 }
 
-// --- PageTable ---
-int* createEmptyPageTable(){
-	int *pt;
-	int ptMaxEntries;
-	int ptSize;
-	int i;
-	i=0;
-	
-	ptMaxEntries = VMEMORYSIZE / PAGESIZE;
-	ptSize = ptMaxEntries * 4;
-	pt = malloc(ptSize);
-
-	while(i < ptSize){
-		*(pt+i) = 0;
-		i = i + 1;
-	}
-	
-	return pt;
-}
-
-//	--- GETTER ---
-int* getPrev(int *context){
-	return (int*)*context;
-}
-int* getNext(int *context){
-	return (int*)*(context+1);
-}
-int getUID(int *context){
-	return *(context+2);
-}
-int  getPC(int *context){
-	return *(context+3);
-}
-int* getRegisters(int *context){
-	return (int*)*(context+4);
-}
-int* getPageTable(int *context){
-	return (int*)*(context+5);
-}
-
-//	--- SETTER ---
-void setPrev(int *context, int *prev){
-	*context = (int)prev;
-}
-void setNext(int *context, int *next){
-	*(context+1) = (int)next;
-}
-void setUID(int *context, int uid){
-	*(context+2) = uid;
-}
-void setPC(int *context, int pc){
-	*(context+3) = pc;
-}
-void setRegisters(int *context, int *regs){
-	*(context+4) = (int)regs;
-}
-void setPageTable(int *context, int *pt){
-	*(context+5) = (int)pt;
-}
-
-//  --- LIST ---
 int* initList(){
 	int *list;
-	list = malloc(2*4);
+	list = malloc(2 * 4);
 	*list = 0;
 	*(list+1) = 0;
-	return list;
 }
 
-void appendContext(int *context){
-	int *tail;
-	tail = (int*)*(readyQueue+1);
-	if(isListEmpty()){
-		*readyQueue = (int)context;
-	} else {
-		*context = *(readyQueue+1);
-		*(readyQueue+1) = (int)context;
-	}
-	*(readyQueue+1) = (int)context;
-	*(context+1) = 0;
+int* pollHead(int *queue){
+	return (int*)*queue;
 }
-int* removeFirstContext(){
-	int *head;
-	int *tail;
-	int *remove;
-	head = (int*)*readyQueue;
-	tail = (int*)*(readyQueue+1);
+int* pollTail(int *queue){
+	return (int*)*(queue+1);
+}
+int* findProcessByPid(int *queue, int pid){
+	int *curr;
+	curr = pollHead(queue);
+	while((int)curr != 0){
+		if(getPid(curr) == pid)
+			return curr;
+		curr = getNextProcess(curr);
+	}
+	return curr; //curr = (int*)0
+}
+int* removeFirst(int *queue){
+	int *first;
+	if(*queue == 0)
+		return (int*)0;
+	first = pollHead(queue);
+	if(*queue == (int)pollTail(queue)){
+		*queue = 0;
+		*(queue + 1) = 0;
+	} else {
+		*queue = (int)getNextProcess(first);
+	}
+	setNextProcess(first, (int*)0);
+	return first;
+}
+
+void deleteProcess(int *queue, int pid){
+	int *process;
+	process = (int*)0;
+	if((int)currProcess != 0){
+		if(getPid(currProcess) == pid){
+			process = currProcess;
+			currProcess = (int*)0;
+		} else
+			process = removeFromList(queue, pid);
+	} else 
+		process = removeFromList(queue, pid);
 	
-	if((int)head == 0){
-		remove = (int*)0;
-	} else if((int)getNext(head) == 0){
-		remove = head;
-		head = (int*)0;
-		tail = (int*)0;
-	} else {
-		remove = head;
-		head = getNext(head);
+	if((int)process != 0)	
+		hcDeleteContext(pid);
+}
+int* removeFromList(int *queue, int pid){
+	int *process;
+	int *prev;
+	int *next;
+	
+	if(*queue != 0)
+		return (int*)0;
+	
+	process = findProcessByPid(queue, pid);
+	if((int)process == 0)
+		return (int*)0;
+	if(getPid(process) == getPid(pollHead(queue))){		// process is first element
+		removeFirst(queue);
+	} else if(getPid(process) == getPid(pollTail(queue))){ // process is not first but last element
+		prev = getPrevProcess(process);
+		setNextProcess(prev, (int*)0);
+		*(queue+1) = (int)prev;
+	} else {						// process is in middle of queue
+		prev = getPrevProcess(process);
+		next = getNextProcess(process);
+		*(prev+1) = (int)next;
+		*next = (int)prev;
 	}
-	return remove;
+	return process;
 }
-int isListEmpty(){
-	if(*readyQueue == 0)
-		return 1;
-	return 0;
+void appendProcess(int *queue, int *process){
+	int *tail;
+	tail = pollTail(queue);
+	if((int)tail == 0){
+		*queue = (int)process;
+	} else {
+		setNextProcess(tail, process);
+		setPrevProcess(process, tail);
+	}
+	setNextProcess(process, (int*)0);
+	*(queue+1) = (int)process;
 }
+
+void printProcessQueue(int *queue){
+	int *curr;
+	curr = pollHead(queue);
+	putchar(10);
+	putchar('L');
+	putchar('I');
+	putchar('S');
+	putchar('T');
+	putchar(' ');
+	putchar('S');
+	putchar('T');
+	putchar('A');
+	putchar('R');
+	putchar('T');
+	putchar(10);
+	if((int)curr == 0){
+		putchar(' ');
+		putchar(' ');
+		putchar('E');
+		putchar('M');
+		putchar('P');
+		putchar('T');
+		putchar('Y');
+	
+	} else {
+		putchar('p');
+		putchar('i');
+		putchar('d');
+		putchar(':');
+		putchar(' ');
+	}
+	while((int)curr != 0){
+		putchar(getPid(curr)+'0');
+		curr = getNextProcess(curr);
+		if((int)curr != 0){
+			putchar(',');
+			putchar(' ');
+		}
+	}
+	putchar(10);
+	putchar('L');
+	putchar('I');
+	putchar('S');
+	putchar('T');
+	putchar(' ');
+	putchar('E');
+	putchar('N');
+	putchar('D');
+	putchar(10);
+	
+}
+
+// --- SETTER ---
+void setPrevProcess(int *process, int *prev){
+	*process = (int)prev;
+}
+void setNextProcess(int *process, int *next){
+	*(process+1) = (int)next;
+}
+void setPid(int *process, int pid){
+	*(process+2) = pid;
+}
+
+// --- GETTER ---
+int* getPrevProcess(int *process){
+	return (int*)*process;
+}
+int* getNextProcess(int *process){
+	return (int*)*(process+1);
+}
+int getPid(int *process){
+	return *(process+2);
+}
+
+
+
 

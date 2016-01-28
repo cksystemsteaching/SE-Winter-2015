@@ -1,16 +1,8 @@
-#compile	
-	clang -w -m32 -D'main(a, b)=main(int argc, char **argv)' selfie.c -o selfie
-	touch out
-	./selfie -c < testFile.c
-	mv out testFile.mips
-	touch out
-	./selfie -c < selfie.c
-	mv out selfie.mips
+gcc -w -m32 -Wl,--unresolved-symbols=ignore-in-object-files -D'main(a, b)=main(int argc, char **argv)' selfie.c -o selfie
 
-#run 
-		./selfie -c testFile.c -m 32 
-		#./selfie -o testFile.mips
-		#./selfie -m 32 testFile.mips 
+./selfie -c kernel.c -o kernel.mips
+./selfie -c test.c -o test.mips
+
+./selfie -l kernel.mips -k 32
 #clean	
-	rm -rf selfie selfie.mips testFile.mips *~ 
-
+	rm -rf selfie *.mips  *~ 
