@@ -1,3 +1,4 @@
+
 // Copyright (c) 2015, the Selfie Project authors. All rights reserved.
 // Please see the AUTHORS file for details. Use of this source code is
 // governed by a BSD license that can be found in the LICENSE file.
@@ -653,6 +654,7 @@ void emitGlobalsStrings();
 
 void emit();
 void load();
+void loadUserFile();
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -661,12 +663,16 @@ int maxBinaryLength = 131072; // 128KB
 // ------------------------ GLOBAL VARIABLES -----------------------
 
 int *binary = (int*) 0; // binary of emitted instructions
+int *userBinary = (int*) 0; // userbinary of emitted instructions
 
 int binaryLength = 0; // length of binary in bytes incl. globals & strings
+int userBinaryLength = 0; // length of userbinary in bytes incl. globals & strings
 
 int codeLength = 0; // length of code portion of binary in bytes
+int userCodeLength = 0; // length of usercode portion of userbinary in bytes
 
 int *binaryName   = (int*) 0; // file name of binary
+int *userBinaryName   = (int*) 0; // file name of userbinary
 
 int *sourceLineNumber = (int*) 0; // source line number per emitted instruction
 
@@ -694,6 +700,37 @@ void syscall_malloc();
 
 void emitPutchar();
 
+void emitAllocIpc();
+void syscall_allocIpc();
+
+void emitYield();
+void syscall_yield();
+
+void emitGetPID();
+void syscall_getPID();
+
+// -----------------------------------------------------------------
+// ------------------------- HYPERCALLS ----------------------------
+// -----------------------------------------------------------------
+
+void emitCreateContext();
+void hypercall_createContext();
+
+void emitSwitchContext();
+void hypercall_switchContext();
+
+void emitDeleteContext();
+void hypercall_deleteContext();
+
+void emitMapPageInContext();
+void hypercall_mapPageInContext();
+
+void emitFlushPageInContext();
+void hypercall_flushPageInContext();
+
+void emitLoadBinary();
+void hypercall_loadBinary();
+
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int SYSCALL_EXIT   = 4001;
@@ -701,7 +738,30 @@ int SYSCALL_READ   = 4003;
 int SYSCALL_WRITE  = 4004;
 int SYSCALL_OPEN   = 4005;
 int SYSCALL_MALLOC = 5001;
+int SYSCALL_ALLOCIPC = 5002;
+int SYSCALL_YIELD = 5003;
+int SYSCALL_GETPID = 5004;
 
+//A8
+int SYSCALL_GETQUEUE = 5004;
+int SYSCALL_CAS    = 5005;
+
+int HYPERCALL_CREATECONTEXT = 6001;
+int HYPERCALL_SWITCHCONTEXT = 6002;
+int HYPERCALL_DELETECONTEXT = 6003;
+int HYPERCALL_MAPPAGEINCONTEXT = 6004;
+int HYPERCALL_FLUSHPAGEINCONTEXT = 6005;
+int HYPERCALL_LOADBINARY = 6009;
+
+int CREATECONTEXT = 1;
+int SWITCHCONTEXT = 2;
+int DELETECONTEXT = 3;
+int MAPPAGEINCONTEXT = 4;
+int FLUSHPAGEINCONTEXT = 5;
+int LOADUSERBINARY = 6;
+int EXITKERNEL = 7;
+
+int *nextEvent = (int*)0;
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -709,26 +769,87 @@ int SYSCALL_MALLOC = 5001;
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 
 // -----------------------------------------------------------------
+// ---------------------------- KERNEL -----------------------------
+// -----------------------------------------------------------------
+
+void printNumber(int number);
+
+int  ipc = -1;
+int *currContext = (int*)0;
+int *currPageTable = (int*)0;
+int *contextQueue = (int*)0;
+int  kernelMode = 0;
+int  nextValidUID = 1;
+void createKernelContext();
+int* createContext();
+void printCurrContext();
+int * top;
+
+int* createPageTable();
+void printContextQueue(int *queue);
+
+int* initList();
+int  getListSize(int *queue);
+int* findContextByUID(int *queue, int uid);
+void appendContext(int *queue, int *context);
+int* removeFirst(int *queue);
+void removeContext(int *queue, int *uid);
+int* pollHead(int *queue);
+int* pollTail(int *queue);
+int* palloc();
+void saveContextState();
+void setContextState(int uid);
+void setRegisterPointer(int *registers, int data_regSP, int data_regGP);
+void printPageTable(int *context);
+// --- SETTER ---
+void setPrevContext(int *context, int *prev);
+void setNextContext(int *context, int *next);
+void setUID(int *context, int uid);
+void setPC(int *context, int pc);
+void setRegisters(int *context, int *regs);
+void setPageTable(int *context, int *pt);
+
+// --- GETTER ---
+int* getPrevContext(int *context);
+int* getNextContext(int *context);
+int  getUID(int *context);
+int  getPC(int *context);
+int* getRegisters(int *context);
+int* getPageTable(int *context);
+
+// -----------------------------------------------------------------
 // ---------------------------- MEMORY -----------------------------
 // -----------------------------------------------------------------
 
 void initMemory(int bytes);
+int* initFreeList();
 
 int tlb(int vaddr);
 
 int  loadMemory(int vaddr);
-void storeMemory(int vaddr, int data);
+int  storeMemory(int vaddr, int data);
+void storeIpc(int arg0, int arg1, int arg2, int arg3);
+void storeNextEvent();
+void setNextEvent(int arg0, int arg1, int arg2, int arg3);
+void resetNextEvent();
+void printIpc(int arg0, int arg1, int arg2, int arg3);
+void printNextEvent();
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int MEGABYTE = 1048576;
+int PAGESIZE = 4096;		// Byte, 4KB
+int PAGEFRAMESIZE = 4096;	// Byte, 4KB
+int VMEMORYSIZE = 4194304;	// Byte, 4MB
 
 // ------------------------ GLOBAL VARIABLES -----------------------
 
 int memorySize = 0; // size of memory in bytes
 
 int *memory = (int*) 0; // mipster memory
-
+int *pfreeList = (int*)0;
+int userMemoryOffset = 0;
+int userMemorySize = 0;
 // ------------------------- INITIALIZATION ------------------------
 
 void initMemory(int bytes) {
@@ -740,6 +861,42 @@ void initMemory(int bytes) {
         memorySize = bytes;
 
     memory = malloc(memorySize);
+}
+
+int* initFreeList(){
+	int *list;
+	int counterPages;
+	int i;
+	i = 0;
+	counterPages = memorySize / PAGEFRAMESIZE;
+	list = malloc(counterPages * 4);
+	while(i < counterPages){
+		if(i+1 == counterPages)
+			*(list+i) = 0;
+		else
+			*(list+i) = (int)memory + (i+1) * PAGEFRAMESIZE;
+		i = i+1;
+	}
+	return list;
+}
+void printFreeList(){
+	int *curr;
+	int i;
+	i = 0;
+	curr = pfreeList;
+	print((int*)"freeList\n");
+	while((int)curr != 0){
+		print((int*)"content of pageFrame [");
+		printNumber(i);
+		print((int*)"] at position [");
+		printNumber((int)curr);
+		print((int*)"]: [");
+		printNumber(*curr);
+		print((int*)"]\n");
+		i = i+1;
+		curr = curr + 1; 
+	}
+	print((int*)"freeList end\n");
 }
 
 // -----------------------------------------------------------------
@@ -786,6 +943,7 @@ int  up_copyString(int *s);
 void up_copyArguments(int argc, int *argv);
 
 void copyBinaryToMemory();
+int  copyUserBinaryToMemory();
 
 int addressWithMaxCounter(int *counters, int max);
 int fixedPointRatio(int a, int b);
@@ -795,13 +953,14 @@ void printProfile(int *message, int total, int *counters);
 
 void disassemble();
 void emulate(int argc, int *argv);
-
+void emulateKernel(int argc, int *argv);
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
 int debug_read    = 0;
 int debug_write   = 0;
 int debug_open    = 0;
 int debug_malloc  = 0;
+int debug_hypercalls = 0;
 
 int EXCEPTION_SIGNAL             = 1;
 int EXCEPTION_ADDRESSERROR       = 2;
@@ -826,7 +985,7 @@ int halt = 0; // flag for halting mipster
 
 int interpret = 0;
 
-int debug = 0;
+int debug = 1;
 
 int calls            = 0;        // total number of executed procedure calls
 int *callsPerAddress = (int*) 0; // number of executed calls of each procedure
@@ -839,6 +998,10 @@ int *loadsPerAddress = (int*) 0; // number of executed loads per load operation
 
 int stores            = 0;        // total number of executed memory stores
 int *storesPerAddress = (int*) 0; // number of executed stores per store operation
+
+int haltCopy;
+int interpretCopy;
+int debugCopy;
 
 // ------------------------- INITIALIZATION ------------------------
 
@@ -3328,7 +3491,20 @@ void compile() {
     emitOpen();
     emitMalloc();
     emitPutchar();
-
+	emitAllocIpc();
+	emitYield();
+	emitGetPID();
+	
+	emitCreateContext();
+	emitSwitchContext();
+	emitDeleteContext();
+	emitMapPageInContext();
+	emitFlushPageInContext();
+	
+	//A8
+	emitCAS();
+	
+	emitLoadBinary();
     // parser
     gr_cstar();
 
@@ -3355,7 +3531,15 @@ void compile() {
 void printRegister(int reg) {
     print((int*) *(REGISTERS + reg));
 }
-
+void setRegisterPointer(int *registers, int data_regSP, int data_regGP){
+	if(data_regSP > -1)
+		*(registers+REG_SP) = data_regSP;
+	if(data_regGP > -1){
+		*(registers+REG_GP) = data_regGP;
+		*(registers+REG_K1) = *(registers+REG_GP);
+	}
+	
+}
 // -----------------------------------------------------------------
 // ---------------------------- ENCODER ----------------------------
 // -----------------------------------------------------------------
@@ -3523,6 +3707,9 @@ void decodeJFormat() {
 
 int loadBinary(int addr) {
     return *(binary + addr / 4);
+}
+int loadUserBinary(int addr) {
+    return *(userBinary + addr / 4);
 }
 
 void storeBinary(int addr, int instruction) {
@@ -3730,6 +3917,54 @@ void load() {
 
     exit(-1);
 }
+void loadUserFile() {
+    int fd;
+    int numberOfReadBytes;
+
+    fd = open(userBinaryName, O_RDONLY, 0);
+
+    if (fd < 0) {
+        print(selfieName);
+        print((int*) ": could not open input file ");
+        print(userBinaryName);
+        println();
+
+        exit(-1);
+    }
+
+    userBinary       = malloc(maxBinaryLength);
+    userBinaryLength = 0;
+
+    userCodeLength = 0;
+
+    print(selfieName);
+    print((int*) ": loading code from input file ");
+    print(userBinaryName);
+    println();
+
+    // read code length first
+    numberOfReadBytes = read(fd, io_buffer, 4);
+
+    if (numberOfReadBytes == 4) {
+        userCodeLength = *io_buffer;
+        
+        // now read binary
+        numberOfReadBytes = read(fd, userBinary, maxBinaryLength);
+
+        if (numberOfReadBytes > 0) {
+            userBinaryLength = numberOfReadBytes;
+
+            return;
+        }
+    }
+
+    print(selfieName);
+    print((int*) ": failed to load code from input file ");
+    print(userBinaryName);
+    println();
+
+    exit(-1);
+}
 
 // -----------------------------------------------------------------
 // --------------------------- SYSCALLS ----------------------------
@@ -3762,12 +3997,18 @@ void syscall_exit() {
 
     *(registers+REG_V0) = exitCode;
 
-    print(binaryName);
-    print((int*) ": exiting with error code ");
-    print(itoa(exitCode, string_buffer, 10, 0, 0));
-    println();
-
-    halt = 1;
+		print(binaryName);
+		print((int*) ": exiting with error code ");
+						
+		printNumber(exitCode);
+		println();
+	if(getUID(currContext) > 0){
+		setContextState(0);
+		
+		storeIpc(DELETECONTEXT, getUID(currContext), 0, 0);
+	} else{
+		halt = 1;
+	}
 }
 
 void emitRead() {
@@ -3980,38 +4221,896 @@ void emitPutchar() {
     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 
+void emitAllocIpc(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "allocIpc", 0, FUNCTION, INTSTAR_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_ALLOCIPC);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+	
+}
+void syscall_allocIpc(){
+    int size;
+    if(ipc == -1){
+		size = *(registers+REG_A0);
+
+		if (size % 4 != 0)
+		    size = size + 4 - size % 4;
+
+		ipc = *(registers+REG_K1);
+
+		if (ipc + size >= *(registers+REG_SP))
+		    exception_handler(EXCEPTION_HEAPOVERFLOW);
+		
+		userMemoryOffset = memorySize/10;
+		userMemorySize = memorySize/2;
+
+		if(userMemorySize % PAGEFRAMESIZE != 0){
+			userMemorySize = userMemorySize - userMemorySize % PAGEFRAMESIZE;
+		}
+		if(userMemoryOffset % 4 != 0){
+			userMemoryOffset = userMemoryOffset + 4 - userMemoryOffset % 4;
+		}
+		
+		// first create a context
+		// start of freelist for OS process
+		// size for other processes
+		storeIpc(CREATECONTEXT, userMemoryOffset, userMemorySize, 0);
+
+		*(registers+REG_K1) = ipc + size;
+		*(registers+REG_V0) = ipc;
+	}
+}
+void emitYield(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "yield", 0, FUNCTION, INTSTAR_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_YIELD);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+	
+}
+void syscall_yield(){
+//	print((int*)"\nsyscall_yield\n");
+	saveContextState();
+	setContextState(0);
+	storeIpc(SWITCHCONTEXT, 0, 0, 0);
+}
+void emitGetPID(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "getPID", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_GETPID);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+	
+}
+void syscall_getPID(){
+//	print((int*)"syscall_getPID\n");
+	*(registers+REG_V0) = getUID(currContext);
+	
+}
+
+//A8
+void emitCAS()
+ {
+     createSymbolTableEntry(GLOBAL_TABLE, (int*)"cas", 0, FUNCTION, INTSTAR_T, 0, binaryLength);
+ 
+     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+ 
+     emitIFormat(OP_LW, REG_SP, REG_A2, 0); // new
+     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+     emitIFormat(OP_LW, REG_SP, REG_A1, 0); // old
+     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+ 
+     emitIFormat(OP_LW, REG_SP, REG_A0, 0); // *top (of stack)
+     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+ 	 // Load the correct syscall number 
+     emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_CAS);
+     // invoke syscall
+     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+ 
+     // jump back to caller, return value is in REG_V0
+     emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+ }
+
+void syscall_cas()
+ {
+     int old;
+     int new;
+     int vaddr;
+     int* top;
+ 
+     new = *(registers + REG_A2);
+     old = *(registers + REG_A1);
+     vaddr = *(registers + REG_A0);
+
+    *top = *memory + tlb(vaddr);
+ 
+     if (*top == old) {
+     	// top has not changed we owerwrite it and return true
+         *top = new;
+         *(registers + REG_V0) = 1;
+		
+		print(itoa(getUID(currContext), string_buffer, 10, 0, 0));
+		print((int*)" CAS: new value sucessfully inserted :");
+		println();
+
+     }
+     else {
+     // top has changed we are not allow to owerwrite it
+         *(registers + REG_V0) = 0;
+       
+         print(itoa(getUID(currContext), string_buffer, 10, 0, 0));
+         print((int*)" CAS: top has changed, not allow to write !!! ");
+         println();
+     }
+ }
+
+// -----------------------------------------------------------------
+// ------------------------- HYPERCALLS ----------------------------
+// -----------------------------------------------------------------
+
+
+
+void emitCreateContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "hcCreateContext", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_CREATECONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+
+}
+
+void hypercall_createContext(){
+	int *context;
+
+	if(debug_hypercalls){
+		print((int*)"hypercall_createContext (currUID [");
+		printNumber(getUID(currContext));
+		print((int*)"])\n");
+		print((int*)"pc: ");
+		printNumber(pc);
+		println();
+	}
+	
+	context = createContext();
+	
+	*(registers+REG_V0) = getUID(context);
+	
+	storeIpc(LOADUSERBINARY, getUID(context), 0, 0);
+	
+	if(debug_hypercalls){
+		if((int)context != 0){
+			print((int*)"context [");
+			printNumber(getUID(context));
+			print((int*)"] created\n");
+		} else {
+			print((int*)"no context created\n");
+		}
+
+		print((int*)"hypercall_createContext end (currUID [");
+		printNumber(getUID(currContext));
+		print((int*)"])\n");
+	}
+}
+
+void emitSwitchContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "hcSwitchContext", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_SWITCHCONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+
+}
+
+void hypercall_switchContext(){
+	int uid;
+	if(debug_hypercalls){
+		print((int*)"hypercall_switchContext switch from uid [");
+		printNumber(getUID(currContext));
+		print((int*)"]\n");
+	}
+	
+	uid = *(registers + REG_A0);
+
+	saveContextState();
+	setContextState(uid);
+
+	if(debug_hypercalls){
+		print((int*)"hypercall_switchContext switch to uid [");
+		printNumber(uid);
+		print((int*)"]\n");
+	}
+}
+
+void emitDeleteContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "hcDeleteContext", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_DELETECONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+
+}
+
+void hypercall_deleteContext(){
+	int uid;
+	if(debug_hypercalls){
+		print((int*)"hypercall_deleteContext (currUID [");
+		printNumber(getUID(currContext));
+		print((int*)"])\n");
+	}
+	uid = *(registers + REG_A0);
+
+	removeContext(contextQueue, uid);
+	
+	if((int)getUID(currContext)==uid)
+		saveContextState();
+
+	setContextState(0);
+	print((int*) "hier");
+	storeIpc(SWITCHCONTEXT, 0, 0, 0);
+
+	if(debug_hypercalls){
+		print((int*)"removed context with uid [");
+		printNumber(uid);
+		print((int*)"]\nhypercall_deleteContext end (uid [");
+		printNumber(getUID(currContext));
+		print((int*)"])\n");
+	}
+}
+
+void emitMapPageInContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "hcMapPageInContext", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_MAPPAGEINCONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+
+}
+
+void hypercall_mapPageInContext(){
+	int uid;
+	int index;
+	int *context;
+	int *pt;
+	int pageFrame;
+	if(debug_hypercalls){
+		print((int*)"hypercall_mapPageInContext (currUID [");
+		printNumber(getUID(currContext));
+		print((int*)"])\n");
+	}	
+	uid = *(registers + REG_A0);
+	index = *(registers + REG_A1);
+	pageFrame = *(registers + REG_A2);
+	
+	context = findContextByUID(contextQueue, uid);
+	
+	pt = getPageTable(context);
+	*(pt+index) = pageFrame;
+
+	if(*nextEvent > -1)
+		storeNextEvent();
+
+	else {
+		storeIpc(SWITCHCONTEXT, 0, 0, 0);
+		resetNextEvent();
+	}
+		
+	if(debug_hypercalls){
+		print((int*)"hypercall_mapPageInContext end (currUID [");
+		printNumber(getUID(currContext));
+		print((int*)"])\n");
+	}	
+}
+
+void emitFlushPageInContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "hcFlushPageInContext", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_FLUSHPAGEINCONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+
+}
+
+void hypercall_flushPageInContext(){
+	int uid;
+	int index;
+	int *context;
+	int *pt;
+
+	if(debug_hypercalls){
+		print((int*)"hypercall_flushPageInContext (currUID [");
+		printNumber(getUID(currContext));
+		print((int*)"])\n");
+	}	
+	uid = *(registers + REG_A0);
+	index = *(registers + REG_A1);
+	
+	context = findContextByUID(contextQueue, uid);
+	
+	pt = getPageTable(context);
+	*(pt+index) = 0;
+
+	if(*nextEvent > -1)
+		storeNextEvent();
+	else {
+		storeIpc(SWITCHCONTEXT, 0, 0, 0);
+		resetNextEvent();
+	}
+		
+	if(debug_hypercalls){
+		print((int*)"hypercall_flushPageInContext end (currUID [");
+		printNumber(getUID(currContext));
+		print((int*)"])\n");
+	}	
+}
+
+void emitLoadBinary(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "hcLoadBinary", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_LOADBINARY);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+
+}
+void hypercall_loadBinary(){
+	int uid;
+	int successful;
+	if(debug_hypercalls){
+		print((int*)"hypercall_loadBinary (currUID [");
+		printNumber(getUID(currContext));
+		print((int*)"])\n");
+		print((int*)"pc: ");
+		printNumber(pc);
+		println();
+	}
+	
+	uid = *(registers+REG_A0);
+
+	if(debug_hypercalls){
+		print((int*)"load binary for context [");
+		printNumber(uid);
+		print((int*)"]\n");
+	}
+
+	saveContextState();
+	setContextState(uid);
+	
+	loadUserFile();
+	successful = copyUserBinaryToMemory();
+	
+	if(successful)	
+		setRegisterPointer(registers, -1, userBinaryLength);
+	
+	setContextState(0);
+	
+	if(successful){
+		storeIpc(SWITCHCONTEXT, 0, 0, 0);
+		resetNextEvent();
+	} else {
+		setNextEvent(LOADUSERBINARY, uid, 0, 0);
+	}
+	if(debug_hypercalls){
+		print((int*)"hypercall_loadBinary end (currUID [");
+		printNumber(getUID(currContext));
+		print((int*)"])\n");
+		print((int*)"pc: ");
+		printNumber(getPC(currContext));
+		println();
+	}
+}
+
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
 // -----------------------------------------------------------------
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
+void printNumber(int number){
+	print(itoa(number, string_buffer, 10, 0, 0));
+}
+
+// a context has following structure: 
+//
+//  0     1     2     3     4     5
+//	+-----+-----+-----+-----+-----+-----+
+//  |prev |next | UID | PC  |Regs | PT  |
+//  +-----+-----+-----+-----+-----+-----+
+//
+
+void createKernelContext(){
+	int ptEntries;
+	int i;
+	i=0;
+	
+	ptEntries = memorySize / PAGESIZE;
+	
+	currContext = malloc(6 * 4);
+	currPageTable = malloc(ptEntries *4);
+	
+	while(i< ptEntries){
+		*(currPageTable+i) = (int)memory + i * PAGESIZE;
+		i = i+1;
+	}
+	
+	setPrevContext(currContext, (int*)0);
+	setNextContext(currContext, (int*)0);
+	setUID(currContext, 0);
+	setPC(currContext, 0);
+	setRegisters(currContext, registers);
+	setPageTable(currContext, currPageTable);
+	appendContext(contextQueue, currContext);
+}
+void printCurrContext(){
+	if((int)currContext == 0){
+		print((int*)"curr context is NULL\n");
+	} else {
+		print((int*)"curr context [[");
+		printNumber(getUID(currContext));
+		print((int*)"]]\n");
+	}
+}
+int* createContext(){
+	int *context;
+	int *regs;
+	int *pt;
+	context = malloc(6 * 4);
+	regs = malloc(32*4);
+	pt = createPageTable();
+	setRegisterPointer(regs, VMEMORYSIZE-4, -1);
+	setPrevContext(context, (int*)0);
+	setNextContext(context, (int*)0);
+	setUID(context, nextValidUID);
+	setPC(context, 0);
+	setRegisters(context, regs);
+	setPageTable(context, pt);
+	nextValidUID = nextValidUID + 1;
+	appendContext(contextQueue, context);
+	return context;
+	
+}
+void saveContextState(){
+	if(debug_hypercalls){
+		print((int*)"save state from context [");
+		printNumber(getUID(currContext));
+		print((int*)"]\n");
+	}
+	setPC(currContext, pc);
+	setRegisters(currContext, registers);
+	setPageTable(currContext, currPageTable);
+}
+
+void setContextState(int uid){
+	int *context;
+	context = findContextByUID(contextQueue, uid);
+	
+	if((int)context != 0){
+		pc = getPC(context);
+		registers = getRegisters(context);
+		currPageTable = getPageTable(context);
+		currContext = context;
+
+		if(debug_hypercalls){
+			print((int*)"set state from context [");
+			printNumber(getUID(currContext));
+			print((int*)"]\n");
+		}
+	} else {
+		print((int*)"no context found");
+		exit(-1);
+	}
+}
+
+int* initList(){
+	int *list;
+	list = malloc(2 * 4);
+	*list = 0;
+	*(list+1) = 0;
+}
+int getListSize(int *queue){
+	int size;
+	int *curr;
+	curr = pollHead(queue);
+	size = 0;
+	while((int)curr != 0){
+		size = size + 1;
+		curr = getNextContext(curr);
+	}
+	return size;
+}
+void printContextQueue(int *queue){
+	int *curr;
+	curr = pollHead(queue);
+	print((int*)"list start\n");
+	print((int*)"uid: ");
+	while((int)curr != 0){
+		printNumber(getUID(curr));
+		curr = getNextContext(curr);
+		if((int)curr != 0)
+			print((int*)", ");
+	}
+	print((int*)"\nlist end\n");
+}
+
+int* createPageTable(){
+	int *pt;
+	int ptEntries;
+	int ptSize;
+	int i;
+	i = 0;
+	ptEntries = VMEMORYSIZE / PAGESIZE;
+	ptSize = ptEntries * 4;
+	pt = malloc(ptSize);
+	while(i < ptSize){
+		*(pt+i) = 0;
+		i = i + 1;
+	}
+	return pt;
+}
+void printPageTable(int *context){
+	int ptEntries;
+	int *pt;
+	int i;
+	i = 0;
+	pt = getPageTable(context);
+	if(getUID(context) == 0)
+		ptEntries = memorySize / PAGEFRAMESIZE;
+	else
+		ptEntries = VMEMORYSIZE / PAGEFRAMESIZE;
+	print((int*)"print pageTable of context [");
+	printNumber(getUID(context));
+	print((int*)"]\n");
+	while(i < ptEntries){
+		if(*(pt+i) != 0){
+			print((int*)"pt [");
+			printNumber(i);
+			print((int*)"] :\t[");
+			printNumber(*(pt+i));
+			print((int*)"]\n");
+		}
+		i = i + 1;
+	}
+	print((int*)"print pageTable end\n");
+}
+int* removeFirst(int *queue){
+	int *first;
+	if(*queue == 0)
+		return (int*)0;
+	first = pollHead(queue);
+	if(*queue == (int)pollTail(queue)){
+		*queue = 0;
+		*(queue + 1) = 0;
+	} else {
+		*queue = (int)getNextContext(first);
+	}
+	setNextContext(first, (int*)0);
+	return first;
+}
+
+void removeContext(int *queue, int *uid){
+	int *prev;
+	int *next;
+	int *context;
+	if(*queue == 0)
+		return;
+	context = findContextByUID(queue, uid);
+	if((int)context == 0)
+		return ;
+	if(getUID(context) == getUID(pollHead(queue))){		// process is first element
+		removeFirst(queue);
+	} else if(getUID(context) == getUID(pollTail(queue))){ // process is not first but last element
+		prev = getPrevContext(context);
+		setNextContext(prev, (int*)0);
+		*(queue+1) = (int)prev;
+	} else {						// process is in middle of queue
+		prev = getPrevContext(context);
+		next = getNextContext(context);
+		*(prev+1) = (int)next;
+		*next = (int)prev;
+	}
+}
+
+void appendContext(int *queue, int *context){
+	int *tail;
+	tail = pollTail(queue);
+	if((int)tail == 0){
+		*queue = (int)context;
+		setPrevContext(context, (int*)0);
+	} else {
+		setNextContext(tail, context);
+		setPrevContext(context, tail);
+	}
+	setNextContext(context, (int*)0);
+	*(queue+1) = (int)context;
+}
+int* palloc(){
+	int *pageFrame;
+
+	if(*pfreeList != 0){
+		pageFrame = (int*)*pfreeList;
+		pfreeList = pfreeList + 1;
+		return pageFrame;
+	}
+
+	print((int*)"no free pages left");
+	exit(-1);
+
+}
+
+int* pollHead(int *queue){
+	return (int*)*queue;
+}
+int* pollTail(int *queue){
+	return (int*)*(queue+1);
+}
+int* findContextByUID(int *queue, int uid){
+	int *curr;
+	curr = pollHead(queue);
+	while((int)curr != 0){
+		if(getUID(curr) == uid)
+			return curr;
+		curr = getNextContext(curr);
+	}
+	return curr; //curr = (int*)0
+}
+
+// --- SETTER ---
+void setPrevContext(int *context, int *prev){
+	*context = (int)prev;
+}
+void setNextContext(int *context, int *next){
+	*(context+1) = (int)next;
+}
+void setUID(int *context, int uid){
+	*(context+2) = uid;
+}
+void setPC(int *context, int pc){
+	*(context+3) = pc;
+}
+void setRegisters(int *context, int *regs){
+	*(context+4) = (int)regs;
+}
+void setPageTable(int *context, int *pt){
+	*(context+5) = (int)pt;
+}
+
+// --- GETTER ---
+int* getPrevContext(int *context){
+	return (int*)*context;
+}
+int* getNextContext(int *context){
+	return (int*)*(context+1);
+}
+int getUID(int *context){
+	return *(context+2);
+}
+int getPC(int *context){
+	return *(context+3);
+}
+int* getRegisters(int *context){
+	return (int*)*(context+4);
+}
+int* getPageTable(int *context){
+	return (int*)*(context+5);
+}
 
 // -----------------------------------------------------------------
 // ---------------------------- MEMORY -----------------------------
 // -----------------------------------------------------------------
 
 int tlb(int vaddr) {
-    if (vaddr % 4 != 0)
-        exception_handler(EXCEPTION_ADDRESSERROR);
+	int ptOffset;
+	int pfOffset;
+	int paddr;
+	int uid;
+	int i;
+	i = interpret;
+	if (vaddr % 4 != 0)
+	    exception_handler(EXCEPTION_ADDRESSERROR);
+	if(getUID(currContext) == 0){
+		return vaddr/4;
+	}
 
-    // physical memory is word-addressed for lack of byte-sized data type
-    return vaddr / 4;
+	if(interpret==0){
+		return vaddr/4;
+	}
+
+	ptOffset = vaddr/ PAGESIZE;
+	pfOffset = vaddr % PAGEFRAMESIZE;
+	
+	if(*(currPageTable+ptOffset) == 0){
+		print((int*)"PAGEFAULT\n");
+		
+		uid = getUID(currContext);
+		saveContextState();
+		setContextState(0);
+		storeIpc(MAPPAGEINCONTEXT, uid, ptOffset, 0);
+		return -1;
+	}
+	paddr = *(currPageTable+ptOffset) + pfOffset;
+    return paddr;
 }
 
 int loadMemory(int vaddr) {
     int paddr;
 
     paddr = tlb(vaddr);
-
+	if(paddr == -1)
+		return -1;
     return *(memory + paddr);
 }
 
-void storeMemory(int vaddr, int data) {
+int storeMemory(int vaddr, int data) {
     int paddr;
 
     paddr = tlb(vaddr);
-
+	if(paddr == -1)
+		return 0;
     *(memory + paddr) = data;
+    return 1;
+}
+
+void storeIpc(int arg0, int arg1, int arg2, int arg3){
+	if(debug_hypercalls){
+		printIpc(arg0, arg1, arg2, arg3);
+		printNextEvent();
+	}
+	storeMemory(ipc, arg0);
+	storeMemory(ipc+4, arg1);
+	storeMemory(ipc+8, arg2);
+	storeMemory(ipc+12, arg3);
+}
+void storeNextEvent(){
+	storeIpc(*nextEvent, *(nextEvent+1), *(nextEvent+2), *(nextEvent+3));
+	resetNextEvent();
+}
+void setNextEvent(int arg0, int arg1, int arg2, int arg3){
+	*nextEvent = arg0;
+	*(nextEvent+1) = arg1;
+	*(nextEvent+2) = arg2;
+	*(nextEvent+3) = arg3;
+	if(debug_hypercalls)
+		printNextEvent();
+}
+void resetNextEvent(){
+	*nextEvent = -1;
+	*(nextEvent+1) = -1;
+	*(nextEvent+2) = -1;
+	*(nextEvent+3) = -1;
+}
+void resetIpc(){
+	storeIpc(-1, -1, -1, -1);
+}
+void printIpc(int arg0, int arg1, int arg2, int arg3){
+	print((int*)"ipc\n");
+
+	print((int*)"arg0: ");
+	if(arg0 == 1)
+		print((int*)"CREATECONTEXT");
+	else if(arg0 == 2)
+		print((int*)"SWITCHCONTEXT");
+	else if(arg0 == 3)
+		print((int*)"DELETECONTEXT");
+	else if(arg0 == 4)
+		print((int*)"MAPPAGEINCONTEXT");
+	else if(arg0 == 5)
+		print((int*)"FLUSHPAGEINCONTEXT");
+	else if(arg0 == 6)
+		print((int*)"LOADUSERBINARY");
+	else if(arg0 == 7)
+		print((int*)"EXITKERNEL");
+	else 
+		printNumber(arg0);
+	print((int*)"\narg1: ");
+	printNumber(arg1);
+	print((int*)"\narg2: ");
+	printNumber(arg2);
+	print((int*)"\narg3: ");
+	printNumber(arg3);
+	println();
+}
+void printNextEvent(){
+	print((int*)"next event\n");
+
+	print((int*)"arg0: ");
+	if(*nextEvent == 1)
+		print((int*)"CREATECONTEXT");
+	else if(*nextEvent == 2)
+		print((int*)"SWITCHCONTEXT");
+	else if(*nextEvent == 3)
+		print((int*)"DELETECONTEXT");
+	else if(*nextEvent == 4)
+		print((int*)"MAPPAGEINCONTEXT");
+	else if(*nextEvent == 5)
+		print((int*)"FLUSHPAGEINCONTEXT");
+	else if(*nextEvent == 6)
+		print((int*)"LOADUSERBINARY");
+	else if(*nextEvent == 7)
+		print((int*)"EXITKERNEL");
+	else if(*nextEvent == -1)
+		print((int*)"UNSET");
+	else 
+		printNumber(*nextEvent);
+	if(*nextEvent != -1){
+		print((int*)"\narg1: ");
+		printNumber(*(nextEvent+1));
+		print((int*)"\narg2: ");
+		printNumber(*(nextEvent+2));
+		print((int*)"\narg3: ");
+		printNumber(*(nextEvent+3));
+	}
+	println();
 }
 
 // -----------------------------------------------------------------
@@ -4035,7 +5134,30 @@ void fct_syscall() {
             syscall_open();
         } else if (*(registers+REG_V0) == SYSCALL_MALLOC) {
             syscall_malloc();
+        } else if (*(registers+REG_V0) == SYSCALL_ALLOCIPC) {
+            syscall_allocIpc();
+        } else if (*(registers+REG_V0) == SYSCALL_YIELD) {
+            syscall_yield();
+        } else if (*(registers+REG_V0) == SYSCALL_GETPID) {
+            syscall_getPID();
+        } else if (*(registers+REG_V0) == HYPERCALL_CREATECONTEXT) {
+            hypercall_createContext();
+        } else if (*(registers+REG_V0) == HYPERCALL_SWITCHCONTEXT) {
+            hypercall_switchContext();
+        } else if (*(registers+REG_V0) == HYPERCALL_DELETECONTEXT) {
+            hypercall_deleteContext();
+        } else if (*(registers+REG_V0) == HYPERCALL_MAPPAGEINCONTEXT) {
+            hypercall_mapPageInContext();
+        } else if (*(registers+REG_V0) == HYPERCALL_FLUSHPAGEINCONTEXT) {
+            hypercall_flushPageInContext();
+        } else if (*(registers+REG_V0) == HYPERCALL_LOADBINARY) {
+            hypercall_loadBinary();
+        } else if(*(registers+REG_V0) == SYSCALL_CAS){
+			syscall_cas();
         } else {
+        print((int*)"reg v0: ");
+        printNumber(*(registers+REG_V0));
+        println();
             exception_handler(EXCEPTION_UNKNOWNSYSCALL);
         }
 
@@ -4689,8 +5811,12 @@ void exception_handler(int enumber) {
     print((int*) ": exception: ");
     printException(enumber);
     println();
-
-    exit(enumber);
+    if(getUID(currContext) > 0){
+		setContextState(0);
+		storeMemory(ipc, DELETECONTEXT);
+	}
+	else
+	exit(enumber);
 }
 
 void fetch() {
@@ -4771,12 +5897,38 @@ void execute() {
 }
 
 void run() {
+	int counterInstr;
+	int maxInstr;
+	int i;
+	i=0;
+	counterInstr = 0;
+	maxInstr = 10;
     halt = 0;
 
     while (halt == 0) {
         fetch();
         decode();
         execute();
+        i = i+1;
+        if(getUID(currContext) > 0){
+    		//print((int*)"getUID(currContext) > 0\n");
+        	if(counterInstr >= maxInstr){
+        		//print((int*)"switch after [");
+        		//printNumber(maxInstr);
+        		//print((int*)"] instructions in userMode\n");
+        		
+        		//switch does not work here if it program did not finish
+        		
+        		
+        		//saveContextState();
+        		//setContextState(0);
+        		//storeIpc(SWITCHCONTEXT, 0, 0, 0);
+        		//storeMemory(ipc, SWITCHCONTEXT);
+        		
+        		counterInstr = 0;
+        	} else
+        		counterInstr = counterInstr + 1;
+		}
     }
 
     halt = 0;
@@ -4836,13 +5988,11 @@ int up_copyString(int *s) {
 
 void up_copyArguments(int argc, int *argv) {
     int vaddr;
-
     up_push(argc);
 
     vaddr = up_malloc(argc * 4);
 
     up_push(vaddr);
-
     while (argc > 0) {
         storeMemory(vaddr, up_copyString((int*) *argv));
 
@@ -4863,6 +6013,20 @@ void copyBinaryToMemory() {
 
         a = a + 4;
     }
+}
+int copyUserBinaryToMemory() {
+    int a;
+	int successful;
+	
+    a = 0;
+
+    while (a < userBinaryLength) {
+        successful = storeMemory(a, loadUserBinary(a));
+		if(successful == 0)
+			return 0;
+        a = a + 4;
+    }
+    return 1;
 }
 
 int addressWithMaxCounter(int *counters, int max) {
@@ -5035,9 +6199,64 @@ void emulate(int argc, int *argv) {
     printProfile((int*) ": stores: ", stores, storesPerAddress);
 }
 
+void emulateKernel(int argc, int *argv) {
+    print(selfieName);
+    print((int*) ": this is selfie's mipster executing ");
+    print(binaryName);
+    print((int*) " with ");
+    print(itoa(memorySize / 1024 / 1024, string_buffer, 10, 0, 0));
+    print((int*) "MB of memory");
+    println();
+
+    interpret = 1;
+    kernelMode = 1;
+
+	contextQueue = initList();
+
+	nextEvent = malloc(4*4);
+	resetNextEvent();
+
+    createKernelContext();
+
+    copyBinaryToMemory();
+
+    resetInterpreter();
+
+	setRegisterPointer(registers, memorySize - 4, binaryLength);
+
+    up_copyArguments(argc, argv);
+
+    run();
+
+    print(selfieName);
+    print((int*) ": this is selfie's mipster terminating ");
+    print(binaryName);
+    println();
+
+    print(selfieName);
+    print((int*) ": profile: total,max(ratio%)@addr(line#),2max(ratio%)@addr(line#),3max(ratio%)@addr(line#)");
+    println();
+    printProfile((int*) ": calls: ", calls, callsPerAddress);
+    printProfile((int*) ": loops: ", loops, loopsPerAddress);
+    printProfile((int*) ": loads: ", loads, loadsPerAddress);
+    printProfile((int*) ": stores: ", stores, storesPerAddress);
+}
+
 // -----------------------------------------------------------------
 // ----------------------------- MAIN ------------------------------
 // -----------------------------------------------------------------
+void printArgcArgv(int argc, int *argv){
+	print((int*)"argc: ");
+	printNumber(argc);
+	println();
+	while(argc > 0){
+		print((int*)*argv);
+		print((int*)" ");
+		argv = argv + 1;
+		argc = argc - 1;
+	}
+	println();
+}
 
 int selfie(int argc, int* argv) {
     if (argc < 2)
@@ -5134,9 +6353,27 @@ int selfie(int argc, int* argv) {
 
                 return 0;
             } else if (stringCompare((int*) *argv, (int*) "-k")) {
-                print(selfieName);
-                print((int*) ": selfie -k size ... not yet implemented");
-                println();
+			 	kernelMode = 1;
+                initMemory(atoi((int*) *(argv+2)) * MEGABYTE);
+                userBinaryName = (int*)*(argv+1);
+
+                argc = argc - 2;
+                argv = argv + 2;
+
+                // pass binaryName as first argument replacing size
+                *argv = (int) binaryName;
+
+                if (binaryLength > 0) {
+                    debug = 0;
+
+                    emulateKernel(argc, argv);
+                } else {
+                    print(selfieName);
+                    print((int*) ": nothing to emulate");
+                    println();
+
+                    exit(-1);
+                }
 
                 return 0;
             } else
@@ -5163,8 +6400,12 @@ int main(int argc, int *argv) {
     argv = argv + 1;
 
     if (selfie(argc, (int*) argv) != 0) {
+        printArgcArgv(argc, argv);
         print(selfieName);
         print((int*) ": usage: selfie { -c source | -o binary | -s assembly | -l binary } [ -m size ... | -d size ... | -k size ... ] ");
         println();
     }
 }
+
+
+
