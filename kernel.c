@@ -24,7 +24,6 @@ int EXITKERNEL = 7;
 // --- methods ---
 int* createProcess();
 int* createPageTable();
-void loadBinary();
 int* initFreeList(int *memoryStart, int memorySize);
 int  palloc();
 void mapPageInContext(int pid, int ptOffset);
@@ -42,6 +41,7 @@ void setPrevProcess(int *process, int *prev);
 void setNextProcess(int *process, int *next);
 void setPid(int *process, int pid);
 void setPageTable(int *process, int *pt);
+void flushPageInContext(int pid, int ptOffset);
 
 int* getPrevProcess(int *process);
 int* getNextProcess(int *process);
@@ -49,14 +49,11 @@ int  getPid(int *process);
 int* getPageTable(int *process);
 
 int main(){
-//	if((int)ipc == 0){
-		ipc = allocIpc(4*4);
-		pfreeList = initFreeList((int*)*(ipc+1), *(ipc+2));
-		processQueue = initList();
-//	}
+	ipc = allocIpc(4*4);
+	pfreeList = initFreeList((int*)*(ipc+1), *(ipc+2));
+	processQueue = initList();
+	
 	while(1){
-//	putchar('a');
-//	putchar(' ');
 		if(*ipc == CREATECONTEXT){
 			if(debug){
 				putchar('C');
@@ -68,7 +65,6 @@ int main(){
 				putchar(10);
 			}
 			currProcess = createProcess();
-			//exit(CREATECONTEXT);
 		} else if(*ipc == SWITCHCONTEXT){
 			if(debug){
 				putchar('S');
@@ -83,25 +79,14 @@ int main(){
 			
 			if((int)currProcess != 0)
 				appendProcess(processQueue, currProcess);
-//			printProcessQueue(processQueue);
 			currProcess = (int*)0;
 			currProcess = removeFirst(processQueue);
-//			printProcessQueue(processQueue);
-				//putchar('p');
-				//putchar('i');
-				//putchar('d');
-				//putchar(' ');
-				//putchar(getPid(currProcess));
-				//putchar(10);
+
 			if((int)currProcess != 0){
-				//putchar('p');
-				//putchar('i');
-				//putchar('d');
-				//putchar(' ');
 				hcSwitchContext(getPid(currProcess));
 
 			} else 
-				*ipc = EXITKERNEL;//exit(SWITCHCONTEXT);		
+				*ipc = EXITKERNEL;		
 		} else if(*ipc == DELETECONTEXT){
 			if(debug){
 				putchar('D');
@@ -112,7 +97,6 @@ int main(){
 				putchar('E');
 				putchar(10);
 			}			
-			//exit(DELETECONTEXT);
 			deleteProcess(processQueue, getPid(currProcess));
 		} else if(*ipc == MAPPAGEINCONTEXT){
 			if(debug){
@@ -132,7 +116,8 @@ int main(){
 				putchar('H');
 				putchar(10);
 			}
-			exit(FLUSHPAGEINCONTEXT);
+			flushPageInContext(*(ipc+1), *(ipc+2));
+//			exit(FLUSHPAGEINCONTEXT);
 		} else if(*ipc == LOADUSERBINARY){
 			if(debug){
 				putchar('L');
@@ -141,7 +126,6 @@ int main(){
 				putchar('D');
 				putchar(10);
 			}
-			//exit(0);
 			hcLoadBinary(*(ipc+1));
 		} else if(*ipc == EXITKERNEL){
 			if(debug){
@@ -209,51 +193,47 @@ void mapPageInContext(int pid, int ptOffset){
 		pageFrame = palloc();
 		pt = getPageTable(process);
 		*(pt + ptOffset) = pageFrame;
-		
-//		putchar(10);
-//		putchar(10);
-	//	putchar(10);
-//		putchar(ptOffset + '0');
-		//printNumber(pageFrame);
-//		putchar(10);
-//		putchar(10);
-	//	putchar(10);
 		hcMapPageInContext(pid, ptOffset, pageFrame);
 	} else {
 	
 		exit(-1);
 	}
 }
-void loadBinary(){
-	//*ipc = (int)binaryName;
-	hcLoadBinary(getPid(currProcess));
-
+void flushPageInContext(int pid, int ptOffset){
+	int *process;
+	int *pageFrame;
+	int *pt;
+	if((int)currProcess != 0){
+		if(getPid(currProcess) == pid)
+			process = currProcess;
+		else
+			process = findProcessByPid(processQueue, pid);
+		
+	} else
+		process = findProcessByPid(processQueue, pid);
+	if((int)process != 0){
+		pt = getPageTable(process);
+		pageFrame = (pt+ptOffset);
+		*(pt+ptOffset) = 0;
+		pfree(pageFrame);
+		hcFlushPageInContext(pid, ptOffset);
+	}
+	
 }
+
 int* initFreeList(int *memoryStart, int memorySize){
 	int *list;
 	int i;
 	int counterPageFrames;
 	
-	//printNumber((int)memorySize);
 	i = 0;
-//	if(memorySize % PAGEFRAMESIZE != 0){
-//		memorySize = memorySize - memorySize % PAGEFRAMESIZE;
-//	}
-//	if((int)memoryStart % 4 != 0){
-//		memoryStart = (int*)((int)memoryStart + 4 - (int)memoryStart % 4);
-//	}
-	//putchar('a');
 	counterPageFrames = memorySize / PAGEFRAMESIZE;
 	list = memoryStart;
-//	putchar('a');
 	while(i < counterPageFrames){
-	//putchar('a');
 		if(i+1 == counterPageFrames)
-			*(memoryStart+i) = 0;//(int)memoryStart + PAGEFRAMESIZE;
+			*(memoryStart+i) = 0;
 		else
 			*(memoryStart+i) = (int)memoryStart + (i+1) * PAGEFRAMESIZE;
-//			putchar(i+'0');
-//			putchar(10);
 		i = i +1;
 	}
 	return list;
@@ -270,6 +250,15 @@ int palloc(){
 	//print((int*)"no free pages left");
 	exit(-1);
 
+}
+void pfree(int *pageFrame){
+	if((int)pfreeList == 0){
+		*pageFrame = 0;
+		pfreeList = pageFrame 
+	} else {
+		*pageFrame = (int)pfreeList;
+		pfreeList = pageFrame;
+	}
 }
 
 int* initList(){

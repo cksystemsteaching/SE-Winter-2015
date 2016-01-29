@@ -724,6 +724,8 @@ void hypercall_deleteContext();
 void emitMapPageInContext();
 void hypercall_mapPageInContext();
 
+void emitFlushPageInContext();
+void hypercall_flushPageInContext();
 
 void emitLoadBinary();
 void hypercall_loadBinary();
@@ -743,6 +745,7 @@ int HYPERCALL_CREATECONTEXT = 6001;
 int HYPERCALL_SWITCHCONTEXT = 6002;
 int HYPERCALL_DELETECONTEXT = 6003;
 int HYPERCALL_MAPPAGEINCONTEXT = 6004;
+int HYPERCALL_FLUSHPAGEINCONTEXT = 6005;
 int HYPERCALL_LOADBINARY = 6009;
 
 int CREATECONTEXT = 1;
@@ -3489,6 +3492,7 @@ void compile() {
 	emitSwitchContext();
 	emitDeleteContext();
 	emitMapPageInContext();
+	emitFlushPageInContext();
 	
 	emitLoadBinary();
     // parser
@@ -3991,6 +3995,7 @@ void syscall_exit() {
 	if(getUID(currContext) > 0){
 		//halt = 1;
 		setContextState(0);
+		
 		storeIpc(DELETECONTEXT, getUID(currContext), 0, 0);
 	} else{
 		halt = 1;
@@ -4436,11 +4441,7 @@ void emitMapPageInContext(){
     createSymbolTableEntry(GLOBAL_TABLE, (int*) "hcMapPageInContext", 0, FUNCTION, INT_T, 0, binaryLength);
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
-//   emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
-//    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
 
-//    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
- //   emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
     emitIFormat(OP_LW, REG_SP, REG_A2, 0);
     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
@@ -4489,6 +4490,58 @@ void hypercall_mapPageInContext(){
 		
 	if(debug_hypercalls){
 		print((int*)"hypercall_mapPageInContext end (currUID [");
+		printNumber(getUID(currContext));
+		print((int*)"])\n");
+	}	
+}
+
+void emitFlushPageInContext(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "hcFlushPageInContext", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+
+    emitIFormat(OP_LW, REG_SP, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_LW, REG_SP, REG_A0, 0);
+    emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_FLUSHPAGEINCONTEXT);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+
+}
+
+void hypercall_flushPageInContext(){
+	int uid;
+	int index;
+	int *context;
+	int *pt;
+
+	if(debug_hypercalls){
+		print((int*)"hypercall_flushPageInContext (currUID [");
+		printNumber(getUID(currContext));
+		print((int*)"])\n");
+	}	
+	uid = *(registers + REG_A0);
+	index = *(registers + REG_A1);
+	
+	context = findContextByUID(contextQueue, uid);
+	
+	pt = getPageTable(context);
+	*(pt+index) = 0;
+
+	if(*nextEvent > -1)
+		storeNextEvent();
+	else {
+		storeIpc(SWITCHCONTEXT, 0, 0, 0);
+		resetNextEvent();
+	}
+		
+	if(debug_hypercalls){
+		print((int*)"hypercall_flushPageInContext end (currUID [");
 		printNumber(getUID(currContext));
 		print((int*)"])\n");
 	}	
@@ -5033,6 +5086,8 @@ void fct_syscall() {
             hypercall_deleteContext();
         } else if (*(registers+REG_V0) == HYPERCALL_MAPPAGEINCONTEXT) {
             hypercall_mapPageInContext();
+        } else if (*(registers+REG_V0) == HYPERCALL_FLUSHPAGEINCONTEXT) {
+            hypercall_flushPageInContext();
         } else if (*(registers+REG_V0) == HYPERCALL_LOADBINARY) {
             hypercall_loadBinary();
         } else {
