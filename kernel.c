@@ -3,11 +3,10 @@
 int *currProcess;
 int *currPageTable;
 int *processQueue;
-int pid;
-int *ipc;
-int *binaryName;
+int  pid;
+int *ipc = (int*)0;
 int *pfreeList;
-
+int debug = 0;
 
 // --- constants ---
 int PAGESIZE = 4096;		// Byte, 4KB
@@ -19,12 +18,12 @@ int SWITCHCONTEXT = 2;
 int DELETECONTEXT = 3;
 int MAPPAGEINCONTEXT = 4;
 int FLUSHPAGEINCONTEXT = 5;
-int EXITKERNEL = 6;
+int LOADUSERBINARY = 6;
+int EXITKERNEL = 7;
 
 // --- methods ---
 int* createProcess();
 int* createPageTable();
-void loadBinary();
 int* initFreeList(int *memoryStart, int memorySize);
 int  palloc();
 void mapPageInContext(int pid, int ptOffset);
@@ -42,6 +41,8 @@ void setPrevProcess(int *process, int *prev);
 void setNextProcess(int *process, int *next);
 void setPid(int *process, int pid);
 void setPageTable(int *process, int *pt);
+void flushPageInContext(int pid, int ptOffset);
+void pfree(int *pageFrame);
 
 void setPrevProcess(int *process, int *prev);
 void setNextProcess(int *process, int *next);
@@ -53,26 +54,34 @@ int  getPid(int *process);
 int* getPageTable(int *process);
 
 int main(){
-		
-
 	ipc = allocIpc(4*4);
 	pfreeList = initFreeList((int*)*(ipc+1), *(ipc+2));
 	processQueue = initList();
 	
 	while(1){
 		if(*ipc == CREATECONTEXT){
-			putchar('c');
-			putchar('r');
-			putchar('e');
-			putchar('a');
-			putchar('t');
-			putchar('e');
-			putchar(10);
-
+			if(debug){
+				putchar('C');
+				putchar('R');
+				putchar('E');
+				putchar('A');
+				putchar('T');
+				putchar('E');
+				putchar(10);
+			}
 			currProcess = createProcess();
 			hcLoadBinary(getPid(currProcess));
 		
 		} else if(*ipc == SWITCHCONTEXT){
+			if(debug){
+				putchar('S');
+				putchar('W');
+				putchar('I');
+				putchar('T');
+				putchar('C');
+				putchar('H');
+				putchar(10);
+			}
 			
 			if((int)currProcess != 0)
 				appendProcess(processQueue, currProcess);
@@ -80,55 +89,71 @@ int main(){
 			currProcess = removeFirst(processQueue);
 			if((int)currProcess != 0){
 				hcSwitchContext(getPid(currProcess));
-			} else 
-				exit(10);		
-		} else if(*ipc == DELETECONTEXT){
-			putchar('d');
-			putchar('e');
-			putchar('l');
-			putchar('e');
-			putchar('t');
-			putchar('e');
-			putchar(' ');
-			putchar('p');
-			putchar('i');
-			putchar('d');
-			putchar(' ');
-			putchar('[');
-			putchar(getPid(currProcess)+'0');
-			putchar(']');
-			putchar(10);
-			
 
+			} else 
+				*ipc = EXITKERNEL;		
+		} else if(*ipc == DELETECONTEXT){
+			if(debug){
+				putchar('D');
+				putchar('E');
+				putchar('L');
+				putchar('E');
+				putchar('T');
+				putchar('E');
+				putchar(10);
+			}			
 			deleteProcess(processQueue, getPid(currProcess));
 		} else if(*ipc == MAPPAGEINCONTEXT){
-			putchar('m');
-			putchar('a');
-			putchar('p');
-			putchar(10);
-			mapPageInContext(*(ipc+1), *(ipc+2));
-			
-			hcMapPageInContext(*(ipc+1), *(ipc+2));
+			if(debug){
+				putchar('M');
+				putchar('A');
+				putchar('P');
+				putchar(10);
+			}
+			mapPageInContext((int*)*(ipc+1), *(ipc+2));
 		
 		} else if(*ipc == FLUSHPAGEINCONTEXT){
-			putchar('f');
-			putchar('l');
-			putchar('u');
-			putchar('s');
-			putchar('h');
-			putchar(10);
-		
+			if(debug){
+				putchar('F');
+				putchar('L');
+				putchar('U');
+				putchar('S');
+				putchar('H');
+				putchar(10);
+			}
+			flushPageInContext(*(ipc+1), *(ipc+2));
+//			exit(FLUSHPAGEINCONTEXT);
+		} else if(*ipc == LOADUSERBINARY){
+			if(debug){
+				putchar('L');
+				putchar('O');
+				putchar('A');
+				putchar('D');
+				putchar(10);
+			}
+			hcLoadBinary(*(ipc+1));
 		} else if(*ipc == EXITKERNEL){
+			if(debug){
+				putchar('E');
+				putchar('X');
+				putchar('I');
+				putchar('T');
+				putchar(10);
+			}		
 			exit(0);
-		
-			putchar(10);
+		} else {
+			putchar('E');
+			putchar('R');
+			putchar('R');
+			putchar('O');
+			putchar('R');
+			putchar(' ');
 			putchar('E');
 			putchar('X');
 			putchar('I');
 			putchar('T');
 			putchar(10);
-			exit(0);
-		
+			exit(-1);
 		}
 	}
 }
@@ -137,10 +162,8 @@ int main(){
 int* createProcess(){
 	int *process;
 	int pid;
-
 	process = malloc(4*4);
 	pid = hcCreateContext();
-	
 	setPid(process, pid);
 	setPageTable(process, createPageTable());
 	return process;
@@ -175,17 +198,34 @@ void mapPageInContext(int pid, int ptOffset){
 		pageFrame = palloc();
 		pt = getPageTable(process);
 		*(pt + ptOffset) = pageFrame;
-		
-		hcMapPageInContext(pid, ptOffset, (int)pageFrame);
+		hcMapPageInContext(pid, ptOffset, pageFrame);
 	} else {
 	
 		exit(-1);
 	}
 }
-void loadBinary(){
-	hcLoadBinary(getPid(currProcess));
-
+void flushPageInContext(int pid, int ptOffset){
+	int *process;
+	int *pageFrame;
+	int *pt;
+	if((int)currProcess != 0){
+		if(getPid(currProcess) == pid)
+			process = currProcess;
+		else
+			process = findProcessByPid(processQueue, pid);
+		
+	} else
+		process = findProcessByPid(processQueue, pid);
+	if((int)process != 0){
+		pt = getPageTable(process);
+		pageFrame = (pt+ptOffset);
+		*(pt+ptOffset) = 0;
+		pfree(pageFrame);
+		hcFlushPageInContext(pid, ptOffset);
+	}
+	
 }
+
 int* initFreeList(int *memoryStart, int memorySize){
 	int *list;
 	int i;
@@ -196,7 +236,7 @@ int* initFreeList(int *memoryStart, int memorySize){
 	list = memoryStart;
 	while(i < counterPageFrames){
 		if(i+1 == counterPageFrames)
-			*(memoryStart+i) = 0;//(int)memoryStart + PAGEFRAMESIZE;
+			*(memoryStart+i) = 0;
 		else
 			*(memoryStart+i) = (int)memoryStart + (i+1) * PAGEFRAMESIZE;
 		i = i +1;
@@ -214,6 +254,15 @@ int palloc(){
 	}
 	exit(-1);
 
+}
+void pfree(int *pageFrame){
+	if((int)pfreeList == 0){
+		*pageFrame = 0;
+		pfreeList = pageFrame;
+	} else {
+		*pageFrame = (int)pfreeList;
+		pfreeList = pageFrame;
+	}
 }
 
 int* initList(){
@@ -423,6 +472,23 @@ int* getPageTable(int *process){
 
 // =======================================================
 //A8
+int *top;
+
+int* create_node();
+void init_Tstack(int *head);
+void push_Tstack(int *head, int value);
+int  pop_Tstack();
+int  *create_pointer();
+void set_pointer_node(int *pointer, int *ptr);
+void set_pointer_index(int *pointer, int index);
+int  *get_pointer_node(int *pointer);
+int  get_pointer_count(int *pointer);
+int* create_node();
+void set_node_value(int *node, int value);
+void set_node_next(int *node, int *next);
+int  get_node_value(int *node);
+int  *get_node_next(int *node);
+
 void init_Tstack(int *head){
 	int * node; // struct node_
 	int * ptr; // struct ptr_
@@ -441,10 +507,10 @@ void push_Tstack(int *head, int value){
 	set_node_next(newNode, 0);
 	while(1){
 		old = get_node_value(get_pointer_node(top));
-		if(cas(top,old,newNode) == 1){
+		if((int)cas(top,old,newNode) == 1){
 			set_pointer_node(top,newNode);
 			set_pointer_index(top,get_pointer_count(top) + 1);	
-			return 1;
+			//return 1;
 		}	
 		
 	}
@@ -463,7 +529,7 @@ int  pop_Tstack(){
     value = *(old + 1);
     next = (int*)*old;
     while (1) {
-        if (cas(top, old, next) == 1) {
+        if ((int)cas(top, old, next) == 1) {
         	
          	first_element = (int*)*top;
          	old = top;
@@ -474,7 +540,7 @@ int  pop_Tstack(){
 }
 
 int  *create_pointer(){
-	int pointer_;
+	int *pointer_;
 	pointer_ = (int *)malloc(2*4);
 	set_pointer_node(pointer_, 0);
 	set_pointer_index(pointer_, 0);
@@ -482,7 +548,7 @@ int  *create_pointer(){
 }
 
 void set_pointer_node(int *pointer, int *ptr){
-	*pointer = (int *)ptr;
+	*pointer = (int)ptr;
 }
 void set_pointer_index(int *pointer, int index){
 	*(pointer + 1) = index;
@@ -494,7 +560,7 @@ int  get_pointer_count(int *pointer){
 	return *(pointer + 1);
 }
 
-int  *create_node(){
+int* create_node(){
 	int *node;
 	int *next;
 	node = (int *)malloc(2*4);
