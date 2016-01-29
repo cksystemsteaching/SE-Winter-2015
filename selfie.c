@@ -750,9 +750,10 @@ int SWITCHCONTEXT = 2;
 int DELETECONTEXT = 3;
 int MAPPAGEINCONTEXT = 4;
 int FLUSHPAGEINCONTEXT = 5;
-int EXITKERNEL = 6;
+int LOADUSERBINARY = 6;
+int EXITKERNEL = 7;
 
-
+int *nextEvent = (int*)0;
 // *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~ *~*~
 // -----------------------------------------------------------------
 // ---------------------     E M U L A T O R   ---------------------
@@ -788,7 +789,8 @@ int* pollTail(int *queue);
 int* palloc();
 void saveContextState();
 void setContextState(int uid);
-
+void setRegisterPointer(int *registers, int data_regSP, int data_regGP);
+void printPageTable(int *context);
 // --- SETTER ---
 void setPrevContext(int *context, int *prev);
 void setNextContext(int *context, int *next);
@@ -815,7 +817,13 @@ int* initFreeList();
 int tlb(int vaddr);
 
 int  loadMemory(int vaddr);
-void storeMemory(int vaddr, int data);
+int  storeMemory(int vaddr, int data);
+void storeIpc(int arg0, int arg1, int arg2, int arg3);
+void storeNextEvent();
+void setNextEvent(int arg0, int arg1, int arg2, int arg3);
+void resetNextEvent();
+void printIpc(int arg0, int arg1, int arg2, int arg3);
+void printNextEvent();
 
 // ------------------------ GLOBAL CONSTANTS -----------------------
 
@@ -919,16 +927,13 @@ void fetch();
 void execute();
 void run();
 
-void saveSystemState();
-void restoreSystemState();
-
 void up_push(int value);
 int  up_malloc(int size);
 int  up_copyString(int *s);
 void up_copyArguments(int argc, int *argv);
 
 void copyBinaryToMemory();
-void copyUserBinaryToMemory();
+int  copyUserBinaryToMemory();
 
 int addressWithMaxCounter(int *counters, int max);
 int fixedPointRatio(int a, int b);
@@ -970,7 +975,7 @@ int halt = 0; // flag for halting mipster
 
 int interpret = 0;
 
-int debug = 0;
+int debug = 1;
 
 int calls            = 0;        // total number of executed procedure calls
 int *callsPerAddress = (int*) 0; // number of executed calls of each procedure
@@ -3512,7 +3517,15 @@ void compile() {
 void printRegister(int reg) {
     print((int*) *(REGISTERS + reg));
 }
-
+void setRegisterPointer(int *registers, int data_regSP, int data_regGP){
+	if(data_regSP > -1)
+		*(registers+REG_SP) = data_regSP;
+	if(data_regGP > -1){
+		*(registers+REG_GP) = data_regGP;
+		*(registers+REG_K1) = *(registers+REG_GP);
+	}
+	
+}
 // -----------------------------------------------------------------
 // ---------------------------- ENCODER ----------------------------
 // -----------------------------------------------------------------
@@ -3970,44 +3983,18 @@ void syscall_exit() {
 
     *(registers+REG_V0) = exitCode;
 
-
 		print(binaryName);
 		print((int*) ": exiting with error code ");
 						
 		printNumber(exitCode);
 		println();
-
-		halt = 1;
-if(0){
-	if(getListSize(contextQueue) > 1){
-		if(getUID(currContext) == 0){
-			//if(loadMemory(ipc) == -1){
-				print(binaryName);
-				print((int*) ": an error occured, error code ");
-				printNumber(exitCode);
-				println();
-				halt = 1;
-			//}
-		} else {
-			print((int*) "\ncontext [");
-			printNumber(getUID(currContext));
-			print((int*) "] exiting with error code ");
-			print(itoa(exitCode, string_buffer, 10, 0, 0));
-			println();
-		}
+	if(getUID(currContext) > 0){
 		//halt = 1;
-		//setContextState(0);
-		//storeMemory(ipc, DELETECONTEXT);		
-	} else {
-		print(binaryName);
-		print((int*) ": exiting with error code ");
-						
-		printNumber(exitCode);
-		println();
-
+		setContextState(0);
+		storeIpc(DELETECONTEXT, getUID(currContext), 0, 0);
+	} else{
 		halt = 1;
-    }
-}
+	}
 }
 
 void emitRead() {
@@ -4338,9 +4325,16 @@ void hypercall_createContext(){
 		print((int*)"hypercall_createContext (currUID [");
 		printNumber(getUID(currContext));
 		print((int*)"])\n");
+		print((int*)"pc: ");
+		printNumber(pc);
+		println();
 	}
+	
 	context = createContext();
+	
 	*(registers+REG_V0) = getUID(context);
+	
+	storeIpc(LOADUSERBINARY, getUID(context), 0, 0);
 	
 	if(debug_hypercalls){
 		if((int)context != 0){
@@ -4384,8 +4378,7 @@ void hypercall_switchContext(){
 	
 	uid = *(registers + REG_A0);
 
-	if(getUID(currContext) != 0)
-		saveContextState();
+	saveContextState();
 	setContextState(uid);
 
 	if(debug_hypercalls){
@@ -4423,11 +4416,13 @@ void hypercall_deleteContext(){
 
 	removeContext(contextQueue, uid);
 	
-	storeIpc(SWITCHCONTEXT, 0, 0, 0);
-	storeMemory(ipc, SWITCHCONTEXT);
-	
 	if((int)getUID(currContext)==uid)
-		setContextState(0);
+		saveContextState();
+
+	setContextState(0);
+	print((int*) "hier");
+	storeIpc(SWITCHCONTEXT, 0, 0, 0);
+
 	if(debug_hypercalls){
 		print((int*)"removed context with uid [");
 		printNumber(uid);
@@ -4477,30 +4472,21 @@ void hypercall_mapPageInContext(){
 	index = *(registers + REG_A1);
 	pageFrame = *(registers + REG_A2);
 	
-if(0){	print((int*)"uid: ");
-	printNumber(uid);
-	println();
-	print((int*)"index: ");
-	printNumber(index);
-	println();
-	print((int*)"pageFrame: ");
-	printNumber(pageFrame);
-	println();
-}		//print((int*)"map for [");
-		//printNumber(uid);
-		//print((int*)"]\n");
-		//printContextQueue(contextQueue);
 	context = findContextByUID(contextQueue, uid);
 	
 	pt = getPageTable(context);
 	*(pt+index) = pageFrame;
-//	print((int*)"map page: ");
-//	printNumber(index);
-//	println();
-//	printNumber((int)(pt+index));
-//	println();
-	halt = 1;
-	setContextState(uid);
+
+	if(*nextEvent > -1)
+		storeNextEvent();
+
+	else {
+		//setContextState(uid);
+		storeIpc(SWITCHCONTEXT, 0, 0, 0);
+		resetNextEvent();
+		//resetIpc();
+	}
+		
 	if(debug_hypercalls){
 		print((int*)"hypercall_mapPageInContext end (currUID [");
 		printNumber(getUID(currContext));
@@ -4513,11 +4499,7 @@ void emitLoadBinary(){
 
     emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
     emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
-
     emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
-
-//    emitIFormat(OP_LW, REG_SP, REG_A1, 0);	// file should be passed by the process
- //   emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
 
     emitIFormat(OP_LW, REG_SP, REG_A0, 0);
     emitIFormat(OP_ADDIU, REG_SP, REG_SP, 4);
@@ -4525,18 +4507,19 @@ void emitLoadBinary(){
     emitIFormat(OP_ADDIU, REG_ZR, REG_V0, HYPERCALL_LOADBINARY);
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
 
-//    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 
 }
 void hypercall_loadBinary(){
 	int uid;
-	userBinaryName = malloc(12*4);
-	userBinaryName = "test.mips";
-
+	int successful;
 	if(debug_hypercalls){
 		print((int*)"hypercall_loadBinary (currUID [");
 		printNumber(getUID(currContext));
 		print((int*)"])\n");
+		print((int*)"pc: ");
+		printNumber(pc);
+		println();
 	}
 	
 	uid = *(registers+REG_A0);
@@ -4547,21 +4530,30 @@ void hypercall_loadBinary(){
 		print((int*)"]\n");
 	}
 
-	currContext = findContextByUID(contextQueue, uid);
+	saveContextState();
 	setContextState(uid);
-
+	
 	loadUserFile();
-	copyUserBinaryToMemory();
-	*(registers+REG_GP) = userBinaryLength;
-	*(registers+REG_K1) = *(registers+REG_GP);
+	successful = copyUserBinaryToMemory();
+	
+	if(successful)	
+		setRegisterPointer(registers, -1, userBinaryLength);
 	
 	setContextState(0);
-	storeIpc(SWITCHCONTEXT, 0, 0, 0);
-	run();
+	
+	if(successful){
+		storeIpc(SWITCHCONTEXT, 0, 0, 0);
+		resetNextEvent();
+	} else {
+		setNextEvent(LOADUSERBINARY, uid, 0, 0);
+	}
 	if(debug_hypercalls){
 		print((int*)"hypercall_loadBinary end (currUID [");
 		printNumber(getUID(currContext));
 		print((int*)"])\n");
+		print((int*)"pc: ");
+		printNumber(getPC(currContext));
+		println();
 	}
 }
 
@@ -4591,21 +4583,12 @@ void createKernelContext(){
 	
 	currContext = malloc(6 * 4);
 	currPageTable = malloc(ptEntries *4);
+	
 	while(i< ptEntries){
 		*(currPageTable+i) = (int)memory + i * PAGESIZE;
 		i = i+1;
 	}
 	
-//	*currPageTable = (int)palloc();
-//	*(currPageTable+1) = (int)palloc();
-//	*(currPageTable+2) = (int)palloc();
-//	*(currPageTable+3) = (int)palloc();
-//	*(currPageTable+4) = (int)palloc();
-//	*(currPageTable+(ptEntries-5)) = (int)palloc();
-//	*(currPageTable+(ptEntries-4)) = (int)palloc();
-//	*(currPageTable+(ptEntries-3)) = (int)palloc();
-//	*(currPageTable+(ptEntries-2)) = (int)palloc();
-//	*(currPageTable+(ptEntries-1)) = (int)palloc();
 	setPrevContext(currContext, (int*)0);
 	setNextContext(currContext, (int*)0);
 	setUID(currContext, 0);
@@ -4629,8 +4612,8 @@ int* createContext(){
 	int *pt;
 	context = malloc(6 * 4);
 	regs = malloc(32*4);
-	*(regs+REG_SP) = VMEMORYSIZE - 4;
-	pt = malloc(VMEMORYSIZE/PAGESIZE *4);
+	pt = createPageTable();
+	setRegisterPointer(regs, VMEMORYSIZE-4, -1);
 	setPrevContext(context, (int*)0);
 	setNextContext(context, (int*)0);
 	setUID(context, nextValidUID);
@@ -4719,6 +4702,31 @@ int* createPageTable(){
 		i = i + 1;
 	}
 	return pt;
+}
+void printPageTable(int *context){
+	int ptEntries;
+	int *pt;
+	int i;
+	i = 0;
+	pt = getPageTable(context);
+	if(getUID(context) == 0)
+		ptEntries = memorySize / PAGEFRAMESIZE;
+	else
+		ptEntries = VMEMORYSIZE / PAGEFRAMESIZE;
+	print((int*)"print pageTable of context [");
+	printNumber(getUID(context));
+	print((int*)"]\n");
+	while(i < ptEntries){
+		if(*(pt+i) != 0){
+			print((int*)"pt [");
+			printNumber(i);
+			print((int*)"] :\t[");
+			printNumber(*(pt+i));
+			print((int*)"]\n");
+		}
+		i = i + 1;
+	}
+	print((int*)"print pageTable end\n");
 }
 int* removeFirst(int *queue){
 	int *first;
@@ -4866,50 +4874,16 @@ int tlb(int vaddr) {
 	ptOffset = vaddr/ PAGESIZE;
 	pfOffset = vaddr % PAGEFRAMESIZE;
 	
-	if(0){
-		print((int*)"\ntlb\n");
-		print((int*)"ptOffset ");
-		printNumber(ptOffset);
-		println();
-		print((int*)"pfOffset ");
-		printNumber(pfOffset);
-		println();
-	}
 	if(*(currPageTable+ptOffset) == 0){
 		print((int*)"PAGEFAULT\n");
 		
 		uid = getUID(currContext);
-		saveSystemState();
-		if(getUID(currContext) != 0);
-			saveContextState();
+		saveContextState();
 		setContextState(0);
 		storeIpc(MAPPAGEINCONTEXT, uid, ptOffset, 0);
-		run();
-		
-		restoreSystemState();
-//		saveContextState();
-		//setContextState(uid);
-		//exit(0);
-		// map page not working yet
-		//*(currPageTable+ptOffset) = (int)palloc();
-		
-			//printNumber(ptOffset);
-			//println();
-//			uid = getUID(currContext);
-//			saveContextState();
-//			setContextState(0);
-//			storeMemory(ipc, MAPPAGEINCONTEXT);
-//			storeMemory(ipc+4, uid);
-//			storeMemory(ipc+8, ptOffset);
-			//exit(0);
-//			run();
-//			exit(0);
-//			setContextState(uid);
-		//saveContextState();
-		//setContextState(0);
-		//exit(0);
+		return -1;
 	}
-	paddr = *(currPageTable+ptOffset) + pfOffset;// + (int)memory;
+	paddr = *(currPageTable+ptOffset) + pfOffset;
     return paddr;
 }
 
@@ -4917,24 +4891,113 @@ int loadMemory(int vaddr) {
     int paddr;
 
     paddr = tlb(vaddr);
-
+	if(paddr == -1)
+		return -1;
     return *(memory + paddr);
 }
 
-void storeMemory(int vaddr, int data) {
+int storeMemory(int vaddr, int data) {
     int paddr;
 
     paddr = tlb(vaddr);
-
+	if(paddr == -1)
+		return 0;
     *(memory + paddr) = data;
+    return 1;
 }
 
 void storeIpc(int arg0, int arg1, int arg2, int arg3){
+	if(debug_hypercalls){
+		printIpc(arg0, arg1, arg2, arg3);
+		printNextEvent();
+	}
 	storeMemory(ipc, arg0);
 	storeMemory(ipc+4, arg1);
 	storeMemory(ipc+8, arg2);
 	storeMemory(ipc+12, arg3);
 }
+void storeNextEvent(){
+	storeIpc(*nextEvent, *(nextEvent+1), *(nextEvent+2), *(nextEvent+3));
+	resetNextEvent();
+}
+void setNextEvent(int arg0, int arg1, int arg2, int arg3){
+	*nextEvent = arg0;
+	*(nextEvent+1) = arg1;
+	*(nextEvent+2) = arg2;
+	*(nextEvent+3) = arg3;
+	if(debug_hypercalls)
+		printNextEvent();
+}
+void resetNextEvent(){
+	*nextEvent = -1;
+	*(nextEvent+1) = -1;
+	*(nextEvent+2) = -1;
+	*(nextEvent+3) = -1;
+}
+void resetIpc(){
+	storeIpc(-1, -1, -1, -1);
+}
+void printIpc(int arg0, int arg1, int arg2, int arg3){
+	print((int*)"ipc\n");
+
+	print((int*)"arg0: ");
+	if(arg0 == 1)
+		print((int*)"CREATECONTEXT");
+	else if(arg0 == 2)
+		print((int*)"SWITCHCONTEXT");
+	else if(arg0 == 3)
+		print((int*)"DELETECONTEXT");
+	else if(arg0 == 4)
+		print((int*)"MAPPAGEINCONTEXT");
+	else if(arg0 == 5)
+		print((int*)"FLUSHPAGEINCONTEXT");
+	else if(arg0 == 6)
+		print((int*)"LOADUSERBINARY");
+	else if(arg0 == 7)
+		print((int*)"EXITKERNEL");
+	else 
+		printNumber(arg0);
+	print((int*)"\narg1: ");
+	printNumber(arg1);
+	print((int*)"\narg2: ");
+	printNumber(arg2);
+	print((int*)"\narg3: ");
+	printNumber(arg3);
+	println();
+}
+void printNextEvent(){
+	print((int*)"next event\n");
+
+	print((int*)"arg0: ");
+	if(*nextEvent == 1)
+		print((int*)"CREATECONTEXT");
+	else if(*nextEvent == 2)
+		print((int*)"SWITCHCONTEXT");
+	else if(*nextEvent == 3)
+		print((int*)"DELETECONTEXT");
+	else if(*nextEvent == 4)
+		print((int*)"MAPPAGEINCONTEXT");
+	else if(*nextEvent == 5)
+		print((int*)"FLUSHPAGEINCONTEXT");
+	else if(*nextEvent == 6)
+		print((int*)"LOADUSERBINARY");
+	else if(*nextEvent == 7)
+		print((int*)"EXITKERNEL");
+	else if(*nextEvent == -1)
+		print((int*)"UNSET");
+	else 
+		printNumber(*nextEvent);
+	if(*nextEvent != -1){
+		print((int*)"\narg1: ");
+		printNumber(*(nextEvent+1));
+		print((int*)"\narg2: ");
+		printNumber(*(nextEvent+2));
+		print((int*)"\narg3: ");
+		printNumber(*(nextEvent+3));
+	}
+	println();
+}
+
 // -----------------------------------------------------------------
 // ------------------------- INSTRUCTIONS --------------------------
 // -----------------------------------------------------------------
@@ -5740,6 +5803,7 @@ void run() {
         		
         		//saveContextState();
         		//setContextState(0);
+        		//storeIpc(SWITCHCONTEXT, 0, 0, 0);
         		//storeMemory(ipc, SWITCHCONTEXT);
         		
         		counterInstr = 0;
@@ -5754,16 +5818,6 @@ void run() {
     debug     = 0;
 }
 
-void saveSystemState(){
-	haltCopy = halt;
-	interpretCopy = interpret;
-	debugCopy = debug;
-}
-void restoreSystemState(){
-	halt = haltCopy;
-	interpret = interpretCopy;
-	debug = debugCopy;
-}
 void up_push(int value) {
     int vaddr;
 
@@ -5841,16 +5895,19 @@ void copyBinaryToMemory() {
         a = a + 4;
     }
 }
-void copyUserBinaryToMemory() {
+int copyUserBinaryToMemory() {
     int a;
-
+	int successful;
+	
     a = 0;
 
     while (a < userBinaryLength) {
-        storeMemory(a, loadUserBinary(a));
-
+        successful = storeMemory(a, loadUserBinary(a));
+		if(successful == 0)
+			return 0;
         a = a + 4;
     }
+    return 1;
 }
 
 int addressWithMaxCounter(int *counters, int max) {
@@ -6036,23 +6093,17 @@ void emulateKernel(int argc, int *argv) {
     kernelMode = 1;
 
 	contextQueue = initList();
-
-
+	nextEvent = malloc(4*4);
+	resetNextEvent();
     createKernelContext();
-//	setContextState(0);
 
     copyBinaryToMemory();
 
     resetInterpreter();
 
-    *(registers+REG_SP) = memorySize - 4; // initialize stack pointer
-
-    *(registers+REG_GP) = binaryLength; // initialize global pointer
-
-    *(registers+REG_K1) = *(registers+REG_GP); // initialize bump pointer
+	setRegisterPointer(registers, memorySize - 4, binaryLength);
 
     up_copyArguments(argc, argv);
-    //exit(0);
 
     run();
 
@@ -6186,11 +6237,11 @@ int selfie(int argc, int* argv) {
                 return 0;
             } else if (stringCompare((int*) *argv, (int*) "-k")) {
 			 	kernelMode = 1;
-               
-                initMemory(atoi((int*) *(argv+1)) * MEGABYTE);
+                initMemory(atoi((int*) *(argv+2)) * MEGABYTE);
+                userBinaryName = (int*)*(argv+1);
 
-                argc = argc - 1;
-                argv = argv + 1;
+                argc = argc - 2;
+                argv = argv + 2;
 
                 // pass binaryName as first argument replacing size
                 *argv = (int) binaryName;

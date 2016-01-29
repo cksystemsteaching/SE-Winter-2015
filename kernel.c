@@ -3,23 +3,23 @@
 int *currProcess;
 int *currPageTable;
 int *processQueue;
-int pid;
-int *ipc;
-int *binaryName;
+int  pid;
+int *ipc = (int*)0;
 int *pfreeList;
-
+int debug = 0;
 
 // --- constants ---
 int PAGESIZE = 4096;		// Byte, 4KB
 int PAGEFRAMESIZE = 4096;	// Byte, 4KB
 int VMEMORYSIZE = 4194304;	// Byte, 4MB
-int BOOT = 1;
+
 int CREATECONTEXT = 1;
 int SWITCHCONTEXT = 2;
 int DELETECONTEXT = 3;
 int MAPPAGEINCONTEXT = 4;
 int FLUSHPAGEINCONTEXT = 5;
-int EXITKERNEL = 6;
+int LOADUSERBINARY = 6;
+int EXITKERNEL = 7;
 
 // --- methods ---
 int* createProcess();
@@ -49,80 +49,36 @@ int  getPid(int *process);
 int* getPageTable(int *process);
 
 int main(){
-		
-	if(BOOT){
-		putchar(10);
-		putchar('K');
-		putchar('E');
-		putchar('R');
-		putchar('N');
-		putchar('E');
-		putchar('L');
-		putchar(10);
-		putchar(10);
-
+//	if((int)ipc == 0){
 		ipc = allocIpc(4*4);
 		pfreeList = initFreeList((int*)*(ipc+1), *(ipc+2));
 		processQueue = initList();
-		BOOT = 0;
-	}
-//	binaryName = malloc(4*4);
-//	binaryName = "test.mips";
-//	currProcess = createProcess();
-	
-	//exit(0);
-//	appendProcess(processQueue, currProcess);
-	
-//	printProcessQueue(processQueue);
-	
-//	currProcess = createProcess();
-//	hcLoadBinary(getPid(currProcess));
-	//appendProcess(processQueue, currProcess);
-	
-	//currProcess = (int*)0;
-//	hcSwitchContext(getPid(currProcess));
-//	putchar(*ipc);
-//	putchar(10);
-//	while(1){
-	//	putchar('i');
-	//	putchar('p');
-	//	putchar(10);
-	//	putchar('c');
-	//	putchar(' ');
-	//	putchar(*ipc+'0');
-	//	putchar(10);
-		
+//	}
+	while(1){
+//	putchar('a');
+//	putchar(' ');
 		if(*ipc == CREATECONTEXT){
-			putchar('c');
-			putchar('r');
-			putchar('e');
-			putchar('a');
-			putchar('t');
-			putchar('e');
-			putchar(10);
-
+			if(debug){
+				putchar('C');
+				putchar('R');
+				putchar('E');
+				putchar('A');
+				putchar('T');
+				putchar('E');
+				putchar(10);
+			}
 			currProcess = createProcess();
-			hcLoadBinary(getPid(currProcess));
-			//loadBinary();
-			putchar('p');
-			putchar('i');
-			putchar('d');
-			putchar('[');
-			putchar(getPid(currProcess)+'0');
-			putchar(']');
-			putchar(10);
-		
+			//exit(CREATECONTEXT);
 		} else if(*ipc == SWITCHCONTEXT){
-//			putchar(10);
-//			putchar(10);
-//			putchar('s');
-//			putchar('w');
-//			putchar('i');
-//			putchar('t');
-//			putchar('c');
-//			putchar('h');
-//			putchar(10);
-			
+			if(debug){
+				putchar('S');
+				putchar('W');
+				putchar('I');
+				putchar('T');
+				putchar('C');
+				putchar('H');
+				putchar(10);
+			}
 			
 			
 			if((int)currProcess != 0)
@@ -143,62 +99,82 @@ int main(){
 				//putchar('d');
 				//putchar(' ');
 				hcSwitchContext(getPid(currProcess));
-	
-			} else 
-				exit(10);		
-		} else if(*ipc == DELETECONTEXT){
-			putchar('d');
-			putchar('e');
-			putchar('l');
-			putchar('e');
-			putchar('t');
-			putchar('e');
-			putchar(' ');
-			putchar('p');
-			putchar('i');
-			putchar('d');
-			putchar(' ');
-			putchar('[');
-			putchar(getPid(currProcess)+'0');
-			putchar(']');
-			putchar(10);
-			
 
+			} else 
+				*ipc = EXITKERNEL;//exit(SWITCHCONTEXT);		
+		} else if(*ipc == DELETECONTEXT){
+			if(debug){
+				putchar('D');
+				putchar('E');
+				putchar('L');
+				putchar('E');
+				putchar('T');
+				putchar('E');
+				putchar(10);
+			}			
+			//exit(DELETECONTEXT);
 			deleteProcess(processQueue, getPid(currProcess));
 		} else if(*ipc == MAPPAGEINCONTEXT){
-			putchar('m');
-			putchar('a');
-			putchar('p');
-			putchar(10);
+			if(debug){
+				putchar('M');
+				putchar('A');
+				putchar('P');
+				putchar(10);
+			}
 			mapPageInContext((int*)*(ipc+1), *(ipc+2));
 		
 		} else if(*ipc == FLUSHPAGEINCONTEXT){
-			putchar('f');
-			putchar('l');
-			putchar('u');
-			putchar('s');
-			putchar('h');
-			putchar(10);
-		
+			if(debug){
+				putchar('F');
+				putchar('L');
+				putchar('U');
+				putchar('S');
+				putchar('H');
+				putchar(10);
+			}
+			exit(FLUSHPAGEINCONTEXT);
+		} else if(*ipc == LOADUSERBINARY){
+			if(debug){
+				putchar('L');
+				putchar('O');
+				putchar('A');
+				putchar('D');
+				putchar(10);
+			}
+			//exit(0);
+			hcLoadBinary(*(ipc+1));
 		} else if(*ipc == EXITKERNEL){
+			if(debug){
+				putchar('E');
+				putchar('X');
+				putchar('I');
+				putchar('T');
+				putchar(10);
+			}		
 			exit(0);
-		
-		} 
-	//	else {
-	//		*ipc = -1;
-	//		exit(-1);
-	//	}
-//	}
+		} else {
+			putchar('E');
+			putchar('R');
+			putchar('R');
+			putchar('O');
+			putchar('R');
+			putchar(' ');
+			putchar('E');
+			putchar('X');
+			putchar('I');
+			putchar('T');
+			putchar(10);
+			exit(-1);
+		}
+	}
 }
 
 
 int* createProcess(){
 	int *process;
 	int pid;
-
 	process = malloc(4*4);
 	pid = hcCreateContext();
-	
 	setPid(process, pid);
 	setPageTable(process, createPageTable());
 	return process;
@@ -242,7 +218,7 @@ void mapPageInContext(int pid, int ptOffset){
 //		putchar(10);
 //		putchar(10);
 	//	putchar(10);
-		hcMapPageInContext(pid, ptOffset, (int)pageFrame);
+		hcMapPageInContext(pid, ptOffset, pageFrame);
 	} else {
 	
 		exit(-1);

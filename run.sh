@@ -5,5 +5,5 @@ gcc -w -m32 -Wl,--unresolved-symbols=ignore-in-object-files -D'main(a, b)=main(i
 ./selfie -c kernel.c -o kernel.mips
 ./selfie -c test.c -o test.mips
 
-./selfie -l kernel.mips -k 32
+./selfie -l kernel.mips -k test.mips 32
 
