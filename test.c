@@ -1,11 +1,7 @@
+
 int main(){
-//	int pid;
-//	int *a;
-//	int i;
-//	i = 0; 
-	//while(i < 10)
-	//	a = malloc(4096*4096);
-//	pid = getPID();
+	int pid;
+	pid = getPID();
 	putchar(10);
 	putchar('h');
 	putchar('a');
@@ -17,6 +13,13 @@ int main(){
 //	putchar(pid+'0');
 	putchar(10);
 //	calculateSum();
+	putchar('l');
+	putchar('o');
+	putchar(' ');
+	putchar(pid+'0');
+	putchar(10);
+	//yield();
+	//calculateSum();
 	exit(30);
 }
 void calculateSum(){
@@ -47,4 +50,3 @@ int sumUp(int i, int j){
 	}
 	return sum;
 }
-
