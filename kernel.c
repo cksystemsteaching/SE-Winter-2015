@@ -26,6 +26,7 @@ int* createProcess();
 int* createPageTable();
 int* initFreeList(int *memoryStart, int memorySize);
 int  palloc();
+void pfree(int *pageFrame);
 void mapPageInContext(int pid, int ptOffset);
 int* initList();
 int* findProcessByPid(int *queue, int pid);
@@ -117,7 +118,6 @@ int main(){
 				putchar(10);
 			}
 			flushPageInContext(*(ipc+1), *(ipc+2));
-//			exit(FLUSHPAGEINCONTEXT);
 		} else if(*ipc == LOADUSERBINARY){
 			if(debug){
 				putchar('L');
@@ -254,7 +254,7 @@ int palloc(){
 void pfree(int *pageFrame){
 	if((int)pfreeList == 0){
 		*pageFrame = 0;
-		pfreeList = pageFrame 
+		pfreeList = pageFrame;
 	} else {
 		*pageFrame = (int)pfreeList;
 		pfreeList = pageFrame;
