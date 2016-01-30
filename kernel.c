@@ -24,29 +24,28 @@ int EXITKERNEL = 7;
 // --- methods ---
 int* createProcess();
 int* createPageTable();
+void mapPageInContext(int pid, int ptOffset);
+void flushPageInContext(int pid, int ptOffset);
+
 int* initFreeList(int *memoryStart, int memorySize);
 int  palloc();
-void mapPageInContext(int pid, int ptOffset);
+void pfree(int *pageFrame);
+
 int* initList();
+void appendProcess(int *queue, int *process);
 int* findProcessByPid(int *queue, int pid);
 int* removeFirst(int *queue);
 void deleteProcess(int *queue, int pid);
 int* removeFromList(int *queue, int pid);
-void appendProcess(int *queue, int *process);
 int* pollHead(int *queue);
 int* pollTail(int *queue);
 void printProcessQueue(int *queue);
 void printNumber(int number);
-void setPrevProcess(int *process, int *prev);
-void setNextProcess(int *process, int *next);
-void setPid(int *process, int pid);
-void setPageTable(int *process, int *pt);
-void flushPageInContext(int pid, int ptOffset);
-void pfree(int *pageFrame);
 
 void setPrevProcess(int *process, int *prev);
 void setNextProcess(int *process, int *next);
 void setPid(int *process, int pid);
+void setPageTable(int *process, int *pt);
 
 int* getPrevProcess(int *process);
 int* getNextProcess(int *process);
@@ -70,8 +69,6 @@ int main(){
 				putchar(10);
 			}
 			currProcess = createProcess();
-			hcLoadBinary(getPid(currProcess));
-		
 		} else if(*ipc == SWITCHCONTEXT){
 			if(debug){
 				putchar('S');
@@ -82,7 +79,6 @@ int main(){
 				putchar('H');
 				putchar(10);
 			}
-			
 			if((int)currProcess != 0)
 				appendProcess(processQueue, currProcess);
 			currProcess = (int*)0;
@@ -122,7 +118,6 @@ int main(){
 				putchar(10);
 			}
 			flushPageInContext(*(ipc+1), *(ipc+2));
-//			exit(FLUSHPAGEINCONTEXT);
 		} else if(*ipc == LOADUSERBINARY){
 			if(debug){
 				putchar('L');

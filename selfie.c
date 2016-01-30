@@ -709,6 +709,9 @@ void syscall_yield();
 void emitGetPID();
 void syscall_getPID();
 
+void emitFork();
+void syscall_fork();
+
 // -----------------------------------------------------------------
 // ------------------------- HYPERCALLS ----------------------------
 // -----------------------------------------------------------------
@@ -741,6 +744,7 @@ int SYSCALL_MALLOC = 5001;
 int SYSCALL_ALLOCIPC = 5002;
 int SYSCALL_YIELD = 5003;
 int SYSCALL_GETPID = 5004;
+int SYSCALL_FORK = 5005;
 
 //A8
 int SYSCALL_GETQUEUE = 5004;
@@ -778,29 +782,31 @@ int  ipc = -1;
 int *currContext = (int*)0;
 int *currPageTable = (int*)0;
 int *contextQueue = (int*)0;
-int  kernelMode = 0;
 int  nextValidUID = 1;
+
 void createKernelContext();
 int* createContext();
-void printCurrContext();
+int* createPageTable();
+
 int * top;
 
-int* createPageTable();
+void printCurrContext();
 void printContextQueue(int *queue);
+void printPageTable(int *context);
 
 int* initList();
-int  getListSize(int *queue);
+int* pollHead(int *queue);
+int* pollTail(int *queue);
+
 int* findContextByUID(int *queue, int uid);
 void appendContext(int *queue, int *context);
 int* removeFirst(int *queue);
 void removeContext(int *queue, int *uid);
-int* pollHead(int *queue);
-int* pollTail(int *queue);
-int* palloc();
+
 void saveContextState();
 void setContextState(int uid);
 void setRegisterPointer(int *registers, int data_regSP, int data_regGP);
-void printPageTable(int *context);
+
 // --- SETTER ---
 void setPrevContext(int *context, int *prev);
 void setNextContext(int *context, int *next);
@@ -822,16 +828,17 @@ int* getPageTable(int *context);
 // -----------------------------------------------------------------
 
 void initMemory(int bytes);
-int* initFreeList();
 
 int tlb(int vaddr);
 
 int  loadMemory(int vaddr);
 int  storeMemory(int vaddr, int data);
+
 void storeIpc(int arg0, int arg1, int arg2, int arg3);
 void storeNextEvent();
 void setNextEvent(int arg0, int arg1, int arg2, int arg3);
 void resetNextEvent();
+
 void printIpc(int arg0, int arg1, int arg2, int arg3);
 void printNextEvent();
 
@@ -848,6 +855,7 @@ int memorySize = 0; // size of memory in bytes
 
 int *memory = (int*) 0; // mipster memory
 int *pfreeList = (int*)0;
+
 int userMemoryOffset = 0;
 int userMemorySize = 0;
 // ------------------------- INITIALIZATION ------------------------
@@ -863,41 +871,6 @@ void initMemory(int bytes) {
     memory = malloc(memorySize);
 }
 
-int* initFreeList(){
-	int *list;
-	int counterPages;
-	int i;
-	i = 0;
-	counterPages = memorySize / PAGEFRAMESIZE;
-	list = malloc(counterPages * 4);
-	while(i < counterPages){
-		if(i+1 == counterPages)
-			*(list+i) = 0;
-		else
-			*(list+i) = (int)memory + (i+1) * PAGEFRAMESIZE;
-		i = i+1;
-	}
-	return list;
-}
-void printFreeList(){
-	int *curr;
-	int i;
-	i = 0;
-	curr = pfreeList;
-	print((int*)"freeList\n");
-	while((int)curr != 0){
-		print((int*)"content of pageFrame [");
-		printNumber(i);
-		print((int*)"] at position [");
-		printNumber((int)curr);
-		print((int*)"]: [");
-		printNumber(*curr);
-		print((int*)"]\n");
-		i = i+1;
-		curr = curr + 1; 
-	}
-	print((int*)"freeList end\n");
-}
 
 // -----------------------------------------------------------------
 // ------------------------- INSTRUCTIONS --------------------------
@@ -3494,6 +3467,7 @@ void compile() {
 	emitAllocIpc();
 	emitYield();
 	emitGetPID();
+	emitFork();
 	
 	emitCreateContext();
 	emitSwitchContext();
@@ -3505,6 +3479,7 @@ void compile() {
 	emitCAS();
 	
 	emitLoadBinary();
+	
     // parser
     gr_cstar();
 
@@ -3997,11 +3972,12 @@ void syscall_exit() {
 
     *(registers+REG_V0) = exitCode;
 
-		print(binaryName);
-		print((int*) ": exiting with error code ");
-						
-		printNumber(exitCode);
-		println();
+	print(binaryName);
+	print((int*) ": exiting with error code ");
+					
+	printNumber(exitCode);
+	println();
+	
 	if(getUID(currContext) > 0){
 		setContextState(0);
 		
@@ -4250,6 +4226,7 @@ void syscall_allocIpc(){
 		if (ipc + size >= *(registers+REG_SP))
 		    exception_handler(EXCEPTION_HEAPOVERFLOW);
 		
+		// pass some memory for user processes to the OS process
 		userMemoryOffset = memorySize/10;
 		userMemorySize = memorySize/2;
 
@@ -4281,14 +4258,14 @@ void emitYield(){
     emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_YIELD);
     emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
 
-	
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
 }
 void syscall_yield(){
-//	print((int*)"\nsyscall_yield\n");
 	saveContextState();
 	setContextState(0);
 	storeIpc(SWITCHCONTEXT, 0, 0, 0);
 }
+
 void emitGetPID(){
     createSymbolTableEntry(GLOBAL_TABLE, (int*) "getPID", 0, FUNCTION, INT_T, 0, binaryLength);
 
@@ -4305,7 +4282,6 @@ void emitGetPID(){
 	
 }
 void syscall_getPID(){
-//	print((int*)"syscall_getPID\n");
 	*(registers+REG_V0) = getUID(currContext);
 	
 }
@@ -4365,6 +4341,24 @@ void syscall_cas()
          println();
      }
  }
+void emitFork(){
+    createSymbolTableEntry(GLOBAL_TABLE, (int*) "fork", 0, FUNCTION, INT_T, 0, binaryLength);
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A3, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A2, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A1, 0);
+    emitIFormat(OP_ADDIU, REG_ZR, REG_A0, 0);
+
+
+    emitIFormat(OP_ADDIU, REG_ZR, REG_V0, SYSCALL_FORK);
+    emitRFormat(OP_SPECIAL, 0, 0, 0, FCT_SYSCALL);
+
+    emitRFormat(OP_SPECIAL, REG_RA, 0, 0, FCT_JR);
+	
+}
+void syscall_fork(){
+	
+}
 
 // -----------------------------------------------------------------
 // ------------------------- HYPERCALLS ----------------------------
@@ -4399,12 +4393,16 @@ void hypercall_createContext(){
 		println();
 	}
 	
-	context = createContext();
+//	if(getUID(currContext) == 0){
 	
-	*(registers+REG_V0) = getUID(context);
+		context = createContext();
 	
-	storeIpc(LOADUSERBINARY, getUID(context), 0, 0);
+		*(registers+REG_V0) = getUID(context);
 	
+		storeIpc(LOADUSERBINARY, getUID(context), 0, 0);
+//	} else {
+		//trap
+//	}
 	if(debug_hypercalls){
 		if((int)context != 0){
 			print((int*)"context [");
@@ -4481,17 +4479,19 @@ void hypercall_deleteContext(){
 		printNumber(getUID(currContext));
 		print((int*)"])\n");
 	}
-	uid = *(registers + REG_A0);
+//	if(getUID(currContext) == 0){
+		uid = *(registers + REG_A0);
 
-	removeContext(contextQueue, uid);
+		removeContext(contextQueue, uid);
 	
-	if((int)getUID(currContext)==uid)
-		saveContextState();
+		if((int)getUID(currContext)==uid)
+			saveContextState();
 
-	setContextState(0);
-	print((int*) "hier");
-	storeIpc(SWITCHCONTEXT, 0, 0, 0);
-
+		setContextState(0);
+		storeIpc(SWITCHCONTEXT, 0, 0, 0);
+//	} else {
+		// trap
+//	}
 	if(debug_hypercalls){
 		print((int*)"removed context with uid [");
 		printNumber(uid);
@@ -4532,24 +4532,28 @@ void hypercall_mapPageInContext(){
 		print((int*)"hypercall_mapPageInContext (currUID [");
 		printNumber(getUID(currContext));
 		print((int*)"])\n");
-	}	
-	uid = *(registers + REG_A0);
-	index = *(registers + REG_A1);
-	pageFrame = *(registers + REG_A2);
-	
-	context = findContextByUID(contextQueue, uid);
-	
-	pt = getPageTable(context);
-	*(pt+index) = pageFrame;
-
-	if(*nextEvent > -1)
-		storeNextEvent();
-
-	else {
-		storeIpc(SWITCHCONTEXT, 0, 0, 0);
-		resetNextEvent();
 	}
-		
+	
+//	if(getUID(currContext) == 0){
+		uid = *(registers + REG_A0);
+		index = *(registers + REG_A1);
+		pageFrame = *(registers + REG_A2);
+	
+		context = findContextByUID(contextQueue, uid);
+	
+		pt = getPageTable(context);
+		*(pt+index) = pageFrame;
+
+		if(*nextEvent > -1)
+			storeNextEvent();
+
+		else {
+			storeIpc(SWITCHCONTEXT, 0, 0, 0);
+			resetNextEvent();
+		}
+//	} else {
+		//trap
+//	}
 	if(debug_hypercalls){
 		print((int*)"hypercall_mapPageInContext end (currUID [");
 		printNumber(getUID(currContext));
@@ -4587,21 +4591,24 @@ void hypercall_flushPageInContext(){
 		printNumber(getUID(currContext));
 		print((int*)"])\n");
 	}	
-	uid = *(registers + REG_A0);
-	index = *(registers + REG_A1);
+//	if(getUID(currContext) == 0){
+		uid = *(registers + REG_A0);
+		index = *(registers + REG_A1);
 	
-	context = findContextByUID(contextQueue, uid);
+		context = findContextByUID(contextQueue, uid);
 	
-	pt = getPageTable(context);
-	*(pt+index) = 0;
+		pt = getPageTable(context);
+		*(pt+index) = 0;
 
-	if(*nextEvent > -1)
-		storeNextEvent();
-	else {
-		storeIpc(SWITCHCONTEXT, 0, 0, 0);
-		resetNextEvent();
-	}
-		
+		if(*nextEvent > -1)
+			storeNextEvent();
+		else {
+			storeIpc(SWITCHCONTEXT, 0, 0, 0);
+			resetNextEvent();
+		}
+//	} else {
+		//trap
+//	}
 	if(debug_hypercalls){
 		print((int*)"hypercall_flushPageInContext end (currUID [");
 		printNumber(getUID(currContext));
@@ -4712,6 +4719,7 @@ void createKernelContext(){
 	setPageTable(currContext, currPageTable);
 	appendContext(contextQueue, currContext);
 }
+
 void printCurrContext(){
 	if((int)currContext == 0){
 		print((int*)"curr context is NULL\n");
@@ -4777,17 +4785,6 @@ int* initList(){
 	list = malloc(2 * 4);
 	*list = 0;
 	*(list+1) = 0;
-}
-int getListSize(int *queue){
-	int size;
-	int *curr;
-	curr = pollHead(queue);
-	size = 0;
-	while((int)curr != 0){
-		size = size + 1;
-		curr = getNextContext(curr);
-	}
-	return size;
 }
 void printContextQueue(int *queue){
 	int *curr;
@@ -4894,20 +4891,6 @@ void appendContext(int *queue, int *context){
 	setNextContext(context, (int*)0);
 	*(queue+1) = (int)context;
 }
-int* palloc(){
-	int *pageFrame;
-
-	if(*pfreeList != 0){
-		pageFrame = (int*)*pfreeList;
-		pfreeList = pfreeList + 1;
-		return pageFrame;
-	}
-
-	print((int*)"no free pages left");
-	exit(-1);
-
-}
-
 int* pollHead(int *queue){
 	return (int*)*queue;
 }
@@ -5035,6 +5018,8 @@ void storeNextEvent(){
 	storeIpc(*nextEvent, *(nextEvent+1), *(nextEvent+2), *(nextEvent+3));
 	resetNextEvent();
 }
+// if a pagefault occurs in loadBinary next event after MAPPAGEINCONTEXT
+// must be loading the file again
 void setNextEvent(int arg0, int arg1, int arg2, int arg3){
 	*nextEvent = arg0;
 	*(nextEvent+1) = arg1;
@@ -5140,6 +5125,8 @@ void fct_syscall() {
             syscall_yield();
         } else if (*(registers+REG_V0) == SYSCALL_GETPID) {
             syscall_getPID();
+        } else if (*(registers+REG_V0) == SYSCALL_FORK) {
+            syscall_fork();
         } else if (*(registers+REG_V0) == HYPERCALL_CREATECONTEXT) {
             hypercall_createContext();
         } else if (*(registers+REG_V0) == HYPERCALL_SWITCHCONTEXT) {
@@ -5155,9 +5142,6 @@ void fct_syscall() {
         } else if(*(registers+REG_V0) == SYSCALL_CAS){
 			syscall_cas();
         } else {
-        print((int*)"reg v0: ");
-        printNumber(*(registers+REG_V0));
-        println();
             exception_handler(EXCEPTION_UNKNOWNSYSCALL);
         }
 
@@ -5814,9 +5798,10 @@ void exception_handler(int enumber) {
     if(getUID(currContext) > 0){
 		setContextState(0);
 		storeMemory(ipc, DELETECONTEXT);
+		resetNextEvent();
 	}
 	else
-	exit(enumber);
+		exit(enumber);
 }
 
 void fetch() {
@@ -5911,19 +5896,17 @@ void run() {
         execute();
         i = i+1;
         if(getUID(currContext) > 0){
-    		//print((int*)"getUID(currContext) > 0\n");
         	if(counterInstr >= maxInstr){
         		//print((int*)"switch after [");
         		//printNumber(maxInstr);
         		//print((int*)"] instructions in userMode\n");
         		
-        		//switch does not work here if it program did not finish
+        		pc = pc - 4;
+        		saveContextState();
         		
+        		setContextState(0);
         		
-        		//saveContextState();
-        		//setContextState(0);
-        		//storeIpc(SWITCHCONTEXT, 0, 0, 0);
-        		//storeMemory(ipc, SWITCHCONTEXT);
+        		storeIpc(SWITCHCONTEXT, 0, 0, 0);
         		
         		counterInstr = 0;
         	} else
@@ -6209,11 +6192,11 @@ void emulateKernel(int argc, int *argv) {
     println();
 
     interpret = 1;
-    kernelMode = 1;
 
 	contextQueue = initList();
 
 	nextEvent = malloc(4*4);
+
 	resetNextEvent();
 
     createKernelContext();
@@ -6353,7 +6336,6 @@ int selfie(int argc, int* argv) {
 
                 return 0;
             } else if (stringCompare((int*) *argv, (int*) "-k")) {
-			 	kernelMode = 1;
                 initMemory(atoi((int*) *(argv+2)) * MEGABYTE);
                 userBinaryName = (int*)*(argv+1);
 
