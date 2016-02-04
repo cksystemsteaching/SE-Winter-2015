@@ -1,5 +1,18 @@
 int* ts;
 
+void print(int* stack) {
+	int* it;
+	
+	it = *stack;
+	while (it != 0) {
+		putchar(*(it + 1));
+		putchar(10);
+		it = *it;
+	}
+	
+	putchar(10);
+}
+
 void push(int* stack, int value) {
 	int* node;
 	int* top;
@@ -9,11 +22,11 @@ void push(int* stack, int value) {
 	*node = 0;
 	
 	top = *stack;
-	*node = *top;
+	*node = top;
 
 	while (CAS(stack, top, node) == 0) {
 		top = *stack;
-		*node = *top;
+		*node = top;
 	}
 }
 
@@ -61,13 +74,14 @@ int main() {
 		pvalue = malloc(2 * 4);
 		while (i < 5) {
 			b = pop(ts, pvalue);
-			//while(b == 0) {
-				//b = pop(ts, pvalue);
-			//}
+			while(b == 0) {
+				b = pop(ts, pvalue);
+			}
 			putchar(*pvalue);
+
 			i = i+ 1;
 		}
-		
+		putchar(10);
 			
 	} else { //thread 1 - producer
 		i = 0;
@@ -76,7 +90,7 @@ int main() {
 			push(ts, 97 + i);
 			i = i + 1;
 		}
-
+		
 		exit(0);
 	}
 	
