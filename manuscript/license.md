@@ -1,3 +1,11 @@
+{frontmatter}
+
+# Code License
+
+The code provided in this book is covered by the Simplified BSD License. Please make sure to include it in any code derived from here.
+
+{line-numbers=off,lang="text"}
+```
 Copyright (c) 2015, the Selfie Project authors. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -19,3 +27,4 @@ LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
 ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
